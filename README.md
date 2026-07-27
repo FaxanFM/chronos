@@ -38,19 +38,17 @@ Use Chronos to inspect current Codex resource health.
 
 Chronos reports the current condition and recommends a proportionate response.
 
-## Managed Chronos services
+## Self-service agents
 
-FaxanFM offers optional managed services for teams and power users who want
-help beyond the local plugin:
+Chronos extends to Poe and Apify as independently callable self-service agents:
 
-- Guided session-health assessments.
-- Before-and-after remediation analysis.
-- Sanitized, support-ready incident reports.
-- Codex version and public-fix compatibility reviews.
+- Poe provides a guided session-health assessment.
+- Apify provides session analysis, sanitized incident reports, and Codex
+  public-fix compatibility checks.
 
-The local Chronos plugin remains free, private, and independently usable.
-Contact [FaxanFM on GitHub](https://github.com/FaxanFM) for service availability
-and pricing.
+Each agent is invoked and paid for directly through its platform. Chronos does
+not require a managed engagement or contacting FaxanFM. Public runner links
+will be added here as each agent is published.
 
 ## Safety and privacy
 
