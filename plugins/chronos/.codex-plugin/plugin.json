@@ -1,7 +1,7 @@
 {
   "name": "chronos",
-  "version": "0.2.0",
-  "description": "Check and mitigate resource degradation during long-running Codex sessions on Windows.",
+  "version": "0.3.0",
+  "description": "Check and mitigate process and diagnostic-log degradation during long-running Codex sessions on Windows.",
   "author": {
     "name": "FaxanFM",
     "url": "https://github.com/FaxanFM"
@@ -14,10 +14,10 @@
   "interface": {
     "displayName": "Chronos",
     "shortDescription": "Keep long-running Codex sessions responsive.",
-    "longDescription": "Check Windows resource health during long-running Codex work, understand degradation, and apply conservative recovery steps with user approval.",
+    "longDescription": "Check Windows process, memory, handle, disk, and Codex diagnostic-log health during long-running work, understand degradation, and apply conservative recovery steps with user approval.",
     "developerName": "FaxanFM",
     "category": "Productivity",
-    "capabilities": ["Resource health checks", "Guided recovery"],
+    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",

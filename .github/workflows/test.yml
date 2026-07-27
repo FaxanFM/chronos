@@ -1,0 +1,17 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Chronos
+        shell: powershell
+        run: .\tests\chronos.tests.ps1 -PythonPath python
