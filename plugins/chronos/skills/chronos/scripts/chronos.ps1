@@ -340,7 +340,7 @@ if ($Action -eq "inspect") {
   $logLevel = Get-LogDbLevel $logMetrics
   $level = Get-WorseLevel $processLevel $logLevel
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} logDb={11} logDbGiB={12} logReclaimableGiB={13} logWalMiB={14} logWalActive={15} logSeq={16} logRate={17} logTracePct={18}" -f `
+  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} logDb={11} logDbGiB={12} logReclaimableGiB={13} logWalMiB={14} logWalActive={15} logSeq={16} logRate={17} logTracePct={18}" -f `
     $level, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $logLevel, (Format-Metric $logMetrics.DatabaseGiB),
@@ -351,28 +351,7 @@ if ($Action -eq "inspect") {
 }
 
 $candidates = @(Get-Candidates $snapshot)
-Write-Output ("CHRONOS PLAN candidates={0} minAgeMinutes={1}" -f $candidates.Count, $MinAgeMinutes)
-if ($candidates.Count) {
-  $candidates | Select-Object PID, Name, AgeMinutes | Format-Table -AutoSize
-}
+Write-Output ("CHRONOS PLAN advisoryOnly=true candidates={0} minAgeMinutes={1}" -f $candidates.Count, $MinAgeMinutes)
 
 if ($Action -eq "plan") { exit 0 }
-if (-not $Force) {
-  Write-Output "Preview only. Explicit approval and -Force are required for cleanup."
-  exit 0
-}
-
-$stopped = 0
-foreach ($candidate in $candidates) {
-  $current = Get-Process -Id $candidate.PID -ErrorAction SilentlyContinue
-  if (-not $current) { continue }
-  try {
-    if ($current.StartTime -ne $candidate.StartTime) { continue }
-  } catch {
-    continue
-  }
-  Stop-Process -Id $candidate.PID -ErrorAction Stop
-  $stopped += 1
-}
-
-Write-Output ("CHRONOS CLEANUP stopped={0}" -f $stopped)
+Write-Output "CHRONOS CLEANUP disabled=advisory-only stopped=0"

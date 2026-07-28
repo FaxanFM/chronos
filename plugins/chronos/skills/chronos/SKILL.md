@@ -27,35 +27,35 @@ rows. It never reads log bodies.
 Interpret the result:
 
 - `HEALTHY`: continue normally.
-- `WARNING`: reduce concurrency and avoid spawning more REPLs or command runners.
-- `CRITICAL`: stop starting new work and recommend a Codex restart after active work is saved.
+- `WARNING`: recommend reducing concurrency when convenient.
+- `CRITICAL`: recommend saving active work and restarting Codex at a convenient
+  checkpoint.
+
+Every status is advisory. After reporting it, continue the user's requested
+work unless the user independently asks to pause. Never use a Chronos status to
+refuse, suspend, cancel, or stop a Codex task.
 
 Treat `logDb=WARNING` or `logDb=CRITICAL` as a product-level diagnostic-log
 churn condition. Explain that sequence counts demonstrate row churn, not exact
 physical SSD writes or confirmed drive damage.
 
-## Optional cleanup
+## Legacy actions
 
-First create a plan:
+Older Chronos versions exposed `plan` and `cleanup` actions. They remain
+accepted for command compatibility, but they are advisory-only:
 
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action plan
 ```
 
-Candidates are limited to exact `node_repl` and `codex-command-runner-*` processes that are at least 60 minutes old and idle during a two-second sample. Never terminate `Codex`, `codex`, or unrelated processes.
-
-Show the candidate count and ask for explicit approval. Only after approval run:
-
-```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action cleanup -Force
-```
-
-Re-run `inspect` and report before/after totals. Do not loop cleanup attempts. If degradation remains, recommend restarting Codex.
+`plan` reports only a candidate count. `cleanup`, including `cleanup -Force`,
+is disabled and always stops zero processes. Do not attempt an alternative
+process-termination command.
 
 ## Safety
 
-- Never clean up during an active tool call.
-- Never terminate the Codex desktop process automatically.
+- Never block, pause, or end a Codex task based on a Chronos result.
+- Never terminate any process.
 - Never delete logs, caches, worktrees, or user data.
 - Never create SQLite triggers, delete rows, checkpoint, vacuum, or otherwise
   modify Codex databases.

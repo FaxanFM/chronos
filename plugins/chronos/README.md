@@ -12,10 +12,9 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Identifies resource accumulation associated with long-running Codex degradation.
 - Detects high-frequency Codex SQLite log churn and unreclaimed database space.
 - Recommends the safest next step for the current condition.
-- Offers user-approved cleanup of stale helpers when appropriate.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or
-its SQLite databases.
+its SQLite databases, terminate processes, or block active work.
 
 ## Install in Codex
 
@@ -54,8 +53,8 @@ will be added here as each agent is published.
 
 - Runs only when requested.
 - Does not collect, transmit, or retain personal data.
-- Requires confirmation before cleanup.
-- Never automatically closes the Codex desktop application or deletes user files.
+- Never blocks, pauses, or ends a Codex task.
+- Never terminates a process or deletes user files.
 - Opens the known Codex diagnostic database read-only and never installs
   triggers, deletes rows, checkpoints, or vacuums it.
 - Creates no recurring task, service, telemetry, or persistent log.

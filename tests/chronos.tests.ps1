@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $chronosScript = Join-Path $repoRoot "plugins\chronos\skills\chronos\scripts\chronos.ps1"
+$chronosSkill = Join-Path $repoRoot "plugins\chronos\skills\chronos\SKILL.md"
 $fixtureScript = Join-Path $PSScriptRoot "create_log_fixture.py"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-tests-" + [guid]::NewGuid())
 $fixtureHome = Join-Path $testRoot "fixture-home"
@@ -31,6 +32,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Chronos fixture inspection failed." }
 
   Assert-Match $output "^CHRONOS (HEALTHY|WARNING|CRITICAL) " "Missing Chronos status."
+  Assert-Match $output " advisory=true " "Inspection must declare advisory behavior."
   Assert-Match $output " logDb=HEALTHY " "Fixture log database should be healthy."
   Assert-Match $output " logSeq=400 " "Fixture sequence was not read."
   Assert-Match $output " logRate=0([.,]0)? " "Inactive fixture should have zero insert rate."
@@ -70,6 +72,26 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Chronos missing-database inspection failed." }
   Assert-Match $missingOutput " logDb=UNAVAILABLE " "Missing database should be unavailable."
   Assert-Match $missingOutput " logSeq=unknown " "Missing database should not invent a sequence."
+
+  $cleanupOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action cleanup -Force -CodexHome $missingHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos compatibility cleanup failed." }
+  $cleanupText = $cleanupOutput -join "`n"
+  Assert-Match $cleanupText "CHRONOS PLAN advisoryOnly=true " "Legacy plan must be advisory-only."
+  Assert-Match $cleanupText "CHRONOS CLEANUP disabled=advisory-only stopped=0" `
+    "Legacy cleanup must stop zero processes."
+
+  $scriptText = Get-Content -LiteralPath $chronosScript -Raw
+  if ($scriptText -match "\bStop-Process\b") {
+    throw "Chronos script must not contain a process-termination path."
+  }
+
+  $skillText = Get-Content -LiteralPath $chronosSkill -Raw
+  if ($skillText -match "stop starting new work") {
+    throw "Chronos skill must not gate new work."
+  }
+  Assert-Match $skillText "Never use a Chronos status to\s+refuse, suspend, cancel, or stop" `
+    "Chronos skill must explicitly prohibit status-based task blocking."
 
   Write-Output "Chronos tests passed."
 } finally {
