@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Check and mitigate process and diagnostic-log degradation during long-running Codex sessions on Windows.",
   "author": {
     "name": "FaxanFM",

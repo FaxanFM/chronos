@@ -198,6 +198,96 @@ function Get-LogDbMetrics($before, $after) {
   }
 }
 
+function Get-FilesystemHelperHealth {
+  $health = [ordered]@{
+    Present = $false
+    ReadOk = $false
+    Level = "UNAVAILABLE"
+    CopyFailure = $false
+    LaunchFailure = $false
+    PcRestartAdvised = $false
+  }
+
+  $cutoff = (Get-Date).ToUniversalTime().AddHours(-24)
+  $sandboxHome = Join-Path $CodexHome ".sandbox"
+  $logs = @(@($CodexHome, $sandboxHome) | ForEach-Object {
+    Get-ChildItem -LiteralPath $_ -Filter "sandbox*.log" -File -ErrorAction SilentlyContinue
+  } | Where-Object {
+      $_.LastWriteTimeUtc -ge $cutoff
+    } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 2)
+
+  if (-not $logs.Count) {
+    return [pscustomobject]$health
+  }
+
+  $health.Present = $true
+  $copyMarker = "helper copy failed for command-runner: remove stale helper destination"
+  $launchMarker = "CreateProcessWithLogonW failed: 5"
+  $successMarker = "] SUCCESS:"
+  $markerCutoff = [DateTimeOffset]::Now.AddMinutes(-15)
+  $latestCopyFailure = [DateTimeOffset]::MinValue
+  $latestLaunchFailure = [DateTimeOffset]::MinValue
+  $latestSuccess = [DateTimeOffset]::MinValue
+
+  foreach ($log in $logs) {
+    try {
+      $lines = @(Get-Content -LiteralPath $log.FullName -Tail 4000 -ErrorAction Stop)
+      $health.ReadOk = $true
+    } catch {
+      continue
+    }
+
+    foreach ($line in $lines) {
+      $timestampMatch = [regex]::Match(
+        $line,
+        "^\[(?<timestamp>\d{4}-\d{2}-\d{2}(?:T|\s)\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)"
+      )
+      if (-not $timestampMatch.Success) { continue }
+
+      $timestamp = [DateTimeOffset]::MinValue
+      if (-not [DateTimeOffset]::TryParse(
+        $timestampMatch.Groups["timestamp"].Value,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AllowWhiteSpaces,
+        [ref]$timestamp
+      )) { continue }
+      if ($timestamp -lt $markerCutoff) { continue }
+
+      if ($line.IndexOf($copyMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $timestamp -gt $latestCopyFailure) {
+        $latestCopyFailure = $timestamp
+      }
+      if ($line.IndexOf($launchMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $timestamp -gt $latestLaunchFailure) {
+        $latestLaunchFailure = $timestamp
+      }
+      if ($line.IndexOf($successMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $timestamp -gt $latestSuccess) {
+        $latestSuccess = $timestamp
+      }
+    }
+  }
+
+  if (-not $health.ReadOk) {
+    return [pscustomobject]$health
+  }
+
+  $health.CopyFailure = $latestCopyFailure -ge $markerCutoff
+  $health.LaunchFailure = $latestLaunchFailure -ge $markerCutoff -and
+    $latestLaunchFailure -gt $latestSuccess
+
+  if ($health.LaunchFailure) {
+    $health.Level = "CRITICAL"
+    $health.PcRestartAdvised = $true
+  } elseif ($health.CopyFailure) {
+    $health.Level = "WARNING"
+  } else {
+    $health.Level = "HEALTHY"
+  }
+
+  [pscustomobject]$health
+}
+
 function Get-CodexFamily {
   @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
     $_.ProcessName -in @("Codex", "codex", "node_repl") -or
@@ -338,12 +428,17 @@ if ($Action -eq "inspect") {
   $logAfter = Get-LogDbSample
   $logMetrics = Get-LogDbMetrics $logBefore $logAfter
   $logLevel = Get-LogDbLevel $logMetrics
-  $level = Get-WorseLevel $processLevel $logLevel
+  $filesystemHelper = Get-FilesystemHelperHealth
+  $level = Get-WorseLevel (Get-WorseLevel $processLevel $logLevel) $filesystemHelper.Level
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} logDb={11} logDbGiB={12} logReclaimableGiB={13} logWalMiB={14} logWalActive={15} logSeq={16} logRate={17} logTracePct={18}" -f `
+  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22}" -f `
     $level, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
-    $snapshot.CpuCores, $diskDisplay, $logLevel, (Format-Metric $logMetrics.DatabaseGiB),
+    $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
+    (Format-Metric $filesystemHelper.CopyFailure),
+    (Format-Metric $filesystemHelper.LaunchFailure),
+    (Format-Metric $filesystemHelper.PcRestartAdvised),
+    $logLevel, (Format-Metric $logMetrics.DatabaseGiB),
     (Format-Metric $logMetrics.ReclaimableGiB), (Format-Metric $logMetrics.WalMiB),
     (Format-Metric $logMetrics.WalActive), (Format-Metric $logMetrics.Sequence),
     (Format-Metric $logMetrics.InsertRate), (Format-Metric $logMetrics.TracePercent))

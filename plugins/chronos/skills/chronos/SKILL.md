@@ -24,6 +24,10 @@ mode. It reports database size, reclaimable freelist space, WAL activity,
 sequence movement, and the aggregate TRACE percentage from up to 2,000 recent
 rows. It never reads log bodies.
 
+It also scans only the tail of recent, known Codex `sandbox*.log` files for two
+exact filesystem-helper failure markers. It returns aggregate booleans and
+never returns log text or paths.
+
 Interpret the result:
 
 - `HEALTHY`: continue normally.
@@ -34,6 +38,14 @@ Interpret the result:
 Every status is advisory. After reporting it, continue the user's requested
 work unless the user independently asks to pause. Never use a Chronos status to
 refuse, suspend, cancel, or stop a Codex task.
+
+Interpret the filesystem-helper fields separately:
+
+- `fsHelper=WARNING`: warn that the helper is degrading and recommend saving
+  work before relying on more sandboxed file operations.
+- `fsHelper=CRITICAL` with `pcRestartAdvised=true`: advise a full Windows
+  restart at a convenient checkpoint after work is saved. Continue the task if
+  the user chooses not to restart yet.
 
 Treat `logDb=WARNING` or `logDb=CRITICAL` as a product-level diagnostic-log
 churn condition. Explain that sequence counts demonstrate row churn, not exact

@@ -11,6 +11,8 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Reports a clear `HEALTHY`, `WARNING`, or `CRITICAL` status.
 - Identifies resource accumulation associated with long-running Codex degradation.
 - Detects high-frequency Codex SQLite log churn and unreclaimed database space.
+- Warns when the Windows filesystem helper is degrading and advises a full PC
+  restart when the helper becomes unusable.
 - Recommends the safest next step for the current condition.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or

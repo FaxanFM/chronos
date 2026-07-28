@@ -10,6 +10,8 @@ $fixtureScript = Join-Path $PSScriptRoot "create_log_fixture.py"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-tests-" + [guid]::NewGuid())
 $fixtureHome = Join-Path $testRoot "fixture-home"
 $missingHome = Join-Path $testRoot "missing-home"
+$helperWarningHome = Join-Path $testRoot "helper-warning-home"
+$helperCriticalHome = Join-Path $testRoot "helper-critical-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -20,7 +22,8 @@ function Assert-Match($value, $pattern, $message) {
 }
 
 try {
-  New-Item -ItemType Directory -Path $fixtureHome, $missingHome -Force | Out-Null
+  New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
+    $helperCriticalHome -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
@@ -73,6 +76,46 @@ try {
   Assert-Match $missingOutput " logDb=UNAVAILABLE " "Missing database should be unavailable."
   Assert-Match $missingOutput " logSeq=unknown " "Missing database should not invent a sequence."
 
+  $markerTimestamp = (Get-Date).AddSeconds(-5).ToString("yyyy-MM-dd HH:mm:ss.fff")
+  Set-Content -LiteralPath (Join-Path $helperWarningHome "sandbox.log") -Value `
+    "[$markerTimestamp codex.exe] helper copy failed for command-runner: remove stale helper destination"
+  $helperWarningOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $helperWarningHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos helper-warning inspection failed." }
+  Assert-Match $helperWarningOutput " fsHelper=WARNING " `
+    "Helper copy failure should produce a warning."
+  Assert-Match $helperWarningOutput " fsHelperCopyFailure=true " `
+    "Helper copy failure marker was not detected."
+  Assert-Match $helperWarningOutput " fsHelperLaunchFailure=false " `
+    "Warning fixture should not invent a launch failure."
+  Assert-Match $helperWarningOutput " pcRestartAdvised=false " `
+    "Copy failure alone should not advise a full PC restart."
+
+  Set-Content -LiteralPath (Join-Path $helperCriticalHome "sandbox.log") -Value `
+    "[$markerTimestamp codex.exe] windows sandbox: CreateProcessWithLogonW failed: 5"
+  $helperCriticalOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $helperCriticalHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos helper-critical inspection failed." }
+  Assert-Match $helperCriticalOutput "^CHRONOS CRITICAL advisory=true " `
+    "Unusable filesystem helper should produce a critical advisory."
+  Assert-Match $helperCriticalOutput " fsHelper=CRITICAL " `
+    "Filesystem helper critical level was not reported."
+  Assert-Match $helperCriticalOutput " fsHelperLaunchFailure=true " `
+    "Filesystem helper launch failure was not detected."
+  Assert-Match $helperCriticalOutput " pcRestartAdvised=true " `
+    "Unusable filesystem helper should advise a full PC restart."
+
+  $recoveryTimestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+  Add-Content -LiteralPath (Join-Path $helperCriticalHome "sandbox.log") -Value `
+    "[$recoveryTimestamp codex.exe] SUCCESS: powershell.exe"
+  $helperRecoveredOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $helperCriticalHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos helper-recovery inspection failed." }
+  Assert-Match $helperRecoveredOutput " fsHelper=HEALTHY " `
+    "A later successful sandbox launch should clear the unusable state."
+  Assert-Match $helperRecoveredOutput " pcRestartAdvised=false " `
+    "Recovered filesystem helper should not continue advising a PC restart."
+
   $cleanupOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action cleanup -Force -CodexHome $missingHome -SampleSeconds 1
   if ($LASTEXITCODE -ne 0) { throw "Chronos compatibility cleanup failed." }
@@ -92,6 +135,8 @@ try {
   }
   Assert-Match $skillText "Never use a Chronos status to\s+refuse, suspend, cancel, or stop" `
     "Chronos skill must explicitly prohibit status-based task blocking."
+  Assert-Match $skillText "advise a full Windows\s+restart" `
+    "Chronos skill must advise a full PC restart for an unusable helper."
 
   Write-Output "Chronos tests passed."
 } finally {
