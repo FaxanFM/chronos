@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Check process, diagnostic-log, and token-quota degradation during long-running Codex sessions on Windows.",
   "author": {
     "name": "FaxanFM",

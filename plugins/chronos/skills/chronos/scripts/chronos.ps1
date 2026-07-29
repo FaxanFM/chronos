@@ -172,7 +172,8 @@ function Get-LogDbMetrics($before, $after) {
   $elapsedSeconds = [math]::Max(0.001, ($after.CapturedAt - $before.CapturedAt).TotalSeconds)
   $rate = $null
   if ($before.QueryOk -and $after.QueryOk -and $null -ne $before.Sequence -and $null -ne $after.Sequence) {
-    $rate = [math]::Round([math]::Max(0, $after.Sequence - $before.Sequence) / $elapsedSeconds, 1)
+    $sequenceDelta = [long]$after.Sequence - [long]$before.Sequence
+    $rate = [math]::Round([math]::Max(0L, $sequenceDelta) / $elapsedSeconds, 1)
   }
 
   $tracePercent = $null
@@ -304,8 +305,8 @@ function Get-BoundedFileTail {
     )
     if ($stream.Length -le 0) { return "" }
 
-    $bytesToRead = [int][math]::Min($MaxBytes, $stream.Length)
-    $start = [math]::Max(0, $stream.Length - $bytesToRead)
+    $bytesToRead = [int][math]::Min([long]$MaxBytes, [long]$stream.Length)
+    $start = [math]::Max(0L, ([long]$stream.Length - [long]$bytesToRead))
     $null = $stream.Seek($start, [System.IO.SeekOrigin]::Begin)
     $buffer = [byte[]]::new($bytesToRead)
     $offset = 0

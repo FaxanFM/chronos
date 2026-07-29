@@ -13,6 +13,7 @@ $missingHome = Join-Path $testRoot "missing-home"
 $helperWarningHome = Join-Path $testRoot "helper-warning-home"
 $helperCriticalHome = Join-Path $testRoot "helper-critical-home"
 $tokenHealthHome = Join-Path $testRoot "token-health-home"
+$largeTailHome = Join-Path $testRoot "large-tail-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -24,7 +25,7 @@ function Assert-Match($value, $pattern, $message) {
 
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
-    $helperCriticalHome, $tokenHealthHome -Force | Out-Null
+    $helperCriticalHome, $tokenHealthHome, $largeTailHome -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
@@ -206,6 +207,62 @@ try {
   if (($tokenOutput -join "`n") -match "private fixture arguments") {
     throw "Chronos output exposed tool arguments."
   }
+
+  $largeSessionDay = Join-Path (Join-Path (Join-Path $largeTailHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $largeSessionDay = Join-Path $largeSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $largeSessionDay -Force | Out-Null
+  $largeSessionPath = Join-Path $largeSessionDay "rollout-large-tail-fixture.jsonl"
+  $largeTokenRecord = @{
+    type = "event_msg"
+    payload = @{
+      type = "token_count"
+      info = @{
+        model_context_window = 100000
+        total_token_usage = @{
+          input_tokens = 3000000000
+          cached_input_tokens = 2500000000
+          cache_write_input_tokens = 0
+          output_tokens = 100000
+          reasoning_output_tokens = 10000
+          total_tokens = 3000100000
+        }
+        last_token_usage = @{
+          input_tokens = 79000
+          cached_input_tokens = 70000
+          cache_write_input_tokens = 0
+          output_tokens = 1000
+          reasoning_output_tokens = 100
+          total_tokens = 80000
+        }
+      }
+    }
+  } | ConvertTo-Json -Compress -Depth 8
+  $largeStream = [System.IO.File]::Open(
+    $largeSessionPath,
+    [System.IO.FileMode]::Create,
+    [System.IO.FileAccess]::Write,
+    [System.IO.FileShare]::Read
+  )
+  try {
+    $largeStream.SetLength(([long][int]::MaxValue + 1048576L))
+    $null = $largeStream.Seek(0L, [System.IO.SeekOrigin]::End)
+    $largeTailBytes = [System.Text.Encoding]::UTF8.GetBytes("`n$largeTokenRecord`n")
+    $largeStream.Write($largeTailBytes, 0, $largeTailBytes.Length)
+    $largeStream.Flush()
+  } finally {
+    $largeStream.Dispose()
+  }
+
+  $largeTailOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $largeTailHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Chronos failed to inspect a rollout file larger than Int32.MaxValue."
+  }
+  Assert-Match $largeTailOutput " tokenFiles=1 " `
+    "A bounded tail read should support rollout files larger than Int32.MaxValue."
+  Assert-Match $largeTailOutput " tokenSessionInputM=3000([.,]0)? " `
+    "Token totals larger than Int32.MaxValue should remain 64-bit."
 
   $cleanupOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action cleanup -Force -CodexHome $missingHome -SampleSeconds 1
