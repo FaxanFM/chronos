@@ -12,6 +12,7 @@ $fixtureHome = Join-Path $testRoot "fixture-home"
 $missingHome = Join-Path $testRoot "missing-home"
 $helperWarningHome = Join-Path $testRoot "helper-warning-home"
 $helperCriticalHome = Join-Path $testRoot "helper-critical-home"
+$tokenHealthHome = Join-Path $testRoot "token-health-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -23,7 +24,7 @@ function Assert-Match($value, $pattern, $message) {
 
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
-    $helperCriticalHome -Force | Out-Null
+    $helperCriticalHome, $tokenHealthHome -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
@@ -39,7 +40,9 @@ try {
   Assert-Match $output " logDb=HEALTHY " "Fixture log database should be healthy."
   Assert-Match $output " logSeq=400 " "Fixture sequence was not read."
   Assert-Match $output " logRate=0([.,]0)? " "Inactive fixture should have zero insert rate."
-  Assert-Match $output " logTracePct=80([.,]0)?$" "Fixture TRACE percentage was not aggregated."
+  Assert-Match $output " logTracePct=80([.,]0)? " "Fixture TRACE percentage was not aggregated."
+  Assert-Match $output " quotaRisk=UNAVAILABLE " `
+    "Fixture without session files should report unavailable quota risk."
 
   $afterHash = (Get-FileHash -LiteralPath $databasePath -Algorithm SHA256).Hash
   $afterLength = (Get-Item -LiteralPath $databasePath).Length
@@ -115,6 +118,94 @@ try {
     "A later successful sandbox launch should clear the unusable state."
   Assert-Match $helperRecoveredOutput " pcRestartAdvised=false " `
     "Recovered filesystem helper should not continue advising a PC restart."
+
+  $sessionDay = Join-Path (Join-Path (Join-Path $tokenHealthHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $sessionDay = Join-Path $sessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $sessionDay -Force | Out-Null
+  $sessionPath = Join-Path $sessionDay "rollout-token-fixture.jsonl"
+  $sessionRecords = @(
+    @{
+      type = "turn_context"
+      payload = @{
+        model = "gpt-5.6-sol"
+        effort = "high"
+      }
+    },
+    @{
+      type = "response_item"
+      payload = @{
+        type = "function_call"
+        name = "spawn_agent"
+        arguments = "private fixture arguments must never be returned"
+      }
+    },
+    @{
+      type = "event_msg"
+      payload = @{
+        type = "context_compacted"
+      }
+    },
+    @{
+      type = "event_msg"
+      payload = @{
+        type = "context_compacted"
+      }
+    },
+    @{
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = 60000000
+            cached_input_tokens = 48000000
+            cache_write_input_tokens = 20000000
+            output_tokens = 100000
+            reasoning_output_tokens = 40000
+            total_tokens = 60100000
+          }
+          last_token_usage = @{
+            input_tokens = 79000
+            cached_input_tokens = 70000
+            cache_write_input_tokens = 1000
+            output_tokens = 1000
+            reasoning_output_tokens = 400
+            total_tokens = 80000
+          }
+        }
+      }
+    }
+  )
+  $sessionRecords | ForEach-Object {
+    Add-Content -LiteralPath $sessionPath -Value ($_ | ConvertTo-Json -Compress -Depth 8)
+  }
+
+  $tokenOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $tokenHealthHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos token-health inspection failed." }
+  Assert-Match $tokenOutput " quotaRisk=HIGH " `
+    "High-effort, high-context token fixture should report high quota risk."
+  Assert-Match $tokenOutput " tokenFiles=1 " "Token fixture file was not counted."
+  Assert-Match $tokenOutput " tokenSamples=1 " "Token event was not counted."
+  Assert-Match $tokenOutput " tokenCachedReadPct=80([.,]0)? " `
+    "Cached-read percentage was not aggregated."
+  Assert-Match $tokenOutput " tokenCacheWriteObserved=true " `
+    "Cache-write activity was not detected."
+  Assert-Match $tokenOutput " tokenReasoningPct=40([.,]0)? " `
+    "Reasoning percentage was not aggregated."
+  Assert-Match $tokenOutput " tokenMaxContextPct=80([.,]0)? " `
+    "Active context pressure was not detected."
+  Assert-Match $tokenOutput " tokenHighEffortSessions=1 " `
+    "High-effort session was not counted."
+  Assert-Match $tokenOutput " tokenSpawnCalls=1 " "Subagent spawn was not counted."
+  Assert-Match $tokenOutput " tokenCompactions=2 " "Compactions were not counted."
+  Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,avoid-repeat-compaction,cache-write-risk$" `
+    "Token advice did not reflect the aggregate risk signals."
+  if (($tokenOutput -join "`n") -match "private fixture arguments") {
+    throw "Chronos output exposed tool arguments."
+  }
 
   $cleanupOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action cleanup -Force -CodexHome $missingHome -SampleSeconds 1

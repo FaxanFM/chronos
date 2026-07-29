@@ -13,6 +13,9 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Detects high-frequency Codex SQLite log churn and unreclaimed database space.
 - Warns when the Windows filesystem helper is degrading and advises a full PC
   restart when the helper becomes unusable.
+- Separates cached reads from observed GPT-5.6 cache writes and flags quota
+  amplification from large contexts, high reasoning, subagents, and repeated
+  compaction.
 - Recommends the safest next step for the current condition.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or
@@ -39,6 +42,9 @@ Use Chronos to inspect current Codex resource health.
 
 Chronos reports the current condition and recommends a proportionate response.
 
+See [Codex Token and Quota Findings](docs/TOKEN-QUOTA-FINDINGS.md) for the
+source-backed GPT-5.6 findings and conservative local settings.
+
 ## Self-service agents
 
 Chronos extends to Poe and Apify as independently callable self-service agents:
@@ -59,6 +65,10 @@ will be added here as each agent is published.
 - Never terminates a process or deletes user files.
 - Opens the known Codex diagnostic database read-only and never installs
   triggers, deletes rows, checkpoints, or vacuums it.
+- Reads only bounded 2 MiB tails of up to eight recently active rollout files for
+  structured aggregate token, effort, compaction, and subagent counts.
+- Never returns prompts, responses, tool arguments, tool output, usernames, or
+  local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
 
 See [Privacy](PRIVACY.md), [Terms](TERMS.md), and [Support](SUPPORT.md).

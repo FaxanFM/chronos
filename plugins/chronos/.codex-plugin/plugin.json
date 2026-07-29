@@ -1,7 +1,7 @@
 {
   "name": "chronos",
-  "version": "0.3.2",
-  "description": "Check and mitigate process and diagnostic-log degradation during long-running Codex sessions on Windows.",
+  "version": "0.4.0",
+  "description": "Check process, diagnostic-log, and token-quota degradation during long-running Codex sessions on Windows.",
   "author": {
     "name": "FaxanFM",
     "url": "https://github.com/FaxanFM"
@@ -14,16 +14,17 @@
   "interface": {
     "displayName": "Chronos",
     "shortDescription": "Keep long-running Codex sessions responsive.",
-    "longDescription": "Check Windows process, memory, handle, disk, and Codex diagnostic-log health during long-running work, understand degradation, and apply conservative recovery steps with user approval.",
+    "longDescription": "Check Windows process, memory, handle, disk, Codex diagnostic-log, and token-quota health during long-running work, understand degradation, and apply conservative recovery guidance.",
     "developerName": "FaxanFM",
     "category": "Productivity",
-    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Guided recovery"],
+    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
       "Use Chronos to inspect current Codex resource health.",
-      "Use Chronos to recommend the safest response to current Codex lag."
+      "Use Chronos to recommend the safest response to current Codex lag.",
+      "Use Chronos to explain current token and quota pressure."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

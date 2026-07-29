@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective July 27, 2026
+Effective July 29, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
 
@@ -10,7 +10,9 @@ Chronos does not collect, transmit, sell, or share personal data. It does not us
 
 When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It also opens the known Codex diagnostic SQLite database in read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. Results remain in the active Codex task unless the user chooses to share them.
 
-Chronos does not read SQLite log bodies, prompts, responses, tool output, process arguments, environment variables, user documents, browsing data, credentials, or unrelated file contents.
+For token and quota diagnostics, Chronos reads at most 2 MiB from the tail of each of up to eight Codex rollout files modified in the previous six hours. It retains only structured aggregate token counts, model and reasoning-effort labels, context-window size, and counts of compactions and `spawn_agent` calls. It does not return or retain raw rollout lines, prompts, responses, tool arguments, tool output, usernames, or local paths.
+
+Chronos does not read SQLite log bodies, process arguments, environment variables, user documents, browsing data, credentials, or unrelated file contents.
 
 ## User control
 

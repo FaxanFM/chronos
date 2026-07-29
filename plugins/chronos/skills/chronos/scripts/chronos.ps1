@@ -288,6 +288,214 @@ function Get-FilesystemHelperHealth {
   [pscustomobject]$health
 }
 
+function Get-BoundedFileTail {
+  param(
+    [string]$Path,
+    [int]$MaxBytes = 2097152
+  )
+
+  $stream = $null
+  try {
+    $stream = [System.IO.FileStream]::new(
+      $Path,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      [System.IO.FileShare]::ReadWrite
+    )
+    if ($stream.Length -le 0) { return "" }
+
+    $bytesToRead = [int][math]::Min($MaxBytes, $stream.Length)
+    $start = [math]::Max(0, $stream.Length - $bytesToRead)
+    $null = $stream.Seek($start, [System.IO.SeekOrigin]::Begin)
+    $buffer = [byte[]]::new($bytesToRead)
+    $offset = 0
+    while ($offset -lt $bytesToRead) {
+      $read = $stream.Read($buffer, $offset, $bytesToRead - $offset)
+      if ($read -le 0) { break }
+      $offset += $read
+    }
+
+    $text = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $offset)
+    if ($start -gt 0) {
+      $newline = $text.IndexOf("`n", [System.StringComparison]::Ordinal)
+      if ($newline -lt 0) { return "" }
+      $text = $text.Substring($newline + 1)
+    }
+    $text
+  } catch {
+    ""
+  } finally {
+    if ($stream) { $stream.Dispose() }
+  }
+}
+
+function Get-RecentSessionFiles {
+  $sessionsRoot = Join-Path $CodexHome "sessions"
+  if (-not (Test-Path -LiteralPath $sessionsRoot -PathType Container)) { return @() }
+
+  $cutoff = (Get-Date).ToUniversalTime().AddHours(-6)
+  $files = @()
+  foreach ($daysAgo in 0..1) {
+    $day = (Get-Date).Date.AddDays(-$daysAgo)
+    $dayPath = Join-Path (Join-Path (Join-Path $sessionsRoot $day.ToString("yyyy")) `
+      $day.ToString("MM")) $day.ToString("dd")
+    if (-not (Test-Path -LiteralPath $dayPath -PathType Container)) { continue }
+    $files += @(Get-ChildItem -LiteralPath $dayPath -Filter "*.jsonl" -File `
+      -ErrorAction SilentlyContinue)
+  }
+
+  @($files | Where-Object {
+      $_.LastWriteTimeUtc -ge $cutoff
+    } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 8)
+}
+
+function Get-QuotaHealth {
+  $health = [ordered]@{
+    Level = "UNAVAILABLE"
+    Files = 0
+    Samples = 0
+    SessionInputM = $null
+    CachedReadPercent = $null
+    CacheWriteM = $null
+    CacheWriteObserved = $false
+    ReasoningPercent = $null
+    MaxContextPercent = $null
+    HighEffortSessions = 0
+    ExtremeEffortSessions = 0
+    UltraSessions = 0
+    SpawnCalls = 0
+    Compactions = 0
+    Advice = "none"
+  }
+
+  $inputTokens = 0L
+  $cachedInputTokens = 0L
+  $cacheWriteTokens = 0L
+  $outputTokens = 0L
+  $reasoningTokens = 0L
+  $maxContextPercent = 0.0
+  $advice = [System.Collections.Generic.List[string]]::new()
+  $sessionFiles = @(Get-RecentSessionFiles)
+
+  foreach ($file in $sessionFiles) {
+    $tail = Get-BoundedFileTail -Path $file.FullName
+    if ([string]::IsNullOrEmpty($tail)) { continue }
+
+    $lastInfo = $null
+    $lastTurnContext = $null
+    foreach ($line in ($tail -split "`r?`n")) {
+      if (
+        $line.IndexOf('"token_count"', [System.StringComparison]::Ordinal) -lt 0 -and
+        $line.IndexOf('"turn_context"', [System.StringComparison]::Ordinal) -lt 0 -and
+        $line.IndexOf('"context_compacted"', [System.StringComparison]::Ordinal) -lt 0 -and
+        $line.IndexOf('"spawn_agent"', [System.StringComparison]::Ordinal) -lt 0
+      ) { continue }
+
+      try {
+        $record = $line | ConvertFrom-Json -ErrorAction Stop
+      } catch {
+        continue
+      }
+
+      if ($record.type -eq "turn_context") {
+        $lastTurnContext = $record.payload
+        continue
+      }
+
+      if ($record.type -eq "event_msg") {
+        if ($record.payload.type -eq "token_count") {
+          $health.Samples++
+          if ($record.payload.info) { $lastInfo = $record.payload.info }
+        } elseif ($record.payload.type -eq "context_compacted") {
+          $health.Compactions++
+        }
+        continue
+      }
+
+      if (
+        $record.type -eq "response_item" -and
+        $record.payload.type -eq "function_call" -and
+        $record.payload.name -eq "spawn_agent"
+      ) {
+        $health.SpawnCalls++
+      }
+    }
+
+    if ($lastInfo -and $lastInfo.total_token_usage) {
+      $health.Files++
+      $total = $lastInfo.total_token_usage
+      $inputTokens += [long]$total.input_tokens
+      $cachedInputTokens += [long]$total.cached_input_tokens
+      $cacheWriteTokens += [long]$total.cache_write_input_tokens
+      $outputTokens += [long]$total.output_tokens
+      $reasoningTokens += [long]$total.reasoning_output_tokens
+
+      if ($lastInfo.last_token_usage -and [long]$lastInfo.model_context_window -gt 0) {
+        $contextPercent = 100.0 * [long]$lastInfo.last_token_usage.total_tokens /
+          [long]$lastInfo.model_context_window
+        $maxContextPercent = [math]::Max($maxContextPercent, $contextPercent)
+      }
+    }
+
+    if ($lastTurnContext) {
+      $effort = [string]$lastTurnContext.effort
+      if ($effort -in @("high", "xhigh", "max", "ultra")) {
+        $health.HighEffortSessions++
+      }
+      if ($effort -in @("xhigh", "max", "ultra")) {
+        $health.ExtremeEffortSessions++
+      }
+      if ($effort -eq "ultra") {
+        $health.UltraSessions++
+      }
+    }
+  }
+
+  if ($health.Files -eq 0) {
+    return [pscustomobject]$health
+  }
+
+  $health.SessionInputM = [math]::Round($inputTokens / 1000000.0, 1)
+  $health.CachedReadPercent = if ($inputTokens -gt 0) {
+    [math]::Round(100.0 * $cachedInputTokens / $inputTokens, 1)
+  } else { 0.0 }
+  $health.CacheWriteM = [math]::Round($cacheWriteTokens / 1000000.0, 1)
+  $health.CacheWriteObserved = $cacheWriteTokens -gt 0
+  $health.ReasoningPercent = if ($outputTokens -gt 0) {
+    [math]::Round(100.0 * $reasoningTokens / $outputTokens, 1)
+  } else { 0.0 }
+  $health.MaxContextPercent = [math]::Round($maxContextPercent, 1)
+
+  if ($health.HighEffortSessions -gt 0) { $advice.Add("lower-effort") }
+  if ($health.MaxContextPercent -ge 60) { $advice.Add("fresh-task") }
+  if ($health.UltraSessions -gt 0 -or $health.SpawnCalls -gt 0) {
+    $advice.Add("bound-subagents")
+  }
+  if ($health.Compactions -ge 2) { $advice.Add("avoid-repeat-compaction") }
+  if ($health.CacheWriteObserved) { $advice.Add("cache-write-risk") }
+  if ($advice.Count -gt 0) { $health.Advice = $advice -join "," }
+
+  if (
+    $cacheWriteTokens -ge [math]::Max(1, $inputTokens * 0.25) -or
+    $health.UltraSessions -gt 0 -or $health.SpawnCalls -ge 4 -or
+    $health.Compactions -ge 3 -or
+    ($health.HighEffortSessions -gt 0 -and $health.MaxContextPercent -ge 60) -or
+    $inputTokens -ge 50000000
+  ) {
+    $health.Level = "HIGH"
+  } elseif (
+    $health.HighEffortSessions -gt 0 -or $health.SpawnCalls -gt 0 -or
+    $health.Compactions -gt 0 -or $health.MaxContextPercent -ge 40 -or
+    $inputTokens -ge 10000000
+  ) {
+    $health.Level = "ELEVATED"
+  } else {
+    $health.Level = "LOW"
+  }
+
+  [pscustomobject]$health
+}
+
 function Get-CodexFamily {
   @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
     $_.ProcessName -in @("Codex", "codex", "node_repl") -or
@@ -429,9 +637,10 @@ if ($Action -eq "inspect") {
   $logMetrics = Get-LogDbMetrics $logBefore $logAfter
   $logLevel = Get-LogDbLevel $logMetrics
   $filesystemHelper = Get-FilesystemHelperHealth
+  $quotaHealth = Get-QuotaHealth
   $level = Get-WorseLevel (Get-WorseLevel $processLevel $logLevel) $filesystemHelper.Level
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22}" -f `
+  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenAdvice={37}" -f `
     $level, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
@@ -441,7 +650,17 @@ if ($Action -eq "inspect") {
     $logLevel, (Format-Metric $logMetrics.DatabaseGiB),
     (Format-Metric $logMetrics.ReclaimableGiB), (Format-Metric $logMetrics.WalMiB),
     (Format-Metric $logMetrics.WalActive), (Format-Metric $logMetrics.Sequence),
-    (Format-Metric $logMetrics.InsertRate), (Format-Metric $logMetrics.TracePercent))
+    (Format-Metric $logMetrics.InsertRate), (Format-Metric $logMetrics.TracePercent),
+    $quotaHealth.Level, $quotaHealth.Files, $quotaHealth.Samples,
+    (Format-Metric $quotaHealth.SessionInputM),
+    (Format-Metric $quotaHealth.CachedReadPercent),
+    (Format-Metric $quotaHealth.CacheWriteM),
+    (Format-Metric $quotaHealth.CacheWriteObserved),
+    (Format-Metric $quotaHealth.ReasoningPercent),
+    (Format-Metric $quotaHealth.MaxContextPercent),
+    $quotaHealth.HighEffortSessions, $quotaHealth.ExtremeEffortSessions,
+    $quotaHealth.UltraSessions, $quotaHealth.SpawnCalls, $quotaHealth.Compactions,
+    $quotaHealth.Advice)
   exit 0
 }
 
