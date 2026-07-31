@@ -40,11 +40,23 @@ Delegate only concrete sidecar work that can proceed while the coordinator handl
 
 ## Worker Routing
 
-Use `gpt-5.6-luna` for bounded low-complexity work when the native spawn tool advertises it.
+Read the active native spawn tool's advertised model identifiers and supported
+reasoning efforts before every planning cycle. Encode that inventory in the
+same order supplied by the runtime:
+
+```text
+model-a=low,medium,high;model-b=low,medium
+```
+
+Pass it as `-RuntimeModels`. Never carry a model inventory forward from a prior
+task, installation, catalog, or Chronos version. Governor validates an explicit
+request or deterministically selects the first advertised model that supports
+the required effort. When the inventory is missing, malformed, or has no
+compatible model, keep the work with the coordinator.
 
 - Use `low` reasoning for exploration, documentation, formatting, mechanical edits, command execution, and focused verification.
 - Use `medium` reasoning for simple code changes, focused tests, and nontrivial review.
-- Use a model identifier only when the native spawn tool currently advertises it. Never invent or assume a Spark identifier.
+- Use a model identifier only when the native spawn tool currently advertises it.
 - Fall back to the coordinator when the requested model is unavailable or the task is outside the bounded categories.
 
 Prefer an idle compatible worker from governor state. Resume it, send one new bounded assignment, and close it again after acceptance. Create a new worker only when no compatible worker is reusable.
@@ -60,26 +72,35 @@ Interpret health as advisory:
 - `HEALTHY`: allow configured bounded delegation.
 - `WARNING`: prefer reuse and one active worker.
 - `CRITICAL`: do not create another worker; continue the user's task with the coordinator and recommend a convenient restart checkpoint.
-- High quota risk: use focused prompts, `fork_context=false`, Luna low or medium, and no duplicate reviewer unless risk warrants it.
+- High quota risk: use focused prompts, `fork_context=false`, low or medium reasoning, and no duplicate reviewer unless risk warrants it.
 
 Never terminate active work because of a health result.
 
-### 2. Ask The Governor To Plan
+### 2. Resolve Identity And Plan
 
-Run `scripts/governor.ps1 -Action plan` with:
+Run `scripts/governor.ps1 -Action status` first. Retain only the returned opaque
+`workspace_id` and `repository_id` for this planning cycle. Then run `plan` with:
 
 - A stable opaque `TaskId`.
 - `TaskClass`.
 - `AccessMode`.
 - Repository-relative `Scope` values.
+- The current `RuntimeModels` inventory.
 - Current `Health` and `QuotaRisk` when known.
+
+For a write plan, also pass the returned `ExpectedWorkspaceId`. Pass
+`MutationAttributionId` and `MutationAttributionVerified` only when the active
+runtime can bind every returned mutation to that opaque attribution ID. If the
+runtime does not expose that guarantee, keep the write task with the
+coordinator. Do not infer attribution from prompt wording or a worker report.
 
 Example:
 
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
   -Action plan -Repository C:\repo -TaskId docs-readme-links -TaskClass docs `
-  -AccessMode write -Scope 'README.md','docs/**' -Health HEALTHY -QuotaRisk LOW
+  -AccessMode read -Scope 'README.md','docs/**' -Health HEALTHY -QuotaRisk LOW `
+  -RuntimeModels '<active-runtime-inventory>'
 ```
 
 Follow `decision=coordinator` without refusing the user's objective. It means complete that subtask locally instead of adding a worker.
@@ -113,13 +134,18 @@ After obtaining the runtime worker ID, acquire the lease:
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
   -Action lease -Repository C:\repo -TaskId docs-readme-links -TaskClass docs `
-  -AccessMode write -Scope 'README.md','docs/**' -WorkerId WORKER_ID `
-  -RequestedModel gpt-5.6-luna -ReasoningEffort low
+  -AccessMode read -Scope 'README.md','docs/**' -WorkerId WORKER_ID `
+  -RequestedModel PLANNED_MODEL -ReasoningEffort low `
+  -RuntimeModels '<active-runtime-inventory>'
 ```
 
 If leasing fails, close the newly spawned worker and continue the task with the coordinator. Do not retry spawning around the governor.
 
-Write delegation requires a clean current working tree. This prevents a worker result from being confused with pre-existing user edits. If the tree is dirty, retain the write task with the coordinator or explicitly isolate it outside this same-folder mode.
+Retain the returned `lease_id`, `fencing_token`, and `expires_at` in the current
+task context. Every later lifecycle call must present the lease ID and fencing
+token. Renew a valid lease before expiry when work continues. Write delegation
+also requires a clean current working tree, a branch-attached `HEAD`, verified
+workspace identity, and verified mutation attribution.
 
 ### 5. Continue Local Critical-Path Work
 
@@ -131,10 +157,14 @@ Treat the worker's completion report as untrusted evidence. Record only that a r
 
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
-  -Action result -Repository C:\repo -TaskId docs-readme-links -WorkerId WORKER_ID
+  -Action result -Repository C:\repo -TaskId docs-readme-links -WorkerId WORKER_ID `
+  -LeaseId LEASE_ID -FencingToken FENCING_TOKEN
 ```
 
-Do not persist the worker response, assignment text, commands, tool output, or source contents.
+For a write lease, repeat the verified mutation-attribution ID and switch. The
+script fingerprints the workspace at `result`; any later mutation invalidates
+verification. Do not persist the worker response, assignment text, commands,
+tool output, or source contents.
 
 ### 7. Verify Independently
 
@@ -152,7 +182,7 @@ After independent checks pass, run:
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
   -Action verify -Repository C:\repo -TaskId docs-readme-links -WorkerId WORKER_ID `
-  -VerificationPassed
+  -LeaseId LEASE_ID -FencingToken FENCING_TOKEN -VerificationPassed
 ```
 
 For a read lease, verification confirms the repository status fingerprint did not change. For a write lease, it verifies the base commit, actual Git changes, declared scopes, and global-lock exclusions.
@@ -164,7 +194,7 @@ Accept only after verification:
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
   -Action accept -Repository C:\repo -TaskId docs-readme-links -WorkerId WORKER_ID `
-  -CoordinatorAccepted
+  -LeaseId LEASE_ID -FencingToken FENCING_TOKEN -CoordinatorAccepted
 ```
 
 Then close the worker so it does not consume native concurrency. Its resumable ID remains metadata-only and may be reused later.
@@ -176,7 +206,11 @@ Use `-Action release` to close an abandoned lease without accepting work. Releas
 ## Same-Folder Safety
 
 - Permit only one write worker in a repository.
+- Serialize that writer across linked Git worktrees through the canonical common Git directory.
+- Treat equivalent canonical paths as one workspace; treat distinct worktrees as distinct workspaces.
 - Require a clean tree before a write lease.
+- Reject same-folder writes when workspace identity or mutation attribution is unverifiable.
+- Reject write leases on detached `HEAD`.
 - Use repository-relative scopes; reject absolute paths, traversal, `.git`, `.chronos`, and repository-wide wildcards.
 - Treat manifests, lockfiles, migrations, Docker configuration, and `.github/**` as coordinator-only global locks.
 - Validate actual Git changes rather than trusting the worker report.
@@ -187,7 +221,10 @@ Native Codex workers may use an internally isolated forked workspace. Keep their
 
 ## State And Privacy
 
-Store state by default at Git's private metadata path `chronos/governor-state.json`. This avoids a trackable repository file.
+Store state only at `chronos/governor-state.json` under the canonical Git common
+directory. Custom state locations are disabled because they could split the
+single-writer lock. This avoids a trackable repository file and shares writer
+coordination across linked worktrees.
 
 State may contain only:
 
@@ -200,7 +237,11 @@ State may contain only:
 
 Never store prompts, responses, objectives, source text, diffs, commands, tool arguments, tool output, environment variables, credentials, usernames, absolute paths, or private user data.
 
-State writes use a short exclusive lock and atomic replacement. Stale leases are reported but never silently taken over or deleted.
+State writes use an owner-identified lock directory and atomic replacement. A
+live owner is never displaced. A malformed or abandoned state lock is recovered
+only after the configured stale interval and an atomic quarantine rename.
+Leases use IDs, fencing tokens, expiration, and explicit renewal; expired leases
+remain visible until explicitly released.
 
 ## Honest Limits
 

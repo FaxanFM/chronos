@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Check Codex degradation on Windows and govern bounded low-complexity worker delegation.",
   "author": {
     "name": "FaxanFM",
@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Chronos",
     "shortDescription": "Inspect Codex health and govern bounded workers.",
-    "longDescription": "Check Windows process, memory, handle, disk, diagnostic-log, and token-quota health, then optionally govern bounded low-complexity Codex workers with strict scope, concurrency, write, attempt, correction, privacy, and verification limits.",
+    "longDescription": "Check Windows process, memory, handle, disk, diagnostic-log, and token-quota health, then govern bounded Codex workers using runtime model discovery, canonical workspace identity, fenced leases, strict write attribution, scope, privacy, and verification limits.",
     "developerName": "FaxanFM",
     "category": "Productivity",
     "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Bounded worker governance", "Guided recovery"],

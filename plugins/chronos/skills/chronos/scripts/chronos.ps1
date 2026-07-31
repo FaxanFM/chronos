@@ -222,9 +222,11 @@ function Get-FilesystemHelperHealth {
   }
 
   $health.Present = $true
-  $copyMarker = "helper copy failed for command-runner: remove stale helper destination"
-  $launchMarker = "CreateProcessWithLogonW failed: 5"
-  $successMarker = "] SUCCESS:"
+  $copyMessage = "helper copy failed for command-runner: remove stale helper destination"
+  $launchMessages = @(
+    "CreateProcessWithLogonW failed: 5",
+    "windows sandbox: CreateProcessWithLogonW failed: 5"
+  )
   $markerCutoff = [DateTimeOffset]::Now.AddMinutes(-15)
   $latestCopyFailure = [DateTimeOffset]::MinValue
   $latestLaunchFailure = [DateTimeOffset]::MinValue
@@ -239,30 +241,31 @@ function Get-FilesystemHelperHealth {
     }
 
     foreach ($line in $lines) {
-      $timestampMatch = [regex]::Match(
+      $eventMatch = [regex]::Match(
         $line,
-        "^\[(?<timestamp>\d{4}-\d{2}-\d{2}(?:T|\s)\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)"
+        "^\[(?<timestamp>\d{4}-\d{2}-\d{2}(?:T|\s)\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)(?:\s+[^\]]*)?\]\s*(?<message>.*)$"
       )
-      if (-not $timestampMatch.Success) { continue }
+      if (-not $eventMatch.Success) { continue }
 
       $timestamp = [DateTimeOffset]::MinValue
       if (-not [DateTimeOffset]::TryParse(
-        $timestampMatch.Groups["timestamp"].Value,
+        $eventMatch.Groups["timestamp"].Value,
         [System.Globalization.CultureInfo]::InvariantCulture,
         [System.Globalization.DateTimeStyles]::AllowWhiteSpaces,
         [ref]$timestamp
       )) { continue }
       if ($timestamp -lt $markerCutoff) { continue }
+      $message = $eventMatch.Groups["message"].Value.Trim()
 
-      if ($line.IndexOf($copyMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+      if ($message.Equals($copyMessage, [System.StringComparison]::OrdinalIgnoreCase) -and
           $timestamp -gt $latestCopyFailure) {
         $latestCopyFailure = $timestamp
       }
-      if ($line.IndexOf($launchMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+      if ($launchMessages -contains $message -and
           $timestamp -gt $latestLaunchFailure) {
         $latestLaunchFailure = $timestamp
       }
-      if ($line.IndexOf($successMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+      if ($message -match '^SUCCESS:\s+\S.*$' -and
           $timestamp -gt $latestSuccess) {
         $latestSuccess = $timestamp
       }
@@ -350,6 +353,77 @@ function Get-RecentSessionFiles {
     } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 8)
 }
 
+function Get-RecordTimestamp {
+  param($Record)
+  foreach ($name in @("timestamp", "created_at")) {
+    $property = $Record.PSObject.Properties[$name]
+    if (-not $property -or -not $property.Value) { continue }
+    $parsed = [DateTimeOffset]::MinValue
+    if ([DateTimeOffset]::TryParse(
+      [string]$property.Value,
+      [System.Globalization.CultureInfo]::InvariantCulture,
+      [System.Globalization.DateTimeStyles]::AllowWhiteSpaces,
+      [ref]$parsed
+    )) { return $parsed }
+  }
+  $null
+}
+
+function Get-RecordHash {
+  param([string]$Value)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "")
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function ConvertTo-TokenInt64 {
+  param($Object, [string]$Name, [switch]$Optional)
+  $property = if ($Object) { $Object.PSObject.Properties[$Name] } else { $null }
+  if (-not $property -or $null -eq $property.Value) {
+    if ($Optional) { return 0L }
+    throw "missing_token_counter"
+  }
+  $value = [Convert]::ToInt64($property.Value, [System.Globalization.CultureInfo]::InvariantCulture)
+  if ($value -lt 0) { throw "negative_token_counter" }
+  $value
+}
+
+function Get-ValidatedTokenSnapshot {
+  param($Info)
+  try {
+    if (-not $Info -or -not $Info.total_token_usage) { return $null }
+    $total = $Info.total_token_usage
+    $inputTokens = ConvertTo-TokenInt64 $total "input_tokens"
+    $cachedInputTokens = ConvertTo-TokenInt64 $total "cached_input_tokens" -Optional
+    $cacheWriteTokens = ConvertTo-TokenInt64 $total "cache_write_input_tokens" -Optional
+    $outputTokens = ConvertTo-TokenInt64 $total "output_tokens"
+    $reasoningTokens = ConvertTo-TokenInt64 $total "reasoning_output_tokens" -Optional
+    $totalTokens = ConvertTo-TokenInt64 $total "total_tokens"
+    if ($cachedInputTokens -gt $inputTokens) { throw "cached_tokens_exceed_input" }
+    $contextWindow = ConvertTo-TokenInt64 $Info "model_context_window" -Optional
+    $lastTotalTokens = 0L
+    if ($Info.last_token_usage) {
+      $lastTotalTokens = ConvertTo-TokenInt64 $Info.last_token_usage "total_tokens" -Optional
+    }
+    [pscustomobject]@{
+      InputTokens = $inputTokens
+      CachedInputTokens = $cachedInputTokens
+      CacheWriteTokens = $cacheWriteTokens
+      OutputTokens = $outputTokens
+      ReasoningTokens = $reasoningTokens
+      TotalTokens = $totalTokens
+      ContextWindow = $contextWindow
+      LastTotalTokens = $lastTotalTokens
+    }
+  } catch {
+    $null
+  }
+}
+
 function Get-QuotaHealth {
   $health = [ordered]@{
     Level = "UNAVAILABLE"
@@ -366,6 +440,10 @@ function Get-QuotaHealth {
     UltraSessions = 0
     SpawnCalls = 0
     Compactions = 0
+    MalformedRecords = 0
+    DuplicateRecords = 0
+    OutOfOrderRecords = 0
+    TailIncompleteFiles = 0
     Advice = "none"
   }
 
@@ -382,9 +460,20 @@ function Get-QuotaHealth {
     $tail = Get-BoundedFileTail -Path $file.FullName
     if ([string]::IsNullOrEmpty($tail)) { continue }
 
-    $lastInfo = $null
+    $lastSnapshot = $null
+    $lastSnapshotTimestamp = [DateTimeOffset]::MinValue
+    $lastSnapshotOrdinal = -1
     $lastTurnContext = $null
-    foreach ($line in ($tail -split "`r?`n")) {
+    $lastTurnContextTimestamp = [DateTimeOffset]::MinValue
+    $lines = @($tail -split "`r?`n")
+    if (-not $tail.EndsWith("`n", [System.StringComparison]::Ordinal)) {
+      $health.TailIncompleteFiles++
+      if ($lines.Count -gt 0) { $lines = @($lines | Select-Object -First ($lines.Count - 1)) }
+    }
+    $seenRecords = @{}
+    $previousTimestamp = [DateTimeOffset]::MinValue
+    $ordinal = 0
+    foreach ($line in $lines) {
       if (
         $line.IndexOf('"token_count"', [System.StringComparison]::Ordinal) -lt 0 -and
         $line.IndexOf('"turn_context"', [System.StringComparison]::Ordinal) -lt 0 -and
@@ -395,18 +484,52 @@ function Get-QuotaHealth {
       try {
         $record = $line | ConvertFrom-Json -ErrorAction Stop
       } catch {
+        $health.MalformedRecords++
         continue
       }
 
+      $recordTimestamp = Get-RecordTimestamp $record
+      if ($recordTimestamp) {
+        $recordHash = Get-RecordHash $line.Trim()
+        if ($seenRecords.ContainsKey($recordHash)) {
+          $health.DuplicateRecords++
+          continue
+        }
+        $seenRecords[$recordHash] = $true
+        if ($previousTimestamp -ne [DateTimeOffset]::MinValue -and $recordTimestamp -lt $previousTimestamp) {
+          $health.OutOfOrderRecords++
+        }
+        if ($recordTimestamp -gt $previousTimestamp) { $previousTimestamp = $recordTimestamp }
+      }
+      $ordinal++
+
       if ($record.type -eq "turn_context") {
-        $lastTurnContext = $record.payload
+        if (-not $recordTimestamp -or $recordTimestamp -ge $lastTurnContextTimestamp) {
+          $lastTurnContext = $record.payload
+          if ($recordTimestamp) { $lastTurnContextTimestamp = $recordTimestamp }
+        }
         continue
       }
 
       if ($record.type -eq "event_msg") {
         if ($record.payload.type -eq "token_count") {
+          $snapshot = Get-ValidatedTokenSnapshot $record.payload.info
+          if (-not $snapshot) {
+            $health.MalformedRecords++
+            continue
+          }
           $health.Samples++
-          if ($record.payload.info) { $lastInfo = $record.payload.info }
+          $candidateTimestamp = if ($recordTimestamp) { $recordTimestamp } else { [DateTimeOffset]::MinValue }
+          if (
+            -not $lastSnapshot -or
+            $snapshot.TotalTokens -gt $lastSnapshot.TotalTokens -or
+            ($snapshot.TotalTokens -eq $lastSnapshot.TotalTokens -and $candidateTimestamp -gt $lastSnapshotTimestamp) -or
+            ($snapshot.TotalTokens -eq $lastSnapshot.TotalTokens -and $candidateTimestamp -eq $lastSnapshotTimestamp -and $ordinal -gt $lastSnapshotOrdinal)
+          ) {
+            $lastSnapshot = $snapshot
+            $lastSnapshotTimestamp = $candidateTimestamp
+            $lastSnapshotOrdinal = $ordinal
+          }
         } elseif ($record.payload.type -eq "context_compacted") {
           $health.Compactions++
         }
@@ -422,18 +545,17 @@ function Get-QuotaHealth {
       }
     }
 
-    if ($lastInfo -and $lastInfo.total_token_usage) {
+    if ($lastSnapshot) {
       $health.Files++
-      $total = $lastInfo.total_token_usage
-      $inputTokens += [long]$total.input_tokens
-      $cachedInputTokens += [long]$total.cached_input_tokens
-      $cacheWriteTokens += [long]$total.cache_write_input_tokens
-      $outputTokens += [long]$total.output_tokens
-      $reasoningTokens += [long]$total.reasoning_output_tokens
+      $inputTokens += [long]$lastSnapshot.InputTokens
+      $cachedInputTokens += [long]$lastSnapshot.CachedInputTokens
+      $cacheWriteTokens += [long]$lastSnapshot.CacheWriteTokens
+      $outputTokens += [long]$lastSnapshot.OutputTokens
+      $reasoningTokens += [long]$lastSnapshot.ReasoningTokens
 
-      if ($lastInfo.last_token_usage -and [long]$lastInfo.model_context_window -gt 0) {
-        $contextPercent = 100.0 * [long]$lastInfo.last_token_usage.total_tokens /
-          [long]$lastInfo.model_context_window
+      if ($lastSnapshot.ContextWindow -gt 0) {
+        $contextPercent = 100.0 * [long]$lastSnapshot.LastTotalTokens /
+          [long]$lastSnapshot.ContextWindow
         $maxContextPercent = [math]::Max($maxContextPercent, $contextPercent)
       }
     }
@@ -643,7 +765,7 @@ if ($Action -eq "inspect") {
   $quotaHealth = Get-QuotaHealth
   $level = Get-WorseLevel (Get-WorseLevel $processLevel $logLevel) $filesystemHelper.Level
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenAdvice={37}" -f `
+  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} tokenAdvice={41}" -f `
     $level, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
@@ -663,6 +785,8 @@ if ($Action -eq "inspect") {
     (Format-Metric $quotaHealth.MaxContextPercent),
     $quotaHealth.HighEffortSessions, $quotaHealth.ExtremeEffortSessions,
     $quotaHealth.UltraSessions, $quotaHealth.SpawnCalls, $quotaHealth.Compactions,
+    $quotaHealth.MalformedRecords, $quotaHealth.DuplicateRecords,
+    $quotaHealth.OutOfOrderRecords, $quotaHealth.TailIncompleteFiles,
     $quotaHealth.Advice)
   exit 0
 }

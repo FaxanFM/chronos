@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate tag and manifest
+        shell: powershell
+        run: |
+          $manifest = Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json
+          if ("v$($manifest.version)" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match manifest $($manifest.version)."
+          }
+      - name: Test Chronos
+        shell: powershell
+        run: .\tests\chronos.tests.ps1 -PythonPath python
+      - name: Test Chronos Governor
+        shell: powershell
+        run: .\tests\governor.tests.ps1
+      - name: Test reproducible release
+        shell: powershell
+        run: .\tests\release.tests.ps1
+      - name: Build release artifacts
+        shell: powershell
+        run: .\scripts\build-release.ps1 -Version $env:GITHUB_REF_NAME -OutputDirectory dist
+      - name: Attest release artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.zip
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath dist -File | ForEach-Object { $_.FullName })
+          gh release create $env:GITHUB_REF_NAME $assets --verify-tag --generate-notes --title "Chronos $env:GITHUB_REF_NAME"

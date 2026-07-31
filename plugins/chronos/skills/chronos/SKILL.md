@@ -32,6 +32,9 @@ For quota diagnostics, it reads at most 2 MiB from each of up to eight rollout
 files modified in the last six hours. It retains only structured token-count,
 turn-context, compaction-count, and `spawn_agent` count fields. It never returns
 raw rollout lines, prompts, responses, tool arguments, tool output, or paths.
+It reports aggregate parser-integrity counters for malformed, duplicated,
+out-of-order, and incomplete-tail records. Those counters do not alter health
+thresholds or scoring.
 
 Interpret the result:
 

@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("plan", "lease", "result", "verify", "correct", "accept", "retire", "release", "status")]
+  [ValidateSet("plan", "lease", "renew", "result", "verify", "correct", "accept", "retire", "release", "status")]
   [string]$Action = "status",
   [string]$Repository = (Get-Location).Path,
   [string]$StatePath = "",
@@ -12,8 +12,14 @@ param(
   [string]$WorkerId = "",
   [string]$RequestedModel = "",
   [string]$EffectiveModel = "",
-  [ValidateSet("low", "medium", "high")]
+  [ValidateSet("low", "medium", "high", "xhigh", "max", "ultra")]
   [string]$ReasoningEffort = "low",
+  [string]$RuntimeModels = "",
+  [string]$ExpectedWorkspaceId = "",
+  [string]$MutationAttributionId = "",
+  [switch]$MutationAttributionVerified,
+  [string]$LeaseId = "",
+  [string]$FencingToken = "",
   [ValidateSet("HEALTHY", "WARNING", "CRITICAL", "UNAVAILABLE")]
   [string]$Health = "UNAVAILABLE",
   [ValidateSet("LOW", "ELEVATED", "HIGH", "UNAVAILABLE")]
@@ -23,14 +29,16 @@ param(
   [int]$MaxConcurrentWorkers = 2,
   [int]$MaxTotalAttempts = 3,
   [int]$MaxCorrections = 1,
-  [int]$StaleMinutes = 120
+  [int]$LeaseMinutes = 30,
+  [int]$StaleMinutes = 120,
+  [int]$LockStaleSeconds = 30
 )
 
 $ErrorActionPreference = "Stop"
 
 function Write-GovernorOutput {
   param([hashtable]$Data)
-  Write-Output ("CHRONOS GOVERNOR " + ($Data | ConvertTo-Json -Compress -Depth 8))
+  Write-Output ("CHRONOS GOVERNOR " + ($Data | ConvertTo-Json -Compress -Depth 10))
 }
 
 function Throw-GovernorError {
@@ -43,6 +51,15 @@ function Invoke-Git {
   $output = @(& git -C $script:RepositoryRoot @Arguments 2>&1)
   if ($LASTEXITCODE -ne 0) { Throw-GovernorError "git_command_failed" }
   ($output -join "`n").Trim()
+}
+
+function Try-Invoke-Git {
+  param([string[]]$Arguments)
+  $output = @(& git -C $script:RepositoryRoot @Arguments 2>$null)
+  @{
+    ok = ($LASTEXITCODE -eq 0)
+    output = ($output -join "`n").Trim()
+  }
 }
 
 function ConvertTo-Hashtable {
@@ -74,18 +91,6 @@ function ConvertTo-Hashtable {
   $Value
 }
 
-function Get-RepositoryId {
-  param([string]$Path)
-  $normalized = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/').ToLowerInvariant()
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
-    ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
-  } finally {
-    $sha.Dispose()
-  }
-}
-
 function Get-TextHash {
   param([string]$Value)
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -97,10 +102,99 @@ function Get-TextHash {
   }
 }
 
+function Get-FileHashValue {
+  param([string]$Path)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+    try {
+      ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Initialize-NativePathResolver {
+  if ($env:OS -ne 'Windows_NT' -or ('Chronos.NativePath' -as [type])) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Chronos {
+  public static class NativePath {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(
+      string name, uint access, uint share, IntPtr security, uint creation,
+      uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(
+      IntPtr handle, StringBuilder path, uint length, uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    public static string Resolve(string path) {
+      IntPtr handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+      if (handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+      try {
+        var value = new StringBuilder(1024);
+        uint length = GetFinalPathNameByHandleW(handle, value, (uint)value.Capacity, 0);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= value.Capacity) {
+          value = new StringBuilder((int)length + 1);
+          length = GetFinalPathNameByHandleW(handle, value, (uint)value.Capacity, 0);
+          if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return value.ToString();
+      } finally {
+        CloseHandle(handle);
+      }
+    }
+  }
+}
+'@
+}
+
+function Resolve-CanonicalPath {
+  param([string]$Path)
+  $full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+  if (-not (Test-Path -LiteralPath $full)) { return $full }
+  if ($env:OS -eq 'Windows_NT') {
+    Initialize-NativePathResolver
+    try {
+      $resolved = [Chronos.NativePath]::Resolve($full)
+      if ($resolved.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return ('\\' + $resolved.Substring(8)).TrimEnd('\', '/')
+      }
+      if ($resolved.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $resolved.Substring(4).TrimEnd('\', '/')
+      }
+      return $resolved.TrimEnd('\', '/')
+    } catch {
+      Throw-GovernorError "canonical_path_unavailable"
+    }
+  }
+  (Get-Item -LiteralPath $full -Force).FullName.TrimEnd('\', '/')
+}
+
 function Normalize-Identifier {
   param([string]$Value, [string]$ErrorCode)
   if ($Value -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$') {
     Throw-GovernorError $ErrorCode
+  }
+  $Value
+}
+
+function Normalize-ModelIdentifier {
+  param([string]$Value)
+  if ($Value -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$') {
+    Throw-GovernorError "invalid_model_inventory"
   }
   $Value
 }
@@ -134,7 +228,7 @@ function Get-NormalizedScopes {
 
 function Test-PathInScope {
   param([string]$Path, [string[]]$AllowedScopes)
-  $normalizedPath = (Normalize-Scope $Path)
+  $normalizedPath = Normalize-Scope $Path
   foreach ($allowed in $AllowedScopes) {
     if ($allowed.EndsWith('/**')) {
       $prefix = $allowed.Substring(0, $allowed.Length - 3).TrimEnd('/')
@@ -169,7 +263,8 @@ function Test-GlobalLockPath {
 
 function Test-ReparsePath {
   param([string]$Path)
-  $fullPath = [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $Path))
+  $relative = Normalize-Scope $Path
+  $fullPath = [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $relative))
   $root = $script:RepositoryRoot.TrimEnd('\', '/')
   if (
     -not $fullPath.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -and
@@ -181,12 +276,129 @@ function Test-ReparsePath {
     if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $true }
     $current = Split-Path -Parent $current
   }
+  if (Test-Path -LiteralPath $fullPath) {
+    $canonical = Resolve-CanonicalPath $fullPath
+    if (
+      -not $canonical.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -and
+      -not $canonical.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+    ) { return $true }
+  }
   $false
+}
+
+function Test-ScopeReparseRisk {
+  param([string]$ScopeValue)
+  $prefix = ($ScopeValue -split '[*?[]', 2)[0].TrimEnd('/')
+  if (-not $prefix) { return $true }
+  $candidate = Join-Path $script:RepositoryRoot $prefix
+  while (-not (Test-Path -LiteralPath $candidate) -and $candidate -ne $script:RepositoryRoot) {
+    $candidate = Split-Path -Parent $candidate
+  }
+  $relative = $candidate.Substring($script:RepositoryRoot.Length).TrimStart('\', '/')
+  if (-not $relative) { return $false }
+  Test-ReparsePath $relative
+}
+
+function Read-RuntimeModelInventory {
+  param([string]$Value)
+  $models = @()
+  $seen = @{}
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return @{ models = @(); hash = Get-TextHash ''; available = $false }
+  }
+  $index = 0
+  foreach ($entry in @($Value.Split(';'))) {
+    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+    $parts = @($entry.Split('=', 2))
+    if ($parts.Count -ne 2) { Throw-GovernorError "invalid_model_inventory" }
+    $model = Normalize-ModelIdentifier $parts[0].Trim()
+    $key = $model.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { Throw-GovernorError "invalid_model_inventory" }
+    $efforts = @($parts[1].Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+    if ($efforts.Count -eq 0) { Throw-GovernorError "invalid_model_inventory" }
+    foreach ($effort in $efforts) {
+      if ($effort -notin @('low', 'medium', 'high', 'xhigh', 'max', 'ultra')) {
+        Throw-GovernorError "invalid_model_inventory"
+      }
+    }
+    $seen[$key] = $true
+    $models += ,@{ id = $model; efforts = @($efforts); index = $index }
+    $index++
+  }
+  if ($models.Count -eq 0) { Throw-GovernorError "invalid_model_inventory" }
+  $canonical = @($models | ForEach-Object { $_.id + '=' + ($_.efforts -join ',') }) -join ';'
+  @{ models = @($models); hash = Get-TextHash $canonical; available = $true }
+}
+
+function Select-RuntimeModel {
+  param([hashtable]$Inventory, [string]$Requested, [string]$Effort)
+  if (-not $Inventory.available) {
+    return @{ selected = $false; reason = 'model_inventory_unavailable'; model = $null; index = $null }
+  }
+  if ($Requested) {
+    $requestedId = Normalize-ModelIdentifier $Requested
+    $match = @($Inventory.models | Where-Object { $_.id -eq $requestedId })
+    if ($match.Count -eq 0) {
+      return @{ selected = $false; reason = 'model_not_advertised'; model = $null; index = $null }
+    }
+    if ($match[0].efforts -notcontains $Effort) {
+      return @{ selected = $false; reason = 'model_effort_unsupported'; model = $null; index = $null }
+    }
+    return @{ selected = $true; reason = 'requested_model_validated'; model = $match[0].id; index = $match[0].index }
+  }
+  $compatible = @($Inventory.models | Where-Object { $_.efforts -contains $Effort } | Select-Object -First 1)
+  if ($compatible.Count -eq 0) {
+    return @{ selected = $false; reason = 'no_compatible_worker_model'; model = $null; index = $null }
+  }
+  @{ selected = $true; reason = 'runtime_inventory_order'; model = $compatible[0].id; index = $compatible[0].index }
+}
+
+function Get-HeadState {
+  $commit = Invoke-Git @('rev-parse', 'HEAD')
+  $symbolic = Try-Invoke-Git @('symbolic-ref', '-q', 'HEAD')
+  if ($symbolic.ok -and $symbolic.output) {
+    return @{ mode = 'branch'; reference_hash = Get-TextHash $symbolic.output; commit = $commit }
+  }
+  @{ mode = 'detached'; reference_hash = Get-TextHash ('detached:' + $commit); commit = $commit }
+}
+
+function Get-TaskChanges {
+  param([string]$BaseCommit)
+  $trackedText = Invoke-Git @('diff', '--name-only', '--diff-filter=ACDMRTUXB', $BaseCommit, '--')
+  $untrackedText = Invoke-Git @('ls-files', '--others', '--exclude-standard')
+  $paths = @()
+  if ($trackedText) { $paths += @($trackedText -split "`r?`n") }
+  if ($untrackedText) { $paths += @($untrackedText -split "`r?`n") }
+  @($paths | Where-Object { $_ } | ForEach-Object { Normalize-Scope $_ } | Sort-Object -Unique)
+}
+
+function Get-WorkspaceFingerprint {
+  param([string]$BaseCommit)
+  $head = Get-HeadState
+  $status = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
+  $diff = Invoke-Git @('diff', '--no-ext-diff', '--binary', '--full-index', $BaseCommit, '--')
+  $untracked = Invoke-Git @('ls-files', '--others', '--exclude-standard')
+  $untrackedParts = @()
+  if ($untracked) {
+    foreach ($relative in @($untracked -split "`r?`n" | Where-Object { $_ } | Sort-Object -Unique)) {
+      $normalized = Normalize-Scope $relative
+      $full = Join-Path $script:RepositoryRoot $normalized
+      if (Test-ReparsePath $normalized) {
+        $untrackedParts += $normalized + ':reparse'
+      } elseif (Test-Path -LiteralPath $full -PathType Leaf) {
+        $untrackedParts += $normalized + ':' + (Get-FileHashValue $full)
+      } else {
+        $untrackedParts += $normalized + ':non_file'
+      }
+    }
+  }
+  Get-TextHash ($head.mode + "`n" + $head.reference_hash + "`n" + $head.commit + "`n" + $status + "`n" + $diff + "`n" + ($untrackedParts -join "`n"))
 }
 
 function New-State {
   @{
-    version = 1
+    version = 2
+    state_revision = [int64]0
     workers = @{}
     tasks = @{}
     leases = @{}
@@ -203,9 +415,16 @@ function Read-State {
   } catch {
     Throw-GovernorError "state_invalid_json"
   }
-  if ($state.version -ne 1 -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases) {
+  if ($state.version -eq 1) {
+    $legacyActive = @($state.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction') })
+    if ($legacyActive.Count -gt 0) { Throw-GovernorError "state_migration_active_leases" }
+    $state.version = 2
+    $state.state_revision = [int64]0
+  }
+  if ($state.version -ne 2 -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases) {
     Throw-GovernorError "state_version_unsupported"
   }
+  if ($null -eq $state.state_revision) { Throw-GovernorError "state_version_unsupported" }
   $state
 }
 
@@ -215,10 +434,11 @@ function Write-State {
   if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
   }
+  $State.state_revision = [int64]$State.state_revision + [int64]1
   $temporary = $script:ResolvedStatePath + ".tmp-" + [guid]::NewGuid().ToString('N')
   $backup = $script:ResolvedStatePath + ".bak"
   try {
-    $json = $State | ConvertTo-Json -Depth 8
+    $json = $State | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($temporary, $json, [System.Text.UTF8Encoding]::new($false))
     if (Test-Path -LiteralPath $script:ResolvedStatePath -PathType Leaf) {
       Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
@@ -234,47 +454,105 @@ function Write-State {
   }
 }
 
+function Test-LockOwnerAlive {
+  param([hashtable]$Owner)
+  try {
+    $process = Get-Process -Id ([int]$Owner.pid) -ErrorAction Stop
+    $ticks = $process.StartTime.ToUniversalTime().Ticks.ToString()
+    $ticks -eq [string]$Owner.process_start_utc_ticks
+  } catch {
+    $false
+  }
+}
+
+function Try-Recover-StateLock {
+  param([string]$LockPath)
+  if (-not (Test-Path -LiteralPath $LockPath -PathType Container)) { return $true }
+  $ownerPath = Join-Path $LockPath 'owner.json'
+  $item = if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {
+    Get-Item -LiteralPath $ownerPath -Force
+  } else {
+    Get-Item -LiteralPath $LockPath -Force
+  }
+  if ([DateTimeOffset]::UtcNow -lt ([DateTimeOffset]$item.LastWriteTimeUtc).AddSeconds($LockStaleSeconds)) {
+    return $false
+  }
+  $owner = $null
+  if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {
+    try { $owner = ConvertTo-Hashtable (Get-Content -Raw -LiteralPath $ownerPath | ConvertFrom-Json -ErrorAction Stop) } catch { $owner = $null }
+  }
+  if ($owner -and $owner.lock_id -and (Test-LockOwnerAlive $owner)) { return $false }
+  $quarantine = $LockPath + '.stale-' + [guid]::NewGuid().ToString('N')
+  try {
+    [System.IO.Directory]::Move($LockPath, $quarantine)
+    [System.IO.Directory]::Delete($quarantine, $true)
+    $true
+  } catch {
+    $false
+  }
+}
+
 function Acquire-StateLock {
   $lockPath = $script:ResolvedStatePath + ".lock"
   $directory = Split-Path -Parent $lockPath
   if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
   }
-  foreach ($attempt in 1..20) {
+  foreach ($attempt in 1..40) {
     try {
-      return [System.IO.File]::Open(
-        $lockPath,
-        [System.IO.FileMode]::CreateNew,
-        [System.IO.FileAccess]::Write,
-        [System.IO.FileShare]::None
-      )
+      [System.IO.Directory]::CreateDirectory($lockPath) | Out-Null
+      $ownerPath = Join-Path $lockPath 'owner.json'
+      $stream = [System.IO.File]::Open($ownerPath, 'CreateNew', 'Write', 'None')
+      $lockId = [guid]::NewGuid().ToString('N')
+      $owner = @{
+        lock_id = $lockId
+        pid = $PID
+        process_start_utc_ticks = (Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks.ToString()
+        created_at = [DateTimeOffset]::UtcNow.ToString('o')
+      } | ConvertTo-Json -Compress
+      $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false))
+      try { $writer.Write($owner) } finally { $writer.Dispose() }
+      return @{ lock_id = $lockId; path = $lockPath }
     } catch [System.IO.IOException] {
-      if ($attempt -eq 20) { Throw-GovernorError "state_locked" }
+      Try-Recover-StateLock $lockPath | Out-Null
+      if ($attempt -eq 40) { Throw-GovernorError "state_locked" }
       Start-Sleep -Milliseconds 50
     }
   }
 }
 
 function Release-StateLock {
-  param($LockStream)
-  if ($LockStream) { $LockStream.Dispose() }
-  $lockPath = $script:ResolvedStatePath + ".lock"
-  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  param([hashtable]$Lock)
+  if (-not $Lock) { return }
+  $ownerPath = Join-Path $Lock.path 'owner.json'
+  try {
+    if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) { return }
+    $owner = ConvertTo-Hashtable (Get-Content -Raw -LiteralPath $ownerPath | ConvertFrom-Json -ErrorAction Stop)
+    if ($owner.lock_id -ne $Lock.lock_id) { return }
+    [System.IO.File]::Delete($ownerPath)
+    [System.IO.Directory]::Delete($Lock.path, $false)
+  } catch {
+    return
+  }
 }
 
 function Get-ActiveLeases {
   param([hashtable]$State)
-  @($State.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction') })
+  @($State.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified') })
 }
 
-function Get-TaskChanges {
-  param([string]$BaseCommit)
-  $trackedText = Invoke-Git @('diff', '--name-only', '--diff-filter=ACDMRTUXB', $BaseCommit, '--')
-  $untrackedText = Invoke-Git @('ls-files', '--others', '--exclude-standard')
-  $paths = @()
-  if ($trackedText) { $paths += @($trackedText -split "`r?`n") }
-  if ($untrackedText) { $paths += @($untrackedText -split "`r?`n") }
-  @($paths | Where-Object { $_ } | ForEach-Object { Normalize-Scope $_ } | Sort-Object -Unique)
+function Test-LeaseExpired {
+  param([hashtable]$Lease)
+  try { [DateTimeOffset]::Parse([string]$Lease.expires_at) -le [DateTimeOffset]::UtcNow } catch { $true }
+}
+
+function Assert-LeaseCredentials {
+  param([hashtable]$Lease, [switch]$AllowExpiredRelease)
+  if ($WorkerId -and $Lease.worker_id -ne $WorkerId) { Throw-GovernorError "worker_mismatch" }
+  if ($AllowExpiredRelease -and $CoordinatorAccepted -and (Test-LeaseExpired $Lease)) { return }
+  if (-not $LeaseId -or $Lease.lease_id -ne $LeaseId) { Throw-GovernorError "lease_id_mismatch" }
+  if (-not $FencingToken -or $Lease.fencing_token -ne $FencingToken) { Throw-GovernorError "fencing_token_mismatch" }
+  if (Test-LeaseExpired $Lease) { Throw-GovernorError "lease_expired" }
 }
 
 try {
@@ -282,35 +560,29 @@ try {
   if (-not (Test-Path -LiteralPath $resolvedRepository -PathType Container)) {
     Throw-GovernorError "repository_unavailable"
   }
-  $script:RepositoryRoot = (& git -C $resolvedRepository rev-parse --show-toplevel 2>$null).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $script:RepositoryRoot) { Throw-GovernorError "git_repository_required" }
-  $script:RepositoryRoot = [System.IO.Path]::GetFullPath($script:RepositoryRoot)
-  $repositoryId = Get-RepositoryId $script:RepositoryRoot
-
+  $rawRoot = (& git -C $resolvedRepository rev-parse --show-toplevel 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
+  $script:RepositoryRoot = Resolve-CanonicalPath $rawRoot
+  $rawCommonDir = (& git -C $script:RepositoryRoot rev-parse --path-format=absolute --git-common-dir 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $rawCommonDir) { Throw-GovernorError "git_common_dir_unavailable" }
+  $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir
+  $repositoryId = Get-TextHash $script:GitCommonDir.ToLowerInvariant()
+  $workspaceId = Get-TextHash ($script:RepositoryRoot.ToLowerInvariant() + "`n" + $script:GitCommonDir.ToLowerInvariant())
+  $expectedStatePath = [System.IO.Path]::GetFullPath((Join-Path $script:GitCommonDir 'chronos/governor-state.json'))
   if ($StatePath) {
-    $script:ResolvedStatePath = [System.IO.Path]::GetFullPath($StatePath)
-    $repoPrefix = $script:RepositoryRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    if ($script:ResolvedStatePath.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-      Throw-GovernorError "custom_state_path_must_be_private"
+    $candidateStatePath = [System.IO.Path]::GetFullPath($StatePath)
+    if (-not $candidateStatePath.Equals($expectedStatePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Throw-GovernorError "custom_state_path_disabled"
     }
-  } else {
-    $gitStatePath = (& git -C $script:RepositoryRoot rev-parse --path-format=absolute --git-path chronos/governor-state.json 2>$null).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $gitStatePath) { Throw-GovernorError "git_state_path_unavailable" }
-    $script:ResolvedStatePath = [System.IO.Path]::GetFullPath($gitStatePath)
   }
+  $script:ResolvedStatePath = $expectedStatePath
 
-  if ($MaxConcurrentWorkers -lt 1 -or $MaxConcurrentWorkers -gt 4) {
-    Throw-GovernorError "invalid_concurrency_limit"
-  }
-  if ($MaxTotalAttempts -lt 1 -or $MaxTotalAttempts -gt 5) {
-    Throw-GovernorError "invalid_attempt_limit"
-  }
-  if ($MaxCorrections -lt 0 -or $MaxCorrections -gt 2) {
-    Throw-GovernorError "invalid_correction_limit"
-  }
-  if ($StaleMinutes -lt 15 -or $StaleMinutes -gt 1440) {
-    Throw-GovernorError "invalid_stale_limit"
-  }
+  if ($MaxConcurrentWorkers -lt 1 -or $MaxConcurrentWorkers -gt 4) { Throw-GovernorError "invalid_concurrency_limit" }
+  if ($MaxTotalAttempts -lt 1 -or $MaxTotalAttempts -gt 5) { Throw-GovernorError "invalid_attempt_limit" }
+  if ($MaxCorrections -lt 0 -or $MaxCorrections -gt 2) { Throw-GovernorError "invalid_correction_limit" }
+  if ($LeaseMinutes -lt 1 -or $LeaseMinutes -gt 240) { Throw-GovernorError "invalid_lease_limit" }
+  if ($StaleMinutes -lt 15 -or $StaleMinutes -gt 1440) { Throw-GovernorError "invalid_stale_limit" }
+  if ($LockStaleSeconds -lt 1 -or $LockStaleSeconds -gt 600) { Throw-GovernorError "invalid_lock_stale_limit" }
 
   if ($Action -in @('plan', 'status')) {
     $state = Read-State
@@ -323,12 +595,16 @@ try {
       Write-GovernorOutput @{
         ok = $true
         action = 'status'
+        repository_id = $repositoryId
+        workspace_id = $workspaceId
         active_workers = $active.Count
         active_writers = @($active | Where-Object { $_.access_mode -eq 'write' }).Count
+        expired_leases = @($active | Where-Object { Test-LeaseExpired $_ }).Count
         idle_workers = @($state.workers.Values | Where-Object { $_.status -eq 'idle' }).Count
         stale_leases = $stale.Count
         tasks = $state.tasks.Count
         state_version = $state.version
+        state_revision = [int64]$state.state_revision
         persistent_content = 'metadata-only'
       }
       exit 0
@@ -337,56 +613,63 @@ try {
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
     $scopes = @(Get-NormalizedScopes)
     $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
-    $model = if ($RequestedModel) { $RequestedModel } else { 'gpt-5.6-luna' }
     $effort = if ($TaskClass -in @('simple-code', 'tests', 'review')) { 'medium' } else { 'low' }
+    if ($QuotaRisk -eq 'HIGH' -and $effort -eq 'medium' -and $TaskClass -notin @('simple-code', 'tests')) { $effort = 'low' }
+    $inventory = Read-RuntimeModelInventory $RuntimeModels
+    $selection = Select-RuntimeModel $inventory $RequestedModel $effort
     $decision = 'delegate'
     $reason = 'bounded_low_complexity_task'
 
     if ($TaskClass -eq 'risky') {
-      $decision = 'coordinator'
-      $reason = 'risk_requires_coordinator'
+      $decision = 'coordinator'; $reason = 'risk_requires_coordinator'
     } elseif ($Health -eq 'CRITICAL') {
-      $decision = 'coordinator'
-      $reason = 'health_advises_no_new_worker'
+      $decision = 'coordinator'; $reason = 'health_advises_no_new_worker'
     } elseif ($active.Count -ge $MaxConcurrentWorkers) {
-      $decision = 'coordinator'
-      $reason = 'concurrency_budget_reached'
+      $decision = 'coordinator'; $reason = 'concurrency_budget_reached'
     } elseif ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
-      $decision = 'coordinator'
-      $reason = 'single_writer_lease_active'
+      $decision = 'coordinator'; $reason = 'single_writer_lease_active'
+    } elseif (-not $selection.selected) {
+      $decision = 'coordinator'; $reason = $selection.reason
     }
 
     if ($AccessMode -eq 'write') {
+      $head = Get-HeadState
+      if ($head.mode -eq 'detached') { $decision = 'coordinator'; $reason = 'detached_head_write_unsupported' }
+      if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) {
+        $decision = 'coordinator'; $reason = 'workspace_identity_unverified'
+      } elseif (-not $MutationAttributionVerified -or -not $MutationAttributionId) {
+        $decision = 'coordinator'; $reason = 'mutation_attribution_unverified'
+      } else {
+        Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
+      }
       foreach ($scopeItem in $scopes) {
-        if (Test-GlobalLockPath $scopeItem) {
-          $decision = 'coordinator'
-          $reason = 'global_lock_scope'
-        }
+        if (Test-GlobalLockPath $scopeItem) { $decision = 'coordinator'; $reason = 'global_lock_scope' }
+        if (Test-ScopeReparseRisk $scopeItem) { $decision = 'coordinator'; $reason = 'reparse_scope_risk' }
       }
       $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
-      if ($dirty) {
-        $decision = 'coordinator'
-        $reason = 'same_folder_write_requires_clean_tree'
-      }
+      if ($dirty) { $decision = 'coordinator'; $reason = 'same_folder_write_requires_clean_tree' }
     }
 
-    if ($QuotaRisk -eq 'HIGH' -and $effort -eq 'medium' -and $TaskClass -notin @('simple-code', 'tests')) {
-      $effort = 'low'
+    $reuse = @()
+    if ($selection.selected) {
+      $reuse = @($state.workers.Values | Where-Object {
+        $_.status -eq 'idle' -and $_.repository_id -eq $repositoryId -and
+        $_.role -eq $role -and $_.requested_model -eq $selection.model -and $_.access_mode -eq $AccessMode
+      } | Select-Object -First 1)
     }
-
-    $reuse = @($state.workers.Values | Where-Object {
-      $_.status -eq 'idle' -and $_.repository_id -eq $repositoryId -and
-      $_.role -eq $role -and $_.requested_model -eq $model -and $_.access_mode -eq $AccessMode
-    } | Select-Object -First 1)
-
     Write-GovernorOutput @{
       ok = $true
       action = 'plan'
       task_id = $task
+      repository_id = $repositoryId
+      workspace_id = $workspaceId
       decision = $decision
       reason = $reason
       worker_role = $role
-      requested_model = $model
+      requested_model = $selection.model
+      model_selection_reason = $selection.reason
+      model_inventory_hash = $inventory.hash
+      model_inventory_index = $selection.index
       reasoning_effort = $effort
       access_mode = $AccessMode
       scopes = $scopes
@@ -402,32 +685,37 @@ try {
   $lock = Acquire-StateLock
   try {
     $state = Read-State
-    $now = [DateTimeOffset]::UtcNow.ToString('o')
+    $nowOffset = [DateTimeOffset]::UtcNow
+    $now = $nowOffset.ToString('o')
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
 
     if ($Action -eq 'lease') {
       $worker = Normalize-Identifier $WorkerId 'invalid_worker_id'
       $scopes = @(Get-NormalizedScopes)
       $active = @(Get-ActiveLeases $state)
-      $existingLease = if ($state.leases.ContainsKey($task)) { $state.leases[$task] } else { $null }
-      if ($existingLease -and $existingLease.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction')) {
-        if ($existingLease.worker_id -eq $worker) {
-          Write-GovernorOutput @{ ok = $true; action = 'lease'; task_id = $task; worker_id = $worker; idempotent = $true }
-          exit 0
-        }
+      if ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         Throw-GovernorError "task_already_leased"
       }
       if ($active.Count -ge $MaxConcurrentWorkers) { Throw-GovernorError "concurrency_budget_reached" }
       if ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
         Throw-GovernorError "single_writer_lease_active"
       }
+      $head = Get-HeadState
       if ($AccessMode -eq 'write') {
+        if ($head.mode -eq 'detached') { Throw-GovernorError "detached_head_write_unsupported" }
+        if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) { Throw-GovernorError "workspace_identity_unverified" }
+        if (-not $MutationAttributionVerified -or -not $MutationAttributionId) { Throw-GovernorError "mutation_attribution_unverified" }
+        Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
         $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
         if ($dirty) { Throw-GovernorError "same_folder_write_requires_clean_tree" }
         foreach ($scopeItem in $scopes) {
           if (Test-GlobalLockPath $scopeItem) { Throw-GovernorError "global_lock_scope" }
+          if (Test-ScopeReparseRisk $scopeItem) { Throw-GovernorError "reparse_scope_risk" }
         }
       }
+      $inventory = Read-RuntimeModelInventory $RuntimeModels
+      $selection = Select-RuntimeModel $inventory $RequestedModel $ReasoningEffort
+      if (-not $selection.selected) { Throw-GovernorError $selection.reason }
 
       $attempts = 1
       $corrections = 0
@@ -439,17 +727,21 @@ try {
       }
       if ($attempts -gt $MaxTotalAttempts) { Throw-GovernorError "attempt_budget_reached" }
 
-      $baseCommit = Invoke-Git @('rev-parse', 'HEAD')
-      $branchHash = Get-TextHash (Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD'))
-      $baselineStatusHash = Get-TextHash (Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all'))
-      $model = if ($RequestedModel) { $RequestedModel } else { 'gpt-5.6-luna' }
+      $baseCommit = $head.commit
+      $baselineFingerprint = Get-WorkspaceFingerprint $baseCommit
+      $leaseIdentifier = [guid]::NewGuid().ToString('N')
+      $fencing = [guid]::NewGuid().ToString('N')
+      $expiresAt = $nowOffset.AddMinutes($LeaseMinutes).ToString('o')
       $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
-      $state.tasks[$task] = @{
+      $attributionHash = if ($MutationAttributionId) { Get-TextHash $MutationAttributionId } else { $null }
+      $taskRecord = @{
         task_id = $task
         repository_id = $repositoryId
+        workspace_id = $workspaceId
         base_commit = $baseCommit
-        branch_hash = $branchHash
-        baseline_status_hash = $baselineStatusHash
+        head_mode = $head.mode
+        reference_hash = $head.reference_hash
+        baseline_fingerprint = $baselineFingerprint
         access_mode = $AccessMode
         scopes = $scopes
         attempts = $attempts
@@ -458,38 +750,59 @@ try {
         created_at = $createdAt
         updated_at = $now
       }
-      $state.workers[$worker] = @{
+      $workerRecord = @{
         worker_id = $worker
         repository_id = $repositoryId
+        workspace_id = $workspaceId
         role = $role
-        requested_model = $model
+        requested_model = $selection.model
         effective_model = if ($EffectiveModel) { $EffectiveModel } else { $null }
         model_verification = if ($EffectiveModel) { 'reported' } else { 'runtime_not_exposed' }
+        model_inventory_hash = $inventory.hash
+        model_inventory_index = $selection.index
         reasoning_effort = $ReasoningEffort
         access_mode = $AccessMode
         status = 'leased'
         updated_at = $now
       }
-      $state.leases[$task] = @{
+      $leaseRecord = @{
         task_id = $task
+        lease_id = $leaseIdentifier
+        fencing_token = $fencing
         worker_id = $worker
         repository_id = $repositoryId
+        workspace_id = $workspaceId
+        mutation_attribution_hash = $attributionHash
+        mutation_attribution_verified = [bool]$MutationAttributionVerified
         base_commit = $baseCommit
-        branch_hash = $branchHash
-        baseline_status_hash = $baselineStatusHash
+        head_mode = $head.mode
+        reference_hash = $head.reference_hash
+        baseline_fingerprint = $baselineFingerprint
         access_mode = $AccessMode
         scopes = $scopes
         status = 'working'
         created_at = $now
         updated_at = $now
+        expires_at = $expiresAt
       }
+      $state.tasks[$task] = $taskRecord
+      $state.workers[$worker] = $workerRecord
+      $state.leases[$task] = $leaseRecord
       Write-State $state
       Write-GovernorOutput @{
         ok = $true
         action = 'lease'
         task_id = $task
         worker_id = $worker
+        repository_id = $repositoryId
+        workspace_id = $workspaceId
+        lease_id = $leaseIdentifier
+        fencing_token = $fencing
+        expires_at = $expiresAt
         base_commit = $baseCommit
+        selected_model = $selection.model
+        model_inventory_hash = $inventory.hash
+        model_inventory_index = $selection.index
         attempt = $attempts
         max_attempts = $MaxTotalAttempts
         max_delegation_depth = 1
@@ -500,10 +813,29 @@ try {
 
     if (-not $state.leases.ContainsKey($task)) { Throw-GovernorError "lease_not_found" }
     $lease = $state.leases[$task]
-    if ($WorkerId -and $lease.worker_id -ne $WorkerId) { Throw-GovernorError "worker_mismatch" }
+    Assert-LeaseCredentials $lease -AllowExpiredRelease:($Action -eq 'release')
+    if ($lease.repository_id -ne $repositoryId -or $lease.workspace_id -ne $workspaceId) {
+      Throw-GovernorError "workspace_identity_mismatch"
+    }
+
+    if ($Action -eq 'renew') {
+      if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification', 'verified')) { Throw-GovernorError "lease_not_renewable" }
+      $lease.updated_at = $now
+      $lease.expires_at = $nowOffset.AddMinutes($LeaseMinutes).ToString('o')
+      $state.tasks[$task].updated_at = $now
+      Write-State $state
+      Write-GovernorOutput @{ ok = $true; action = 'renew'; task_id = $task; lease_id = $lease.lease_id; expires_at = $lease.expires_at }
+      exit 0
+    }
 
     if ($Action -eq 'result') {
       if ($lease.status -notin @('working', 'needs_correction')) { Throw-GovernorError "lease_not_working" }
+      if ($lease.access_mode -eq 'write') {
+        if (-not $MutationAttributionVerified -or -not $MutationAttributionId) { Throw-GovernorError "mutation_attribution_unverified" }
+        if ((Get-TextHash $MutationAttributionId) -ne $lease.mutation_attribution_hash) { Throw-GovernorError "mutation_attribution_mismatch" }
+      }
+      $resultFingerprint = Get-WorkspaceFingerprint ([string]$lease.base_commit)
+      $lease.result_fingerprint = $resultFingerprint
       $lease.status = 'awaiting_verification'
       $lease.updated_at = $now
       $state.tasks[$task].status = 'awaiting_verification'
@@ -521,6 +853,7 @@ try {
         task_id = $task
         worker_id = $lease.worker_id
         status = 'awaiting_verification'
+        result_fingerprint_recorded = $true
         worker_claims_are_untrusted = $true
       }
       exit 0
@@ -528,27 +861,25 @@ try {
 
     if ($Action -eq 'verify') {
       if ($lease.status -ne 'awaiting_verification') { Throw-GovernorError "result_not_ready" }
+      if (-not $lease.result_fingerprint) { Throw-GovernorError "result_fingerprint_missing" }
+      $currentFingerprint = Get-WorkspaceFingerprint ([string]$lease.base_commit)
+      if ($currentFingerprint -ne $lease.result_fingerprint) { Throw-GovernorError "workspace_changed_after_result" }
+      $head = Get-HeadState
+      if ($head.mode -ne $lease.head_mode -or $head.reference_hash -ne $lease.reference_hash) { Throw-GovernorError "head_identity_mismatch" }
       $baseCommit = [string]$lease.base_commit
-      $currentBranchHash = Get-TextHash (Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD'))
-      if ($currentBranchHash -ne $lease.branch_hash) { Throw-GovernorError "branch_mismatch" }
       & git -C $script:RepositoryRoot merge-base --is-ancestor $baseCommit HEAD 2>$null
       if ($LASTEXITCODE -ne 0) { Throw-GovernorError "base_commit_mismatch" }
       $changed = @()
       if ($lease.access_mode -eq 'read') {
-        $currentStatusHash = Get-TextHash (Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all'))
-        if ($currentStatusHash -ne $lease.baseline_status_hash) {
-          Throw-GovernorError "read_worker_modified_workspace"
-        }
+        if ($currentFingerprint -ne $lease.baseline_fingerprint) { Throw-GovernorError "read_worker_modified_workspace" }
       } else {
         $changed = @(Get-TaskChanges $baseCommit)
         if ($changed.Count -eq 0) { Throw-GovernorError "no_changes_detected" }
-        $outOfScope = @($changed | Where-Object {
-          -not (Test-PathInScope -Path $_ -AllowedScopes @($lease.scopes))
-        })
+        $outOfScope = @($changed | Where-Object { -not (Test-PathInScope -Path $_ -AllowedScopes @($lease.scopes)) })
         $globalLocks = @($changed | Where-Object { Test-GlobalLockPath -Path $_ })
+        $reparseChanges = @($changed | Where-Object { Test-ReparsePath -Path $_ })
         if ($outOfScope.Count -gt 0) { Throw-GovernorError "out_of_scope_changes" }
         if ($globalLocks.Count -gt 0) { Throw-GovernorError "global_lock_change" }
-        $reparseChanges = @($changed | Where-Object { Test-ReparsePath -Path $_ })
         if ($reparseChanges.Count -gt 0) { Throw-GovernorError "reparse_path_change" }
       }
       if (-not $VerificationPassed) { Throw-GovernorError "verification_evidence_required" }
@@ -568,6 +899,9 @@ try {
         changed_files = $changed
         changed_file_count = $changed.Count
         scope_valid = $true
+        workspace_identity_valid = $true
+        mutation_attribution_valid = [bool]$lease.mutation_attribution_verified
+        result_fingerprint_valid = $true
         base_commit_valid = $true
         verification_passed = $true
       }
@@ -575,25 +909,19 @@ try {
     }
 
     if ($Action -eq 'correct') {
+      if ($lease.status -ne 'awaiting_verification') { Throw-GovernorError "result_not_ready" }
       $corrections = [int]$state.tasks[$task].corrections + 1
       if ($corrections -gt $MaxCorrections) { Throw-GovernorError "correction_budget_reached" }
       $state.tasks[$task].corrections = $corrections
       $state.tasks[$task].status = 'needs_correction'
       $state.tasks[$task].updated_at = $now
       $lease.status = 'needs_correction'
+      $lease.result_fingerprint = $null
       $lease.updated_at = $now
       $state.workers[$lease.worker_id].status = 'leased'
       $state.workers[$lease.worker_id].updated_at = $now
       Write-State $state
-      Write-GovernorOutput @{
-        ok = $true
-        action = 'correct'
-        task_id = $task
-        worker_id = $lease.worker_id
-        correction = $corrections
-        max_corrections = $MaxCorrections
-        reuse_same_worker = $true
-      }
+      Write-GovernorOutput @{ ok = $true; action = 'correct'; task_id = $task; worker_id = $lease.worker_id; correction = $corrections; max_corrections = $MaxCorrections; reuse_same_worker = $true }
       exit 0
     }
 
@@ -607,16 +935,7 @@ try {
       $state.workers[$lease.worker_id].status = 'idle'
       $state.workers[$lease.worker_id].updated_at = $now
       Write-State $state
-      Write-GovernorOutput @{
-        ok = $true
-        action = 'accept'
-        task_id = $task
-        worker_id = $lease.worker_id
-        status = 'accepted'
-        worker_reusable = $true
-        automatic_merge = $false
-        automatic_cleanup = $false
-      }
+      Write-GovernorOutput @{ ok = $true; action = 'accept'; task_id = $task; worker_id = $lease.worker_id; status = 'accepted'; worker_reusable = $true; automatic_merge = $false; automatic_cleanup = $false }
       exit 0
     }
 
@@ -628,14 +947,7 @@ try {
       $state.workers[$lease.worker_id].status = 'retired'
       $state.workers[$lease.worker_id].updated_at = $now
       Write-State $state
-      Write-GovernorOutput @{
-        ok = $true
-        action = 'retire'
-        task_id = $task
-        worker_id = $lease.worker_id
-        status = 'retired'
-        automatic_cleanup = $false
-      }
+      Write-GovernorOutput @{ ok = $true; action = 'retire'; task_id = $task; worker_id = $lease.worker_id; status = 'retired'; automatic_cleanup = $false }
       exit 0
     }
 
@@ -647,14 +959,7 @@ try {
       $state.workers[$lease.worker_id].status = 'idle'
       $state.workers[$lease.worker_id].updated_at = $now
       Write-State $state
-      Write-GovernorOutput @{
-        ok = $true
-        action = 'release'
-        task_id = $task
-        worker_id = $lease.worker_id
-        automatic_merge = $false
-        automatic_cleanup = $false
-      }
+      Write-GovernorOutput @{ ok = $true; action = 'release'; task_id = $task; worker_id = $lease.worker_id; automatic_merge = $false; automatic_cleanup = $false }
       exit 0
     }
   } finally {

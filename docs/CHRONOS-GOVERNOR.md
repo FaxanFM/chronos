@@ -1,24 +1,81 @@
 # Chronos Governor
 
-Chronos Governor is an optional companion to Chronos health inspection. It lets
-the current Codex coordinator hand off a small repository task to a native worker
-while retaining control of scope, concurrency, verification, and acceptance.
+Chronos Governor is an optional, local coordination state machine for bounded
+Codex worker delegation. The current coordinator retains architecture,
+integration, verification, and acceptance. Governor is not a background
+service, autonomous loop, source-control replacement, or merge system.
 
-It is not a background service, unrestricted autonomous loop, source-control
-replacement, or automatic merge system.
+## Runtime Model Discovery
 
-## Good Worker Tasks
+Governor has no preferred or hardcoded worker model. The coordinator reads the
+models and reasoning efforts advertised by the active native worker runtime and
+passes them in advertised order:
 
-- Repository exploration and reference finding.
-- Documentation and formatting changes.
-- Focused test creation or execution.
-- Mechanical refactoring.
-- Small localized code changes with clear interfaces.
-- Independent review of a bounded change.
+```text
+model-a=low,medium,high;model-b=low,medium
+```
 
-Architecture, security-sensitive work, payments, authentication, migrations,
-dependency manifests, CI, releases, deployment, and irreversible operations
-remain with the coordinator.
+An explicitly requested model must be present and support the requested effort.
+Without an explicit request, Governor selects the first compatible advertised
+entry. It returns the inventory hash, selected index, and reason so the choice is
+deterministic and auditable. Missing, malformed, stale, or incompatible
+inventories return the work to the coordinator.
+
+## Identity Model
+
+Governor canonicalizes Windows paths before hashing them.
+
+- `repository_id` hashes the canonical Git common directory. Linked worktrees
+  share this identity and therefore share writer serialization.
+- `workspace_id` hashes the canonical worktree root plus common Git directory.
+  Distinct worktrees have distinct workspace identities.
+- Junction or equivalent paths that resolve to the same worktree produce the
+  same workspace identity.
+
+No absolute path is persisted. Custom state paths are disabled because a second
+state file could bypass repository-wide writer exclusion.
+
+## Write Safety
+
+A same-folder write lease is allowed only when all of these checks pass:
+
+1. The current runtime model inventory is valid.
+2. The expected workspace identity exactly matches the computed identity.
+3. The runtime can bind every mutation to the supplied opaque attribution ID.
+4. The tree is clean, `HEAD` is attached, and scopes are repository relative.
+5. No writer is active anywhere in the repository's linked worktrees.
+6. No scope targets a reparse point or coordinator-only global-lock file.
+
+When runtime mutation attribution is unavailable, write work stays with the
+coordinator. Read-only delegation remains available. Worker claims are never
+treated as attribution evidence.
+
+At `result`, Governor records a content fingerprint of `HEAD`, tracked changes,
+and untracked file hashes. `verify` fails when anything changes after that
+fingerprint, preventing a later coordinator or worker mutation from being
+silently attributed to the result.
+
+## Leases And Locks
+
+```text
+plan -> lease -> renew as needed -> result -> verify -> accept
+                  |                         |
+                  +-> correct once --------+
+                  +-> retire or release
+```
+
+Every lease has an opaque lease ID, fencing token, expiry, repository identity,
+workspace identity, base commit, scope, and attribution hash. Lifecycle actions
+must present the matching lease ID and fencing token. An expired lease cannot be
+renewed or used; the coordinator may explicitly release it without deleting any
+workspace content.
+
+State writes use an owner-identified lock directory and atomic file replacement.
+A lock records the process ID, process start time, lock ID, and timestamp. A live
+owner is never displaced. An old malformed or dead-owner lock is recovered only
+after the stale interval and an atomic quarantine rename. Release removes a lock
+only when its lock ID still matches, so an older process cannot delete a newer
+owner's lock.
 
 ## Default Limits
 
@@ -26,6 +83,7 @@ remain with the coordinator.
 | --- | --- |
 | Active workers | 2 |
 | Active writers per repository | 1 |
+| Lease duration | 30 minutes |
 | Total attempts per task | 3 |
 | Corrections per worker | 1 |
 | Delegation depth | 1 |
@@ -33,71 +91,45 @@ remain with the coordinator.
 | Final coordinator verification | Required |
 | Automatic merge or cleanup | Disabled |
 
-Governor prefers a native `gpt-5.6-luna` worker. Low reasoning is used for
-mechanical work, documentation, exploration, and command execution. Medium is
-used for simple code, focused tests, and substantial review. A model is used only
-when the current native worker runtime advertises it.
+Architecture, authentication, payments, migrations, dependency manifests, CI,
+releases, deployment, destructive operations, and ambiguous work remain with
+the coordinator.
 
-## Same-Repository Writer
+## Troubleshooting
 
-Write delegation requires a clean current working tree and an exact
-repository-relative scope. Governor rejects absolute paths, traversal, `.git`,
-`.chronos`, repository-wide wildcards, and a second active writer.
+Run `governor.ps1 -Action status` to inspect opaque counts and identities.
 
-Dependency manifests, lockfiles, migrations, Docker configuration, and
-`.github/**` are global locks and stay with the coordinator. After a worker
-returns, Governor checks the actual Git changes against the stored base commit
-and declared scope. Worker claims alone are never accepted.
+- `model_inventory_unavailable`: refresh the active spawn tool metadata and
+  pass its current inventory. Do not reuse a catalog from another task.
+- `workspace_identity_unverified`: call `status` in the intended worktree and
+  pass that exact workspace ID.
+- `mutation_attribution_unverified`: keep the write with the coordinator unless
+  the runtime exposes reliable attribution.
+- `state_locked`: another live state writer owns the lock. Wait briefly. Do not
+  delete it manually.
+- `lease_expired`: explicitly release the abandoned lease with coordinator
+  acceptance, then plan again.
+- `state_invalid_json`: preserve the state file for diagnosis. Governor will not
+  overwrite malformed state.
+- `workspace_changed_after_result`: inspect all changes and take over locally;
+  the original result can no longer be attributed safely.
 
-Native Codex may isolate a worker in an internal forked workspace. Governor does
-not build a competing checkout system and does not merge or delete that work.
-
-## Lifecycle
-
-```text
-plan -> spawn or resume -> lease -> work -> result -> verify -> accept
-                                      |                 |
-                                      +-> correct once -+
-                                      +-> retire
-```
-
-If planning recommends `coordinator`, the user's objective continues locally;
-Governor does not block the task. Critical health advises against adding a new
-worker but never terminates active work.
-
-Completed native workers should be closed to release concurrency. Their
-resumable IDs may remain idle in metadata and can be resumed for a compatible
-future task.
+Interrupted `.tmp-*` files do not replace valid state. State version 1 migrates
+only when it has no active leases; an active legacy lease fails closed.
 
 ## State And Privacy
 
-State defaults to Git's private metadata path:
+State lives at `chronos/governor-state.json` under Git's canonical common
+directory. It contains only opaque IDs, hashes, base commits, relative scopes,
+model labels, counters, status, and timestamps. It never stores prompts,
+responses, objectives, source, diffs, commands, tool arguments, tool output,
+credentials, usernames, environment values, or absolute paths. Chronos does not
+transmit this state or create telemetry.
 
-```text
-.git/chronos/governor-state.json
-```
+## Enforcement Boundary
 
-Linked worktrees resolve through Git's own metadata path. The file is written
-under a short exclusive lock and replaced atomically.
-
-State contains only opaque task and worker IDs, a repository hash, base commit,
-relative scopes, role, access mode, model labels, reasoning effort, status,
-counters, timestamps, and changed-file count.
-
-It never contains prompts, responses, objectives, source, diffs, commands, tool
-arguments, tool output, credentials, usernames, environment values, absolute
-paths, or personal data. Chronos does not transmit it or clean it automatically.
-
-## Honest Enforcement Boundary
-
-The PowerShell governor enforces local leases, budgets, state integrity, Git
-scope validation, and explicit acceptance. The companion skill controls how the
-coordinator invokes native Codex workers.
-
-Only Codex's runtime can technically remove tools from a worker. Governor places
-`Do not spawn or delegate to another agent` in every assignment, fixes depth at
-one, and requires the coordinator to reject violations, but it does not present
-that prompt contract as a security sandbox.
-
-Requested model identity comes from the spawn request. When the runtime does not
-report the effective model, Governor marks it unverified instead of guessing.
+The script enforces local leases, fencing, budgets, identity checks, state
+integrity, Git scope validation, and explicit acceptance. Only the Codex runtime
+can enforce worker tool permissions and report the worker's effective model.
+Governor records an effective model as unverified when the runtime does not
+report it and never invents that evidence.

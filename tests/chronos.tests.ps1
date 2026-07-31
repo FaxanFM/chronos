@@ -12,7 +12,9 @@ $fixtureHome = Join-Path $testRoot "fixture-home"
 $missingHome = Join-Path $testRoot "missing-home"
 $helperWarningHome = Join-Path $testRoot "helper-warning-home"
 $helperCriticalHome = Join-Path $testRoot "helper-critical-home"
+$helperFalsePositiveHome = Join-Path $testRoot "helper-false-positive-home"
 $tokenHealthHome = Join-Path $testRoot "token-health-home"
+$tokenIntegrityHome = Join-Path $testRoot "token-integrity-home"
 $largeTailHome = Join-Path $testRoot "large-tail-home"
 $aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
@@ -26,7 +28,8 @@ function Assert-Match($value, $pattern, $message) {
 
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
-    $helperCriticalHome, $tokenHealthHome, $largeTailHome, $aggregateOverflowHome `
+    $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
+    $largeTailHome, $aggregateOverflowHome `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -121,6 +124,71 @@ try {
     "A later successful sandbox launch should clear the unusable state."
   Assert-Match $helperRecoveredOutput " pcRestartAdvised=false " `
     "Recovered filesystem helper should not continue advising a PC restart."
+
+  Set-Content -LiteralPath (Join-Path $helperFalsePositiveHome "sandbox.log") -Value @(
+    "[$markerTimestamp codex.exe] INFO user text: helper copy failed for command-runner: remove stale helper destination",
+    "[$markerTimestamp codex.exe] DEBUG payload=CreateProcessWithLogonW failed: 5",
+    "[$markerTimestamp codex.exe] UNSUCCESS: contains SUCCESS: but is not a launch event"
+  )
+  $helperFalsePositiveOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $helperFalsePositiveHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos helper false-positive inspection failed." }
+  Assert-Match $helperFalsePositiveOutput " fsHelper=HEALTHY " `
+    "Marker text embedded in unrelated log messages must not change helper health."
+  Assert-Match $helperFalsePositiveOutput " fsHelperCopyFailure=false " `
+    "Embedded copy-marker text produced a false positive."
+  Assert-Match $helperFalsePositiveOutput " fsHelperLaunchFailure=false " `
+    "Embedded launch-marker text produced a false positive."
+
+  $integritySessionDay = Join-Path (Join-Path (Join-Path $tokenIntegrityHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $integritySessionDay = Join-Path $integritySessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $integritySessionDay -Force | Out-Null
+  $integrityPath = Join-Path $integritySessionDay "rollout-integrity-fixture.jsonl"
+  function New-IntegrityTokenRecord([string]$Timestamp, [long]$InputTokens) {
+    @{
+      timestamp = $Timestamp
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = $InputTokens
+            cached_input_tokens = 0
+            cache_write_input_tokens = 0
+            output_tokens = 1000
+            reasoning_output_tokens = 100
+            total_tokens = $InputTokens + 1000
+          }
+          last_token_usage = @{
+            total_tokens = 1000
+          }
+        }
+      }
+    } | ConvertTo-Json -Compress -Depth 8
+  }
+  $firstIntegrityRecord = New-IntegrityTokenRecord "2026-07-31T12:00:02Z" 1000000L
+  $outOfOrderIntegrityRecord = New-IntegrityTokenRecord "2026-07-31T12:00:01Z" 3000000L
+  [System.IO.File]::WriteAllText(
+    $integrityPath,
+    $firstIntegrityRecord + "`n" + $firstIntegrityRecord + "`n" +
+      '{"timestamp":"2026-07-31T12:00:03Z","type":"event_msg","payload":{"type":"token_count"' + "`n" +
+      $outOfOrderIntegrityRecord + "`n" +
+      '{"type":"event_msg","payload":{"type":"token_count"',
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $integrityOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $tokenIntegrityHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos rollout-integrity inspection failed." }
+  Assert-Match $integrityOutput " tokenFiles=1 " "A valid cumulative record should survive malformed neighbors."
+  Assert-Match $integrityOutput " tokenSamples=2 " "Duplicate and incomplete token records should not be counted as samples."
+  Assert-Match $integrityOutput " tokenSessionInputM=3([.,]0)? " `
+    "The greatest cumulative total should win even when records are out of order."
+  Assert-Match $integrityOutput " tokenMalformedRecords=1 " "Malformed complete rollout records should be counted."
+  Assert-Match $integrityOutput " tokenDuplicateRecords=1 " "Duplicate rollout records should be counted and ignored."
+  Assert-Match $integrityOutput " tokenOutOfOrderRecords=1 " "Out-of-order rollout timestamps should be reported."
+  Assert-Match $integrityOutput " tokenTailIncompleteFiles=1 " "A partially written final rollout record should be reported and ignored."
 
   $sessionDay = Join-Path (Join-Path (Join-Path $tokenHealthHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")

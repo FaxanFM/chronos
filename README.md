@@ -19,9 +19,10 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Recommends the safest next step for the current condition.
 - Routes exploration, documentation, tests, mechanical edits, simple code, and
   focused verification to bounded Codex workers.
-- Enforces two-worker concurrency, one same-repository writer, clean-tree write
-  leases, exact file scopes, attempt and correction budgets, and final
-  coordinator verification.
+- Discovers worker models from the active runtime instead of assuming a model.
+- Enforces canonical workspace identity, one writer across linked worktrees,
+  fenced expiring leases, mutation attribution, exact scopes, result
+  fingerprints, attempt budgets, and final coordinator verification.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or
 its SQLite databases, terminate processes, or block active work.
@@ -57,15 +58,20 @@ To delegate a small repository task, ask:
 Use Chronos Governor to delegate this bounded low-complexity task.
 ```
 
-Governor prefers `gpt-5.6-luna` at low or medium reasoning, sends focused
-assignments without the full parent conversation, and keeps architecture,
-security-sensitive work, integration, publishing, and final acceptance with the
-coordinator.
+Governor validates the worker models advertised by the active runtime and
+selects deterministically from that inventory. It sends focused assignments
+without the full parent conversation and keeps architecture, security-sensitive
+work, unverifiable writes, integration, publishing, and final acceptance with
+the coordinator.
 
 See [Codex Token and Quota Findings](docs/TOKEN-QUOTA-FINDINGS.md) for the
 source-backed GPT-5.6 findings and conservative local settings.
 See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
+See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
+[Release Operations](docs/OPERATIONS.md), and
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.2 safety
+and release model.
 
 ## Self-service agents
 
@@ -89,13 +95,15 @@ will be added here as each agent is published.
 - Opens the known Codex diagnostic database read-only and never installs
   triggers, deletes rows, checkpoints, or vacuums it.
 - Reads only bounded 2 MiB tails of up to eight recently active rollout files for
-  structured aggregate token, effort, compaction, and subagent counts.
+  structured aggregate token, effort, compaction, subagent, and parser-integrity
+  counts.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
 - When Governor is invoked, stores only local coordination metadata inside
-  Git's private metadata directory: opaque IDs, a repository hash, base commit,
-  relative scopes, model labels, counters, status, and timestamps.
+  Git's private common metadata directory: opaque IDs, identity hashes, base
+  commit, relative scopes, model labels, lease fencing, counters, status, and
+  timestamps.
 - Never automatically merges, resets, cleans, deletes worktrees or branches, or
   accepts a worker result without coordinator verification.
 
