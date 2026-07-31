@@ -70,7 +70,7 @@ See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.2 safety
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.3 safety
 and release model.
 
 ## Self-service agents

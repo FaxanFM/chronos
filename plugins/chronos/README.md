@@ -68,7 +68,7 @@ The public [architecture](https://github.com/FaxanFM/chronos/blob/main/docs/ARCH
 [test coverage](https://github.com/FaxanFM/chronos/blob/main/docs/TEST-COVERAGE.md),
 [release operations](https://github.com/FaxanFM/chronos/blob/main/docs/OPERATIONS.md),
 and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/CALIBRATION-METHODOLOGY.md)
-describe the v0.5.2 engineering controls.
+describe the v0.5.3 engineering controls.
 
 ## Self-service agents
 

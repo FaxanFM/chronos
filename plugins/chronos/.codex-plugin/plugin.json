@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Check Codex degradation on Windows and govern bounded low-complexity worker delegation.",
   "author": {
     "name": "FaxanFM",

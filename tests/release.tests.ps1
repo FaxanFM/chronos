@@ -4,12 +4,35 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $builder = Join-Path $repoRoot "scripts\build-release.ps1"
 $manifestPath = Join-Path $repoRoot "plugins\chronos\.codex-plugin\plugin.json"
+$releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
 
 try {
+  $releaseWorkflow = Get-Content -Raw -LiteralPath $releaseWorkflowPath
+  foreach ($required in @(
+    'Require verified commit and annotated tag',
+    'tagObject.verification.verified',
+    'commit.commit.verification.verified',
+    'actions/attest@v4',
+    '--draft',
+    'gh release edit $env:GITHUB_REF_NAME --draft=false',
+    'gh release verify $env:GITHUB_REF_NAME',
+    'gh release verify-asset $env:GITHUB_REF_NAME'
+  )) {
+    if (-not $releaseWorkflow.Contains($required)) {
+      throw "Release workflow is missing supply-chain control: $required"
+    }
+  }
+  $draftIndex = $releaseWorkflow.IndexOf('gh release create')
+  $publishIndex = $releaseWorkflow.IndexOf('gh release edit $env:GITHUB_REF_NAME --draft=false')
+  $verifyIndex = $releaseWorkflow.IndexOf('gh release verify $env:GITHUB_REF_NAME')
+  if ($draftIndex -lt 0 -or $publishIndex -le $draftIndex -or $verifyIndex -le $publishIndex) {
+    throw "Release workflow must create a draft, publish it, and then verify it in that order."
+  }
+
   $firstOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $builder -Version $version -OutputDirectory $first 2>&1)
   if ($LASTEXITCODE -ne 0) { throw "First release build failed.`n$($firstOutput -join "`n")" }

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.3
+
+- Require GitHub-verified cryptographic signatures on both the release commit
+  and the signed annotated release tag.
+- Upload every release asset to a draft before publishing it once under
+  repository release immutability.
+- Verify the published immutable release and each attached asset in the release
+  workflow.
+- Document the separate guarantees provided by signatures, artifact
+  attestations, checksums, reproducible builds, and immutable releases.
+
+No runtime behavior, warning threshold, critical threshold, scoring weight,
+predictive claim, or calibration-sensitive behavior changed in this release.
+
 ## v0.5.2
 
 - Discover and validate worker models from the active runtime inventory.
