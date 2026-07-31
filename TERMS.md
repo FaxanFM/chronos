@@ -1,16 +1,21 @@
 # Terms of Use
 
-Effective July 16, 2026
+Effective July 31, 2026
 
 By installing or using Chronos, you agree to these terms.
 
 ## Purpose
 
-Chronos provides local resource-health information and conservative recovery guidance for long-running Codex sessions on Windows. It is not part of, endorsed by, or supported by OpenAI.
+Chronos provides local resource-health information, conservative recovery
+guidance, and optional bounded worker-governance assistance for Codex sessions
+on Windows. It is not part of, endorsed by, or supported by OpenAI.
 
 ## User control
 
-You remain responsible for reviewing recommendations and approving any optional cleanup. Save active work before taking recovery actions or restarting applications.
+You remain responsible for reviewing recommendations, worker changes,
+verification evidence, and final integration. Chronos does not automatically
+merge or clean worker changes. Save active work before taking recovery actions
+or restarting applications.
 
 ## Availability
 

@@ -1,7 +1,7 @@
 {
   "name": "chronos",
-  "version": "0.4.1",
-  "description": "Check process, diagnostic-log, and token-quota degradation during long-running Codex sessions on Windows.",
+  "version": "0.5.0",
+  "description": "Check Codex degradation on Windows and govern bounded low-complexity worker delegation.",
   "author": {
     "name": "FaxanFM",
     "url": "https://github.com/FaxanFM"
@@ -13,18 +13,19 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Chronos",
-    "shortDescription": "Keep long-running Codex sessions responsive.",
-    "longDescription": "Check Windows process, memory, handle, disk, Codex diagnostic-log, and token-quota health during long-running work, understand degradation, and apply conservative recovery guidance.",
+    "shortDescription": "Inspect Codex health and govern bounded workers.",
+    "longDescription": "Check Windows process, memory, handle, disk, diagnostic-log, and token-quota health, then optionally govern bounded low-complexity Codex workers with strict scope, concurrency, write, attempt, correction, privacy, and verification limits.",
     "developerName": "FaxanFM",
     "category": "Productivity",
-    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Guided recovery"],
+    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Bounded worker governance", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
       "Use Chronos to inspect current Codex resource health.",
       "Use Chronos to recommend the safest response to current Codex lag.",
-      "Use Chronos to explain current token and quota pressure."
+      "Use Chronos to explain current token and quota pressure.",
+      "Use Chronos Governor to delegate one bounded low-complexity repository task."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

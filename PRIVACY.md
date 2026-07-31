@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective July 29, 2026
+Effective July 31, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
 
@@ -14,13 +14,28 @@ For token and quota diagnostics, Chronos reads at most 2 MiB from the tail of ea
 
 Chronos does not read SQLite log bodies, process arguments, environment variables, user documents, browsing data, credentials, or unrelated file contents.
 
+When the user explicitly invokes Chronos Governor, it stores limited local
+coordination metadata in Git's private metadata directory. This may include
+opaque task and worker identifiers, a hash of the repository location, a base
+commit, repository-relative scopes, access mode, requested or reported model
+labels, reasoning effort, status, counters, and timestamps. Governor state does
+not contain assignment text, objectives, prompts, responses, source code, diffs,
+commands, tool arguments, tool output, environment variables, credentials,
+usernames, or absolute paths. It is not transmitted by Chronos.
+
 ## User control
 
-Health checks are read-only. Chronos does not create database triggers, delete rows, run checkpoints, vacuum databases, or alter Codex state. Any optional process cleanup requires clear user confirmation before it runs. Chronos does not automatically close the Codex desktop application or delete user files.
+Health checks are read-only. Chronos does not create database triggers, delete
+rows, run checkpoints, vacuum databases, or alter Codex state. Governor records
+coordination status but never automatically merges, resets, cleans, deletes
+worktrees or branches, closes Codex, terminates processes, or deletes user files.
 
 ## Retention
 
-Chronos creates no persistent logs, user profiles, background services, or scheduled tasks.
+Chronos health inspection creates no persistent logs, user profiles, background
+services, or scheduled tasks. Governor metadata remains local until the user or
+Git repository owner removes it. Chronos performs no automatic state or
+workspace cleanup.
 
 ## Changes
 

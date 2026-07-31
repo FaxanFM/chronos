@@ -2,7 +2,7 @@
 
 # Chronos
 
-Chronos is a lean, on-demand Codex plugin for Windows sessions that become slow after hours or days of parallel work.
+Chronos is a lean, on-demand Codex plugin for Windows sessions that become slow after hours or days of parallel work. Its optional Governor delegates bounded low-complexity repository work without turning Chronos into an autonomous agent loop.
 
 It checks current resource and diagnostic-log health, explains signs of degradation, and offers conservative recovery steps without continuous monitoring.
 
@@ -17,6 +17,11 @@ It checks current resource and diagnostic-log health, explains signs of degradat
   amplification from large contexts, high reasoning, subagents, and repeated
   compaction.
 - Recommends the safest next step for the current condition.
+- Routes exploration, documentation, tests, mechanical edits, simple code, and
+  focused verification to bounded Codex workers.
+- Enforces two-worker concurrency, one same-repository writer, clean-tree write
+  leases, exact file scopes, attempt and correction budgets, and final
+  coordinator verification.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or
 its SQLite databases, terminate processes, or block active work.
@@ -42,8 +47,21 @@ Use Chronos to inspect current Codex resource health.
 
 Chronos reports the current condition and recommends a proportionate response.
 
+To delegate a small repository task, ask:
+
+```text
+Use Chronos Governor to delegate this bounded low-complexity task.
+```
+
+Governor prefers `gpt-5.6-luna` at low or medium reasoning, sends focused
+assignments without the full parent conversation, and keeps architecture,
+security-sensitive work, integration, publishing, and final acceptance with the
+coordinator.
+
 See the public [Codex Token and Quota Findings](https://github.com/FaxanFM/chronos/blob/main/docs/TOKEN-QUOTA-FINDINGS.md)
 for the source-backed GPT-5.6 findings and conservative local settings.
+See the public [Chronos Governor](https://github.com/FaxanFM/chronos/blob/main/docs/CHRONOS-GOVERNOR.md)
+guide for routing, limits, contracts, state, and verification behavior.
 
 ## Self-service agents
 
@@ -60,7 +78,8 @@ will be added here as each agent is published.
 ## Safety and privacy
 
 - Runs only when requested.
-- Does not collect, transmit, or retain personal data.
+- Does not collect, transmit, or retain prompts, responses, source, diffs,
+  commands, tool output, credentials, usernames, absolute paths, or personal data.
 - Never blocks, pauses, or ends a Codex task.
 - Never terminates a process or deletes user files.
 - Opens the known Codex diagnostic database read-only and never installs
@@ -70,6 +89,11 @@ will be added here as each agent is published.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
+- When Governor is invoked, stores only local coordination metadata inside
+  Git's private metadata directory: opaque IDs, a repository hash, base commit,
+  relative scopes, model labels, counters, status, and timestamps.
+- Never automatically merges, resets, cleans, deletes worktrees or branches, or
+  accepts a worker result without coordinator verification.
 
 See the public [Privacy](https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md), [Terms](https://github.com/FaxanFM/chronos/blob/main/TERMS.md), and [Support](https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md) pages.
 

@@ -15,3 +15,6 @@ jobs:
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python
+      - name: Test Chronos Governor
+        shell: powershell
+        run: .\tests\governor.tests.ps1
