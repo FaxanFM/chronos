@@ -28,7 +28,11 @@ its SQLite databases, terminate processes, or block active work.
 
 ## Install in Codex
 
-Until Chronos is listed in the Plugins Directory, install it from its public marketplace:
+Until Chronos is listed in the Plugins Directory, ask Codex to:
+
+> **Analyze and install [FaxanFM/chronos](https://github.com/FaxanFM/chronos), then use Chronos Governor for appropriate low-complexity repository tasks.**
+
+Or install it manually from its public marketplace:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
