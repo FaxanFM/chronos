@@ -286,3 +286,5 @@ try {
     Remove-Item -LiteralPath $resolvedTest -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
+
+exit 0
