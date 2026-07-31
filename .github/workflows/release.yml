@@ -77,9 +77,21 @@ jobs:
           gh release edit $env:GITHUB_REF_NAME --draft=false
           if ($LASTEXITCODE -ne 0) { throw "Could not publish immutable release." }
 
-          gh release verify $env:GITHUB_REF_NAME
-          if ($LASTEXITCODE -ne 0) { throw "Immutable release verification failed." }
+          function Invoke-ReleaseVerification {
+            param([scriptblock]$Command, [string]$FailureMessage)
+            for ($attempt = 1; $attempt -le 12; $attempt++) {
+              & $Command
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($attempt -lt 12) { Start-Sleep -Seconds 5 }
+            }
+            throw $FailureMessage
+          }
+
+          Invoke-ReleaseVerification `
+            { gh release verify $env:GITHUB_REF_NAME } `
+            "Immutable release verification failed after waiting for its attestation."
           foreach ($asset in $assets) {
-            gh release verify-asset $env:GITHUB_REF_NAME $asset
-            if ($LASTEXITCODE -ne 0) { throw "Release asset verification failed: $asset" }
+            Invoke-ReleaseVerification `
+              { gh release verify-asset $env:GITHUB_REF_NAME $asset } `
+              "Release asset verification failed: $asset"
           }

@@ -19,6 +19,9 @@ try {
     'actions/attest@v4',
     '--draft',
     'gh release edit $env:GITHUB_REF_NAME --draft=false',
+    'function Invoke-ReleaseVerification',
+    'for ($attempt = 1; $attempt -le 12; $attempt++)',
+    'Start-Sleep -Seconds 5',
     'gh release verify $env:GITHUB_REF_NAME',
     'gh release verify-asset $env:GITHUB_REF_NAME'
   )) {
