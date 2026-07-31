@@ -476,8 +476,10 @@ function Get-QuotaHealth {
   if ($health.CacheWriteObserved) { $advice.Add("cache-write-risk") }
   if ($advice.Count -gt 0) { $health.Advice = $advice -join "," }
 
+  $cacheWriteThreshold = [math]::Max(1.0, [double]$inputTokens * 0.25)
+
   if (
-    $cacheWriteTokens -ge [math]::Max(1, $inputTokens * 0.25) -or
+    $cacheWriteTokens -ge $cacheWriteThreshold -or
     $health.UltraSessions -gt 0 -or $health.SpawnCalls -ge 4 -or
     $health.Compactions -ge 3 -or
     ($health.HighEffortSessions -gt 0 -and $health.MaxContextPercent -ge 60) -or
@@ -514,7 +516,7 @@ function Get-CpuBaseline($processes) {
 
 function Get-CpuDelta($process, $baseline) {
   if (-not $baseline.ContainsKey($process.Id) -or $null -eq $process.CPU) { return 0 }
-  [math]::Max(0, [double]$process.CPU - $baseline[$process.Id])
+  [math]::Max(0.0, [double]$process.CPU - $baseline[$process.Id])
 }
 
 function Get-FreeDiskGB($path) {

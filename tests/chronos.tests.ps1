@@ -14,6 +14,7 @@ $helperWarningHome = Join-Path $testRoot "helper-warning-home"
 $helperCriticalHome = Join-Path $testRoot "helper-critical-home"
 $tokenHealthHome = Join-Path $testRoot "token-health-home"
 $largeTailHome = Join-Path $testRoot "large-tail-home"
+$aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -25,7 +26,8 @@ function Assert-Match($value, $pattern, $message) {
 
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
-    $helperCriticalHome, $tokenHealthHome, $largeTailHome -Force | Out-Null
+    $helperCriticalHome, $tokenHealthHome, $largeTailHome, $aggregateOverflowHome `
+    -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
@@ -263,6 +265,50 @@ try {
     "A bounded tail read should support rollout files larger than Int32.MaxValue."
   Assert-Match $largeTailOutput " tokenSessionInputM=3000([.,]0)? " `
     "Token totals larger than Int32.MaxValue should remain 64-bit."
+
+  $aggregateSessionDay = Join-Path (Join-Path (Join-Path $aggregateOverflowHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $aggregateSessionDay = Join-Path $aggregateSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $aggregateSessionDay -Force | Out-Null
+  foreach ($index in 1..8) {
+    $aggregateTokenRecord = @{
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = 3000000000000000000L
+            cached_input_tokens = 2400000000000000000L
+            cache_write_input_tokens = 0
+            output_tokens = 100000
+            reasoning_output_tokens = 10000
+            total_tokens = 3000000000000100000L
+          }
+          last_token_usage = @{
+            input_tokens = 79000
+            cached_input_tokens = 70000
+            cache_write_input_tokens = 0
+            output_tokens = 1000
+            reasoning_output_tokens = 100
+            total_tokens = 80000
+          }
+        }
+      }
+    } | ConvertTo-Json -Compress -Depth 8
+    Set-Content -LiteralPath (Join-Path $aggregateSessionDay "rollout-$index.jsonl") `
+      -Value $aggregateTokenRecord
+  }
+
+  $aggregateOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $aggregateOverflowHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Chronos overflowed while aggregating individually valid token counters."
+  }
+  Assert-Match $aggregateOutput " tokenFiles=8 " `
+    "All bounded token files should be aggregated without integer overflow."
+  Assert-Match $aggregateOutput " quotaRisk=HIGH " `
+    "Large aggregate token history should still produce a quota assessment."
 
   $cleanupOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action cleanup -Force -CodexHome $missingHome -SampleSeconds 1
