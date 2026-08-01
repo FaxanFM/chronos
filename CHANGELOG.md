@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.5.4
+
+- Move Governor runtime state out of Git metadata into a sandbox-writable,
+  per-user location keyed by canonical repository identity.
+- Make delegation plans persist normalized inputs and return short-lived,
+  single-use tokens that leases consume after a native worker is created.
+- Accept strictly validated canonical worker IDs, normalize comma-flattened
+  scopes, and return explicit state-store and state-lock decisions.
+- Add coverage-window, continuity, event-observation, machine-health, and quota
+  contributor fields to diagnostic output so zeros and risk levels are
+  explainable.
+- Add Windows regressions for read-only Git metadata, preflight failures, plan
+  token replay, canonical worker IDs, flattened scopes, and coverage semantics.
+
+No warning threshold, critical threshold, scoring weight, predictive claim, or
+calibration-sensitive behavior changed in this release.
+
 ## v0.5.3
 
 - Require GitHub-verified cryptographic signatures on both the release commit

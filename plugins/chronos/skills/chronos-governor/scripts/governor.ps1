@@ -18,6 +18,7 @@ param(
   [string]$ExpectedWorkspaceId = "",
   [string]$MutationAttributionId = "",
   [switch]$MutationAttributionVerified,
+  [string]$PlanToken = "",
   [string]$LeaseId = "",
   [string]$FencingToken = "",
   [ValidateSet("HEALTHY", "WARNING", "CRITICAL", "UNAVAILABLE")]
@@ -29,6 +30,7 @@ param(
   [int]$MaxConcurrentWorkers = 2,
   [int]$MaxTotalAttempts = 3,
   [int]$MaxCorrections = 1,
+  [int]$PlanMinutes = 5,
   [int]$LeaseMinutes = 30,
   [int]$StaleMinutes = 120,
   [int]$LockStaleSeconds = 30
@@ -191,6 +193,21 @@ function Normalize-Identifier {
   $Value
 }
 
+function Normalize-WorkerIdentifier {
+  param([string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value) -or $Value.Length -gt 128 -or $Value -match '[\\\x00-\x1f\x7f]') {
+    Throw-GovernorError "invalid_worker_id"
+  }
+  if ($Value.StartsWith('/')) {
+    $segments = @($Value.Substring(1).Split('/'))
+    if ($segments.Count -lt 2 -or @($segments | Where-Object { $_ -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }).Count -gt 0) {
+      Throw-GovernorError "invalid_worker_id"
+    }
+    return '/' + ($segments -join '/')
+  }
+  Normalize-Identifier $Value 'invalid_worker_id'
+}
+
 function Normalize-ModelIdentifier {
   param([string]$Value)
   if ($Value -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$') {
@@ -223,7 +240,8 @@ function Normalize-Scope {
 
 function Get-NormalizedScopes {
   if (-not $Scope -or $Scope.Count -eq 0) { Throw-GovernorError "scope_required" }
-  @($Scope | ForEach-Object { Normalize-Scope $_ } | Sort-Object -Unique)
+  $expanded = @($Scope | ForEach-Object { @($_ -split ',') })
+  @($expanded | ForEach-Object { Normalize-Scope $_ } | Sort-Object -Unique)
 }
 
 function Test-PathInScope {
@@ -397,31 +415,39 @@ function Get-WorkspaceFingerprint {
 
 function New-State {
   @{
-    version = 2
+    version = 3
     state_revision = [int64]0
     workers = @{}
     tasks = @{}
     leases = @{}
+    plans = @{}
   }
 }
 
 function Read-State {
-  if (-not (Test-Path -LiteralPath $script:ResolvedStatePath -PathType Leaf)) {
+  $sourcePath = $script:ResolvedStatePath
+  $legacySource = $false
+  if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -and (Test-Path -LiteralPath $script:LegacyStatePath -PathType Leaf)) {
+    $sourcePath = $script:LegacyStatePath
+    $legacySource = $true
+  }
+  if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     return New-State
   }
   try {
-    $parsed = Get-Content -Raw -LiteralPath $script:ResolvedStatePath | ConvertFrom-Json -ErrorAction Stop
+    $parsed = Get-Content -Raw -LiteralPath $sourcePath | ConvertFrom-Json -ErrorAction Stop
     $state = ConvertTo-Hashtable $parsed
   } catch {
     Throw-GovernorError "state_invalid_json"
   }
-  if ($state.version -eq 1) {
+  if ($state.version -in @(1, 2)) {
     $legacyActive = @($state.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction') })
-    if ($legacyActive.Count -gt 0) { Throw-GovernorError "state_migration_active_leases" }
-    $state.version = 2
-    $state.state_revision = [int64]0
+    if ($legacySource -and $legacyActive.Count -gt 0) { Throw-GovernorError "state_migration_active_leases" }
+    $state.version = 3
+    if ($null -eq $state.state_revision) { $state.state_revision = [int64]0 }
+    if ($null -eq $state.plans) { $state.plans = @{} }
   }
-  if ($state.version -ne 2 -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases) {
+  if ($state.version -ne 3 -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases -or $null -eq $state.plans) {
     Throw-GovernorError "state_version_unsupported"
   }
   if ($null -eq $state.state_revision) { Throw-GovernorError "state_version_unsupported" }
@@ -431,13 +457,13 @@ function Read-State {
 function Write-State {
   param([hashtable]$State)
   $directory = Split-Path -Parent $script:ResolvedStatePath
-  if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
-  }
-  $State.state_revision = [int64]$State.state_revision + [int64]1
-  $temporary = $script:ResolvedStatePath + ".tmp-" + [guid]::NewGuid().ToString('N')
-  $backup = $script:ResolvedStatePath + ".bak"
   try {
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+      New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $State.state_revision = [int64]$State.state_revision + [int64]1
+    $temporary = $script:ResolvedStatePath + ".tmp-" + [guid]::NewGuid().ToString('N')
+    $backup = $script:ResolvedStatePath + ".bak"
     $json = $State | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($temporary, $json, [System.Text.UTF8Encoding]::new($false))
     if (Test-Path -LiteralPath $script:ResolvedStatePath -PathType Leaf) {
@@ -447,8 +473,14 @@ function Write-State {
     } else {
       [System.IO.File]::Move($temporary, $script:ResolvedStatePath)
     }
+  } catch [System.UnauthorizedAccessException] {
+    Throw-GovernorError "state_store_unwritable"
+  } catch [System.Security.SecurityException] {
+    Throw-GovernorError "state_store_unwritable"
+  } catch [System.IO.IOException] {
+    Throw-GovernorError "state_persist_failed"
   } finally {
-    if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+    if ($temporary -and (Test-Path -LiteralPath $temporary -PathType Leaf)) {
       Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     }
   }
@@ -495,8 +527,16 @@ function Try-Recover-StateLock {
 function Acquire-StateLock {
   $lockPath = $script:ResolvedStatePath + ".lock"
   $directory = Split-Path -Parent $lockPath
-  if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+  try {
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+      New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+  } catch [System.UnauthorizedAccessException] {
+    Throw-GovernorError "state_store_unwritable"
+  } catch [System.Security.SecurityException] {
+    Throw-GovernorError "state_store_unwritable"
+  } catch [System.IO.IOException] {
+    Throw-GovernorError "state_store_unwritable"
   }
   foreach ($attempt in 1..40) {
     try {
@@ -513,12 +553,27 @@ function Acquire-StateLock {
       $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false))
       try { $writer.Write($owner) } finally { $writer.Dispose() }
       return @{ lock_id = $lockId; path = $lockPath }
+    } catch [System.UnauthorizedAccessException] {
+      if (-not (Test-Path -LiteralPath $lockPath -PathType Container)) {
+        Throw-GovernorError "state_store_unwritable"
+      }
+      Try-Recover-StateLock $lockPath | Out-Null
+      if ($attempt -eq 40) { break }
+      Start-Sleep -Milliseconds 50
+    } catch [System.Security.SecurityException] {
+      if (-not (Test-Path -LiteralPath $lockPath -PathType Container)) {
+        Throw-GovernorError "state_store_unwritable"
+      }
+      Try-Recover-StateLock $lockPath | Out-Null
+      if ($attempt -eq 40) { break }
+      Start-Sleep -Milliseconds 50
     } catch [System.IO.IOException] {
       Try-Recover-StateLock $lockPath | Out-Null
-      if ($attempt -eq 40) { Throw-GovernorError "state_locked" }
+      if ($attempt -eq 40) { break }
       Start-Sleep -Milliseconds 50
     }
   }
+  Throw-GovernorError "state_lock_unavailable"
 }
 
 function Release-StateLock {
@@ -568,7 +623,9 @@ try {
   $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir
   $repositoryId = Get-TextHash $script:GitCommonDir.ToLowerInvariant()
   $workspaceId = Get-TextHash ($script:RepositoryRoot.ToLowerInvariant() + "`n" + $script:GitCommonDir.ToLowerInvariant())
-  $expectedStatePath = [System.IO.Path]::GetFullPath((Join-Path $script:GitCommonDir 'chronos/governor-state.json'))
+  $stateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'Chronos\Governor'
+  $expectedStatePath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $stateRoot $repositoryId) 'governor-state.json'))
+  $script:LegacyStatePath = [System.IO.Path]::GetFullPath((Join-Path $script:GitCommonDir 'chronos/governor-state.json'))
   if ($StatePath) {
     $candidateStatePath = [System.IO.Path]::GetFullPath($StatePath)
     if (-not $candidateStatePath.Equals($expectedStatePath, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -580,36 +637,39 @@ try {
   if ($MaxConcurrentWorkers -lt 1 -or $MaxConcurrentWorkers -gt 4) { Throw-GovernorError "invalid_concurrency_limit" }
   if ($MaxTotalAttempts -lt 1 -or $MaxTotalAttempts -gt 5) { Throw-GovernorError "invalid_attempt_limit" }
   if ($MaxCorrections -lt 0 -or $MaxCorrections -gt 2) { Throw-GovernorError "invalid_correction_limit" }
+  if ($PlanMinutes -lt 1 -or $PlanMinutes -gt 15) { Throw-GovernorError "invalid_plan_limit" }
   if ($LeaseMinutes -lt 1 -or $LeaseMinutes -gt 240) { Throw-GovernorError "invalid_lease_limit" }
   if ($StaleMinutes -lt 15 -or $StaleMinutes -gt 1440) { Throw-GovernorError "invalid_stale_limit" }
   if ($LockStaleSeconds -lt 1 -or $LockStaleSeconds -gt 600) { Throw-GovernorError "invalid_lock_stale_limit" }
 
-  if ($Action -in @('plan', 'status')) {
+  if ($Action -eq 'status') {
     $state = Read-State
     $active = @(Get-ActiveLeases $state)
-    if ($Action -eq 'status') {
-      $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-$StaleMinutes)
-      $stale = @($active | Where-Object {
-        try { [DateTimeOffset]::Parse([string]$_.updated_at) -lt $staleCutoff } catch { $true }
-      })
-      Write-GovernorOutput @{
-        ok = $true
-        action = 'status'
-        repository_id = $repositoryId
-        workspace_id = $workspaceId
-        active_workers = $active.Count
-        active_writers = @($active | Where-Object { $_.access_mode -eq 'write' }).Count
-        expired_leases = @($active | Where-Object { Test-LeaseExpired $_ }).Count
-        idle_workers = @($state.workers.Values | Where-Object { $_.status -eq 'idle' }).Count
-        stale_leases = $stale.Count
-        tasks = $state.tasks.Count
-        state_version = $state.version
-        state_revision = [int64]$state.state_revision
-        persistent_content = 'metadata-only'
-      }
-      exit 0
+    $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-$StaleMinutes)
+    $stale = @($active | Where-Object {
+      try { [DateTimeOffset]::Parse([string]$_.updated_at) -lt $staleCutoff } catch { $true }
+    })
+    Write-GovernorOutput @{
+      ok = $true
+      action = 'status'
+      repository_id = $repositoryId
+      workspace_id = $workspaceId
+      active_workers = $active.Count
+      active_writers = @($active | Where-Object { $_.access_mode -eq 'write' }).Count
+      expired_leases = @($active | Where-Object { Test-LeaseExpired $_ }).Count
+      idle_workers = @($state.workers.Values | Where-Object { $_.status -eq 'idle' }).Count
+      stale_leases = $stale.Count
+      pending_plans = @($state.plans.Values | Where-Object { $_.status -eq 'issued' }).Count
+      tasks = $state.tasks.Count
+      state_version = $state.version
+      state_revision = [int64]$state.state_revision
+      state_store = 'per_user_temp'
+      persistent_content = 'metadata-only'
     }
+    exit 0
+  }
 
+  if ($Action -eq 'plan') {
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
     $scopes = @(Get-NormalizedScopes)
     $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
@@ -619,43 +679,98 @@ try {
     $selection = Select-RuntimeModel $inventory $RequestedModel $effort
     $decision = 'delegate'
     $reason = 'bounded_low_complexity_task'
-
-    if ($TaskClass -eq 'risky') {
-      $decision = 'coordinator'; $reason = 'risk_requires_coordinator'
-    } elseif ($Health -eq 'CRITICAL') {
-      $decision = 'coordinator'; $reason = 'health_advises_no_new_worker'
-    } elseif ($active.Count -ge $MaxConcurrentWorkers) {
-      $decision = 'coordinator'; $reason = 'concurrency_budget_reached'
-    } elseif ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
-      $decision = 'coordinator'; $reason = 'single_writer_lease_active'
-    } elseif (-not $selection.selected) {
-      $decision = 'coordinator'; $reason = $selection.reason
-    }
-
-    if ($AccessMode -eq 'write') {
-      $head = Get-HeadState
-      if ($head.mode -eq 'detached') { $decision = 'coordinator'; $reason = 'detached_head_write_unsupported' }
-      if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) {
-        $decision = 'coordinator'; $reason = 'workspace_identity_unverified'
-      } elseif (-not $MutationAttributionVerified -or -not $MutationAttributionId) {
-        $decision = 'coordinator'; $reason = 'mutation_attribution_unverified'
-      } else {
-        Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
-      }
-      foreach ($scopeItem in $scopes) {
-        if (Test-GlobalLockPath $scopeItem) { $decision = 'coordinator'; $reason = 'global_lock_scope' }
-        if (Test-ScopeReparseRisk $scopeItem) { $decision = 'coordinator'; $reason = 'reparse_scope_risk' }
-      }
-      $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
-      if ($dirty) { $decision = 'coordinator'; $reason = 'same_folder_write_requires_clean_tree' }
-    }
-
     $reuse = @()
-    if ($selection.selected) {
-      $reuse = @($state.workers.Values | Where-Object {
-        $_.status -eq 'idle' -and $_.repository_id -eq $repositoryId -and
-        $_.role -eq $role -and $_.requested_model -eq $selection.model -and $_.access_mode -eq $AccessMode
-      } | Select-Object -First 1)
+    $planTokenValue = $null
+    $planExpiresAt = $null
+    $planLock = $null
+    try {
+      $planLock = Acquire-StateLock
+      $state = Read-State
+      $active = @(Get-ActiveLeases $state)
+      if ($TaskClass -eq 'risky') {
+        $decision = 'coordinator'; $reason = 'risk_requires_coordinator'
+      } elseif ($Health -eq 'CRITICAL') {
+        $decision = 'coordinator'; $reason = 'health_advises_no_new_worker'
+      } elseif ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
+        $decision = 'coordinator'; $reason = 'task_already_leased'
+      } elseif ($active.Count -ge $MaxConcurrentWorkers) {
+        $decision = 'coordinator'; $reason = 'concurrency_budget_reached'
+      } elseif ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
+        $decision = 'coordinator'; $reason = 'single_writer_lease_active'
+      } elseif (-not $selection.selected) {
+        $decision = 'coordinator'; $reason = $selection.reason
+      }
+
+      $attributionHash = $null
+      if ($AccessMode -eq 'write') {
+        $head = Get-HeadState
+        if ($head.mode -eq 'detached') { $decision = 'coordinator'; $reason = 'detached_head_write_unsupported' }
+        if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) {
+          $decision = 'coordinator'; $reason = 'workspace_identity_unverified'
+        } elseif (-not $MutationAttributionVerified -or -not $MutationAttributionId) {
+          $decision = 'coordinator'; $reason = 'mutation_attribution_unverified'
+        } else {
+          Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
+          $attributionHash = Get-TextHash $MutationAttributionId
+        }
+        foreach ($scopeItem in $scopes) {
+          if (Test-GlobalLockPath $scopeItem) { $decision = 'coordinator'; $reason = 'global_lock_scope' }
+          if (Test-ScopeReparseRisk $scopeItem) { $decision = 'coordinator'; $reason = 'reparse_scope_risk' }
+        }
+        $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
+        if ($dirty) { $decision = 'coordinator'; $reason = 'same_folder_write_requires_clean_tree' }
+      }
+
+      if ($selection.selected) {
+        $reuse = @($state.workers.Values | Where-Object {
+          $_.status -eq 'idle' -and $_.repository_id -eq $repositoryId -and
+          $_.role -eq $role -and $_.requested_model -eq $selection.model -and $_.access_mode -eq $AccessMode
+        } | Select-Object -First 1)
+      }
+
+      if ($decision -eq 'delegate') {
+        $nowOffset = [DateTimeOffset]::UtcNow
+        foreach ($planKey in @($state.plans.Keys)) {
+          $existingPlan = $state.plans[$planKey]
+          $expired = try { [DateTimeOffset]::Parse([string]$existingPlan.expires_at) -le $nowOffset } catch { $true }
+          if ($existingPlan.status -ne 'issued' -or $expired) { $state.plans.Remove($planKey) }
+        }
+        $planTokenValue = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+        $planExpiresAt = $nowOffset.AddMinutes($PlanMinutes).ToString('o')
+        $state.plans[$task] = @{
+          task_id = $task
+          token_hash = Get-TextHash $planTokenValue
+          repository_id = $repositoryId
+          workspace_id = $workspaceId
+          task_class = $TaskClass
+          access_mode = $AccessMode
+          scopes = $scopes
+          role = $role
+          selected_model = $selection.model
+          model_selection_reason = $selection.reason
+          model_inventory_hash = $inventory.hash
+          model_inventory_index = $selection.index
+          reasoning_effort = $effort
+          mutation_attribution_hash = $attributionHash
+          mutation_attribution_verified = [bool]$MutationAttributionVerified
+          status = 'issued'
+          created_at = $nowOffset.ToString('o')
+          expires_at = $planExpiresAt
+        }
+        Write-State $state
+      }
+    } catch {
+      $planFailure = if ($_.Exception.Message -match '^[a-z0-9_]+$') { $_.Exception.Message } else { 'internal_error' }
+      if ($planFailure -in @('state_store_unwritable', 'state_lock_unavailable', 'state_persist_failed')) {
+        $decision = 'coordinator'
+        $reason = $planFailure
+        $planTokenValue = $null
+        $planExpiresAt = $null
+      } else {
+        throw
+      }
+    } finally {
+      Release-StateLock $planLock
     }
     Write-GovernorOutput @{
       ok = $true
@@ -673,6 +788,9 @@ try {
       reasoning_effort = $effort
       access_mode = $AccessMode
       scopes = $scopes
+      plan_token = $planTokenValue
+      plan_expires_at = $planExpiresAt
+      state_store = 'per_user_temp'
       reuse_worker_id = if ($reuse.Count) { $reuse[0].worker_id } else { $null }
       fork_context = $false
       max_delegation_depth = 1
@@ -690,8 +808,29 @@ try {
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
 
     if ($Action -eq 'lease') {
-      $worker = Normalize-Identifier $WorkerId 'invalid_worker_id'
-      $scopes = @(Get-NormalizedScopes)
+      $worker = Normalize-WorkerIdentifier $WorkerId
+      if (-not $PlanToken) { Throw-GovernorError "plan_token_required" }
+      if (-not $state.plans.ContainsKey($task)) { Throw-GovernorError "plan_not_found" }
+      $plan = $state.plans[$task]
+      if ($plan.status -ne 'issued') { Throw-GovernorError "plan_already_consumed" }
+      try {
+        if ([DateTimeOffset]::Parse([string]$plan.expires_at) -le $nowOffset) { Throw-GovernorError "plan_expired" }
+      } catch [System.FormatException] {
+        Throw-GovernorError "plan_invalid"
+      }
+      if ((Get-TextHash $PlanToken) -ne $plan.token_hash) { Throw-GovernorError "plan_token_mismatch" }
+      if ($plan.repository_id -ne $repositoryId -or $plan.workspace_id -ne $workspaceId) {
+        Throw-GovernorError "plan_workspace_mismatch"
+      }
+      $TaskClass = [string]$plan.task_class
+      $AccessMode = [string]$plan.access_mode
+      $ReasoningEffort = [string]$plan.reasoning_effort
+      $scopes = @($plan.scopes)
+      $selection = @{
+        selected = $true
+        model = [string]$plan.selected_model
+        index = $plan.model_inventory_index
+      }
       $active = @(Get-ActiveLeases $state)
       if ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         Throw-GovernorError "task_already_leased"
@@ -703,9 +842,7 @@ try {
       $head = Get-HeadState
       if ($AccessMode -eq 'write') {
         if ($head.mode -eq 'detached') { Throw-GovernorError "detached_head_write_unsupported" }
-        if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) { Throw-GovernorError "workspace_identity_unverified" }
-        if (-not $MutationAttributionVerified -or -not $MutationAttributionId) { Throw-GovernorError "mutation_attribution_unverified" }
-        Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
+        if (-not $plan.mutation_attribution_verified -or -not $plan.mutation_attribution_hash) { Throw-GovernorError "mutation_attribution_unverified" }
         $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
         if ($dirty) { Throw-GovernorError "same_folder_write_requires_clean_tree" }
         foreach ($scopeItem in $scopes) {
@@ -713,9 +850,6 @@ try {
           if (Test-ScopeReparseRisk $scopeItem) { Throw-GovernorError "reparse_scope_risk" }
         }
       }
-      $inventory = Read-RuntimeModelInventory $RuntimeModels
-      $selection = Select-RuntimeModel $inventory $RequestedModel $ReasoningEffort
-      if (-not $selection.selected) { Throw-GovernorError $selection.reason }
 
       $attempts = 1
       $corrections = 0
@@ -733,7 +867,7 @@ try {
       $fencing = [guid]::NewGuid().ToString('N')
       $expiresAt = $nowOffset.AddMinutes($LeaseMinutes).ToString('o')
       $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
-      $attributionHash = if ($MutationAttributionId) { Get-TextHash $MutationAttributionId } else { $null }
+      $attributionHash = $plan.mutation_attribution_hash
       $taskRecord = @{
         task_id = $task
         repository_id = $repositoryId
@@ -758,7 +892,7 @@ try {
         requested_model = $selection.model
         effective_model = if ($EffectiveModel) { $EffectiveModel } else { $null }
         model_verification = if ($EffectiveModel) { 'reported' } else { 'runtime_not_exposed' }
-        model_inventory_hash = $inventory.hash
+        model_inventory_hash = $plan.model_inventory_hash
         model_inventory_index = $selection.index
         reasoning_effort = $ReasoningEffort
         access_mode = $AccessMode
@@ -773,7 +907,7 @@ try {
         repository_id = $repositoryId
         workspace_id = $workspaceId
         mutation_attribution_hash = $attributionHash
-        mutation_attribution_verified = [bool]$MutationAttributionVerified
+        mutation_attribution_verified = [bool]$plan.mutation_attribution_verified
         base_commit = $baseCommit
         head_mode = $head.mode
         reference_hash = $head.reference_hash
@@ -788,6 +922,9 @@ try {
       $state.tasks[$task] = $taskRecord
       $state.workers[$worker] = $workerRecord
       $state.leases[$task] = $leaseRecord
+      $state.plans[$task].status = 'consumed'
+      $state.plans[$task].consumed_at = $now
+      $state.plans[$task].worker_id_hash = Get-TextHash $worker
       Write-State $state
       Write-GovernorOutput @{
         ok = $true
@@ -801,7 +938,7 @@ try {
         expires_at = $expiresAt
         base_commit = $baseCommit
         selected_model = $selection.model
-        model_inventory_hash = $inventory.hash
+        model_inventory_hash = $plan.model_inventory_hash
         model_inventory_index = $selection.index
         attempt = $attempts
         max_attempts = $MaxTotalAttempts

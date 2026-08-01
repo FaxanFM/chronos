@@ -5,9 +5,9 @@ line-count claim. The release gate requires all suites to pass.
 
 ## Critical Safety Threshold
 
-Governor declares 27 critical controls in `tests/governor.tests.ps1`. A control
+Governor declares 35 critical controls in `tests/governor.tests.ps1`. A control
 is registered only after its associated assertion succeeds. The suite fails
-unless 27 of 27 controls, or 100 percent, are exercised.
+unless 35 of 35 controls, or 100 percent, are exercised.
 
 Coverage includes runtime model discovery, requested-model validation,
 inventory failure, canonical workspace identity, mutation attribution,
@@ -16,6 +16,11 @@ fingerprints, coordinator verification, read-only enforcement, scopes,
 correction and expiry limits, detached `HEAD`, linked worktrees, equivalent
 paths, reparse points, real concurrent writer processes, stale and live locks,
 malformed and interrupted state, privacy, and custom-state bypass prevention.
+It also covers state outside Git metadata, state-store preflight failure,
+single-use plan tokens, canonical `/root/name` worker IDs, comma-flattened scope
+arguments, and operation when the former `.git` state location is unavailable.
+Inactive legacy-state migration and active-legacy fail-safe behavior are also
+exercised.
 
 ## Diagnostic Coverage
 
@@ -23,7 +28,9 @@ malformed and interrupted state, privacy, and custom-state bypass prevention.
 missing data, exact helper failures and recovery, false-positive marker text,
 malformed/truncated/duplicate/out-of-order rollout records, token aggregation,
 files larger than `Int32.MaxValue`, aggregate 64-bit overflow regressions, and
-advisory-only cleanup compatibility.
+advisory-only cleanup compatibility. Coverage assertions distinguish complete,
+partial, unsupported, and unavailable event observations and require quota-risk
+contributors even when no advice tag applies.
 
 ## Release Coverage
 

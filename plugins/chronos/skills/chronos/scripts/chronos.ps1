@@ -334,10 +334,16 @@ function Get-BoundedFileTail {
 }
 
 function Get-RecentSessionFiles {
+  $windowEnd = (Get-Date).ToUniversalTime()
+  $cutoff = $windowEnd.AddHours(-6)
   $sessionsRoot = Join-Path $CodexHome "sessions"
-  if (-not (Test-Path -LiteralPath $sessionsRoot -PathType Container)) { return @() }
+  if (-not (Test-Path -LiteralPath $sessionsRoot -PathType Container)) {
+    return [pscustomobject]@{
+      Files = @(); EligibleCount = 0; SelectedCount = 0; Capped = $false
+      WindowHours = 6; WindowStartUtc = $cutoff.ToString('o'); WindowEndUtc = $windowEnd.ToString('o')
+    }
+  }
 
-  $cutoff = (Get-Date).ToUniversalTime().AddHours(-6)
   $files = @()
   foreach ($daysAgo in 0..1) {
     $day = (Get-Date).Date.AddDays(-$daysAgo)
@@ -348,9 +354,19 @@ function Get-RecentSessionFiles {
       -ErrorAction SilentlyContinue)
   }
 
-  @($files | Where-Object {
+  $eligible = @($files | Where-Object {
       $_.LastWriteTimeUtc -ge $cutoff
-    } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 8)
+    } | Sort-Object LastWriteTimeUtc -Descending)
+  $selected = @($eligible | Select-Object -First 8)
+  [pscustomobject]@{
+    Files = $selected
+    EligibleCount = $eligible.Count
+    SelectedCount = $selected.Count
+    Capped = $eligible.Count -gt $selected.Count
+    WindowHours = 6
+    WindowStartUtc = $cutoff.ToString('o')
+    WindowEndUtc = $windowEnd.ToString('o')
+  }
 }
 
 function Get-RecordTimestamp {
@@ -444,6 +460,18 @@ function Get-QuotaHealth {
     DuplicateRecords = 0
     OutOfOrderRecords = 0
     TailIncompleteFiles = 0
+    TailTruncatedFiles = 0
+    UnreadableFiles = 0
+    CoverageWindowHours = 6
+    CoverageStartUtc = $null
+    CoverageEndUtc = $null
+    FilesEligible = 0
+    FilesSelected = 0
+    CoverageCapped = $false
+    CoverageContinuity = "unknown"
+    SpawnObservation = "unavailable"
+    CompactionObservation = "unavailable"
+    QuotaContributors = "none"
     Advice = "none"
   }
 
@@ -454,11 +482,24 @@ function Get-QuotaHealth {
   $reasoningTokens = 0L
   $maxContextPercent = 0.0
   $advice = [System.Collections.Generic.List[string]]::new()
-  $sessionFiles = @(Get-RecentSessionFiles)
+  $quotaContributors = [System.Collections.Generic.List[string]]::new()
+  $sessionSelection = Get-RecentSessionFiles
+  $sessionFiles = @($sessionSelection.Files)
+  $health.CoverageWindowHours = $sessionSelection.WindowHours
+  $health.CoverageStartUtc = $sessionSelection.WindowStartUtc
+  $health.CoverageEndUtc = $sessionSelection.WindowEndUtc
+  $health.FilesEligible = $sessionSelection.EligibleCount
+  $health.FilesSelected = $sessionSelection.SelectedCount
+  $health.CoverageCapped = $sessionSelection.Capped
+  $multiAgentV2Seen = $false
 
   foreach ($file in $sessionFiles) {
+    if ([long]$file.Length -gt 2097152L) { $health.TailTruncatedFiles++ }
     $tail = Get-BoundedFileTail -Path $file.FullName
-    if ([string]::IsNullOrEmpty($tail)) { continue }
+    if ([string]::IsNullOrEmpty($tail)) {
+      if ([long]$file.Length -gt 0) { $health.UnreadableFiles++ }
+      continue
+    }
 
     $lastSnapshot = $null
     $lastSnapshotTimestamp = [DateTimeOffset]::MinValue
@@ -477,6 +518,7 @@ function Get-QuotaHealth {
       if (
         $line.IndexOf('"token_count"', [System.StringComparison]::Ordinal) -lt 0 -and
         $line.IndexOf('"turn_context"', [System.StringComparison]::Ordinal) -lt 0 -and
+        $line.IndexOf('"multi_agent_version"', [System.StringComparison]::Ordinal) -lt 0 -and
         $line.IndexOf('"context_compacted"', [System.StringComparison]::Ordinal) -lt 0 -and
         $line.IndexOf('"spawn_agent"', [System.StringComparison]::Ordinal) -lt 0
       ) { continue }
@@ -502,6 +544,14 @@ function Get-QuotaHealth {
         if ($recordTimestamp -gt $previousTimestamp) { $previousTimestamp = $recordTimestamp }
       }
       $ordinal++
+
+      if ($record.type -eq "session_meta") {
+        $versionProperty = if ($record.payload) { $record.payload.PSObject.Properties["multi_agent_version"] } else { $null }
+        if ($versionProperty -and [string]$versionProperty.Value -match '^\d+$' -and [int]$versionProperty.Value -ge 2) {
+          $multiAgentV2Seen = $true
+        }
+        continue
+      }
 
       if ($record.type -eq "turn_context") {
         if (-not $recordTimestamp -or $recordTimestamp -ge $lastTurnContextTimestamp) {
@@ -574,6 +624,39 @@ function Get-QuotaHealth {
     }
   }
 
+  if ($health.FilesSelected -eq 0) {
+    $health.CoverageContinuity = "unknown"
+  } elseif (
+    $health.CoverageCapped -or $health.TailTruncatedFiles -gt 0 -or
+    $health.UnreadableFiles -gt 0 -or
+    $health.TailIncompleteFiles -gt 0 -or $health.MalformedRecords -gt 0 -or
+    $health.DuplicateRecords -gt 0 -or $health.OutOfOrderRecords -gt 0
+  ) {
+    $health.CoverageContinuity = "partial"
+  } else {
+    $health.CoverageContinuity = "complete"
+  }
+  $health.SpawnObservation = if ($health.SpawnCalls -gt 0) {
+    "observed"
+  } elseif ($multiAgentV2Seen) {
+    "unsupported"
+  } elseif ($health.CoverageContinuity -eq "partial") {
+    "partial"
+  } elseif ($health.CoverageContinuity -eq "complete") {
+    "not_observed_in_window"
+  } else {
+    "unavailable"
+  }
+  $health.CompactionObservation = if ($health.Compactions -gt 0) {
+    "observed"
+  } elseif ($health.CoverageContinuity -eq "partial") {
+    "partial"
+  } elseif ($health.CoverageContinuity -eq "complete") {
+    "not_observed_in_window"
+  } else {
+    "unavailable"
+  }
+
   if ($health.Files -eq 0) {
     return [pscustomobject]$health
   }
@@ -600,6 +683,15 @@ function Get-QuotaHealth {
 
   $cacheWriteThreshold = [math]::Max(1.0, [double]$inputTokens * 0.25)
 
+  if ($cacheWriteTokens -ge $cacheWriteThreshold) { $quotaContributors.Add("cache-write-volume") }
+  if ($health.UltraSessions -gt 0) { $quotaContributors.Add("ultra-session") }
+  if ($health.SpawnCalls -ge 4) { $quotaContributors.Add("spawn-calls-4plus") }
+  if ($health.Compactions -ge 3) { $quotaContributors.Add("compactions-3plus") }
+  if ($health.HighEffortSessions -gt 0 -and $health.MaxContextPercent -ge 60) {
+    $quotaContributors.Add("high-effort-high-context")
+  }
+  if ($inputTokens -ge 50000000) { $quotaContributors.Add("input-50m") }
+
   if (
     $cacheWriteTokens -ge $cacheWriteThreshold -or
     $health.UltraSessions -gt 0 -or $health.SpawnCalls -ge 4 -or
@@ -614,8 +706,16 @@ function Get-QuotaHealth {
     $inputTokens -ge 10000000
   ) {
     $health.Level = "ELEVATED"
+    if ($health.HighEffortSessions -gt 0) { $quotaContributors.Add("high-effort-session") }
+    if ($health.SpawnCalls -gt 0) { $quotaContributors.Add("spawn-call-observed") }
+    if ($health.Compactions -gt 0) { $quotaContributors.Add("compaction-observed") }
+    if ($health.MaxContextPercent -ge 40) { $quotaContributors.Add("context-40pct") }
+    if ($inputTokens -ge 10000000) { $quotaContributors.Add("input-10m") }
   } else {
     $health.Level = "LOW"
+  }
+  if ($quotaContributors.Count -gt 0) {
+    $health.QuotaContributors = @($quotaContributors | Select-Object -Unique) -join ","
   }
 
   [pscustomobject]$health
@@ -765,7 +865,7 @@ if ($Action -eq "inspect") {
   $quotaHealth = Get-QuotaHealth
   $level = Get-WorseLevel (Get-WorseLevel $processLevel $logLevel) $filesystemHelper.Level
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} tokenAdvice={41}" -f `
+  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} machineHealth={41} tokenCoverageWindowHours={42} tokenCoverageStartUtc={43} tokenCoverageEndUtc={44} tokenFilesEligible={45} tokenFilesSelected={46} tokenCoverageCapped={47} tokenTailTruncatedFiles={48} tokenUnreadableFiles={49} tokenCoverageContinuity={50} tokenSpawnObservation={51} tokenCompactionObservation={52} tokenQuotaContributors={53} tokenAdvice={54}" -f `
     $level, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
@@ -787,6 +887,13 @@ if ($Action -eq "inspect") {
     $quotaHealth.UltraSessions, $quotaHealth.SpawnCalls, $quotaHealth.Compactions,
     $quotaHealth.MalformedRecords, $quotaHealth.DuplicateRecords,
     $quotaHealth.OutOfOrderRecords, $quotaHealth.TailIncompleteFiles,
+    $processLevel, $quotaHealth.CoverageWindowHours,
+    (Format-Metric $quotaHealth.CoverageStartUtc), (Format-Metric $quotaHealth.CoverageEndUtc),
+    $quotaHealth.FilesEligible, $quotaHealth.FilesSelected,
+    (Format-Metric $quotaHealth.CoverageCapped), $quotaHealth.TailTruncatedFiles,
+    $quotaHealth.UnreadableFiles, $quotaHealth.CoverageContinuity,
+    $quotaHealth.SpawnObservation, $quotaHealth.CompactionObservation,
+    $quotaHealth.QuotaContributors,
     $quotaHealth.Advice)
   exit 0
 }

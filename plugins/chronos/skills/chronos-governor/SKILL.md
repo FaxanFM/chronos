@@ -104,6 +104,10 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/
 ```
 
 Follow `decision=coordinator` without refusing the user's objective. It means complete that subtask locally instead of adding a worker.
+Spawn only when `decision=delegate` and `plan_token` is present. Planning has
+already locked and atomically persisted the normalized assignment. If the state
+store or lock is unavailable, planning returns the task to the coordinator
+before a worker is created.
 
 ### 3. Build A Focused Assignment
 
@@ -133,11 +137,14 @@ After obtaining the runtime worker ID, acquire the lease:
 
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/governor.ps1 `
-  -Action lease -Repository C:\repo -TaskId docs-readme-links -TaskClass docs `
-  -AccessMode read -Scope 'README.md','docs/**' -WorkerId WORKER_ID `
-  -RequestedModel PLANNED_MODEL -ReasoningEffort low `
-  -RuntimeModels '<active-runtime-inventory>'
+  -Action lease -Repository C:\repo -TaskId docs-readme-links `
+  -WorkerId WORKER_ID -PlanToken PLAN_TOKEN
 ```
+
+The short-lived token is opaque and single use. `lease` consumes the persisted
+normalized plan; it does not reparse scopes, model inventory, workspace
+identity, or mutation attribution from command-line values. Canonical native
+worker IDs such as `/root/name` are accepted after strict segment validation.
 
 If leasing fails, close the newly spawned worker and continue the task with the coordinator. Do not retry spawning around the governor.
 
@@ -221,14 +228,15 @@ Native Codex workers may use an internally isolated forked workspace. Keep their
 
 ## State And Privacy
 
-Store state only at `chronos/governor-state.json` under the canonical Git common
-directory. Custom state locations are disabled because they could split the
-single-writer lock. This avoids a trackable repository file and shares writer
-coordination across linked worktrees.
+Store state only beneath the current user's Windows temporary application-data
+directory at `Chronos/Governor/<repository-hash>/governor-state.json`. The hash
+comes from the canonical Git common directory, so linked worktrees share one
+writer lock without writing inside the repository or `.git`. Custom state
+locations are disabled because they could split the single-writer lock.
 
 State may contain only:
 
-- Opaque task and worker IDs.
+- Opaque task and worker IDs and hashed single-use plan tokens.
 - A hashed repository identity.
 - Base commit.
 - Repository-relative scopes.

@@ -68,7 +68,7 @@ The public [architecture](https://github.com/FaxanFM/chronos/blob/main/docs/ARCH
 [test coverage](https://github.com/FaxanFM/chronos/blob/main/docs/TEST-COVERAGE.md),
 [release operations](https://github.com/FaxanFM/chronos/blob/main/docs/OPERATIONS.md),
 and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/CALIBRATION-METHODOLOGY.md)
-describe the v0.5.3 engineering controls.
+describe the v0.5.4 engineering controls.
 
 ## Self-service agents
 
@@ -97,8 +97,8 @@ will be added here as each agent is published.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
-- When Governor is invoked, stores only local coordination metadata inside
-  Git's private common metadata directory: opaque IDs, identity hashes, base
+- When Governor is invoked, stores only local coordination metadata beneath the
+  current user's Windows temporary application-data directory: opaque IDs, identity hashes, base
   commit, relative scopes, model labels, lease fencing, counters, status, and
   timestamps.
 - Never automatically merges, resets, cleans, deletes worktrees or branches, or

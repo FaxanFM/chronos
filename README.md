@@ -70,7 +70,7 @@ See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.3 safety
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.4 safety
 and release model.
 
 ## Self-service agents
@@ -100,8 +100,8 @@ will be added here as each agent is published.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
-- When Governor is invoked, stores only local coordination metadata inside
-  Git's private common metadata directory: opaque IDs, identity hashes, base
+- When Governor is invoked, stores only local coordination metadata beneath the
+  current user's Windows temporary application-data directory: opaque IDs, identity hashes, base
   commit, relative scopes, model labels, lease fencing, counters, status, and
   timestamps.
 - Never automatically merges, resets, cleans, deletes worktrees or branches, or

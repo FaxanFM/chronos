@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective July 31, 2026
+Effective August 1, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
 
@@ -15,7 +15,9 @@ For token and quota diagnostics, Chronos reads at most 2 MiB from the tail of ea
 Chronos does not read SQLite log bodies, process arguments, environment variables, user documents, browsing data, credentials, or unrelated file contents.
 
 When the user explicitly invokes Chronos Governor, it stores limited local
-coordination metadata in Git's private metadata directory. This may include
+coordination metadata beneath the current user's Windows temporary
+application-data directory, keyed by a hash of Git's canonical common
+directory. This may include
 opaque task and worker identifiers, a hash of the repository location, a base
 commit, repository-relative scopes, access mode, requested or reported model
 labels, reasoning effort, status, counters, and timestamps. Governor state does
@@ -34,7 +36,7 @@ worktrees or branches, closes Codex, terminates processes, or deletes user files
 
 Chronos health inspection creates no persistent logs, user profiles, background
 services, or scheduled tasks. Governor metadata remains local until the user or
-Git repository owner removes it. Chronos performs no automatic state or
+Windows temporary-storage maintenance removes it. Chronos performs no automatic state or
 workspace cleanup.
 
 ## Changes

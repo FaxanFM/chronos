@@ -17,6 +17,7 @@ $tokenHealthHome = Join-Path $testRoot "token-health-home"
 $tokenIntegrityHome = Join-Path $testRoot "token-integrity-home"
 $largeTailHome = Join-Path $testRoot "large-tail-home"
 $aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
+$v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -29,7 +30,7 @@ function Assert-Match($value, $pattern, $message) {
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
-    $largeTailHome, $aggregateOverflowHome `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -189,6 +190,8 @@ try {
   Assert-Match $integrityOutput " tokenDuplicateRecords=1 " "Duplicate rollout records should be counted and ignored."
   Assert-Match $integrityOutput " tokenOutOfOrderRecords=1 " "Out-of-order rollout timestamps should be reported."
   Assert-Match $integrityOutput " tokenTailIncompleteFiles=1 " "A partially written final rollout record should be reported and ignored."
+  Assert-Match $integrityOutput " tokenCoverageContinuity=partial " `
+    "Malformed, duplicate, out-of-order, or incomplete records must mark coverage partial."
 
   $sessionDay = Join-Path (Join-Path (Join-Path $tokenHealthHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -272,6 +275,15 @@ try {
     "High-effort session was not counted."
   Assert-Match $tokenOutput " tokenSpawnCalls=1 " "Subagent spawn was not counted."
   Assert-Match $tokenOutput " tokenCompactions=2 " "Compactions were not counted."
+  Assert-Match $tokenOutput " tokenCoverageWindowHours=6 " "Token coverage window was not explicit."
+  Assert-Match $tokenOutput " tokenFilesEligible=1 tokenFilesSelected=1 tokenCoverageCapped=false " `
+    "Token file selection coverage was not explicit."
+  Assert-Match $tokenOutput " tokenCoverageContinuity=complete " `
+    "Complete fixture coverage should be reported as complete."
+  Assert-Match $tokenOutput " tokenSpawnObservation=observed tokenCompactionObservation=observed " `
+    "Observed worker and compaction events should be qualified."
+  Assert-Match $tokenOutput " tokenQuotaContributors=.*(cache-write-volume|input-50m)" `
+    "High quota risk should expose contributing measurements."
   Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,avoid-repeat-compaction,cache-write-risk$" `
     "Token advice did not reflect the aggregate risk signals."
   if (($tokenOutput -join "`n") -match "private fixture arguments") {
@@ -333,6 +345,49 @@ try {
     "A bounded tail read should support rollout files larger than Int32.MaxValue."
   Assert-Match $largeTailOutput " tokenSessionInputM=3000([.,]0)? " `
     "Token totals larger than Int32.MaxValue should remain 64-bit."
+  Assert-Match $largeTailOutput " tokenTailTruncatedFiles=1 tokenUnreadableFiles=0 tokenCoverageContinuity=partial " `
+    "A bounded tail must disclose partial continuity."
+
+  $v2SessionDay = Join-Path (Join-Path (Join-Path $v2CoverageHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $v2SessionDay = Join-Path $v2SessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $v2SessionDay -Force | Out-Null
+  $v2SessionPath = Join-Path $v2SessionDay "rollout-v2-fixture.jsonl"
+  $v2Records = @(
+    @{
+      type = "session_meta"
+      payload = @{ multi_agent_version = 2 }
+    },
+    @{
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = 10000000
+            cached_input_tokens = 8000000
+            cache_write_input_tokens = 0
+            output_tokens = 1000
+            reasoning_output_tokens = 100
+            total_tokens = 10001000
+          }
+          last_token_usage = @{ total_tokens = 1000 }
+        }
+      }
+    }
+  ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 }
+  Set-Content -LiteralPath $v2SessionPath -Value $v2Records
+  $v2Output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $v2CoverageHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos Multi-Agent V2 coverage inspection failed." }
+  Assert-Match $v2Output " quotaRisk=ELEVATED " `
+    "The frozen ten-million-input threshold should remain elevated."
+  Assert-Match $v2Output " tokenSpawnCalls=0 " "No unsupported spawn event should be invented."
+  Assert-Match $v2Output " tokenCoverageContinuity=complete tokenSpawnObservation=unsupported tokenCompactionObservation=not_observed_in_window " `
+    "Numeric zero must distinguish unsupported V2 spawn format from a complete no-compaction observation."
+  Assert-Match $v2Output " tokenQuotaContributors=input-10m tokenAdvice=none$" `
+    "Elevated risk without advice must still explain its contributing threshold."
 
   $aggregateSessionDay = Join-Path (Join-Path (Join-Path $aggregateOverflowHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")

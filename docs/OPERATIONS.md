@@ -30,7 +30,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.5.3
+git verify-tag v0.5.4
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -49,16 +49,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.5.3.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.5.3.zip -R FaxanFM/chronos
-gh release verify v0.5.3 -R FaxanFM/chronos
-gh release verify-asset v0.5.3 .\chronos-v0.5.3.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.5.4.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.5.4.zip -R FaxanFM/chronos
+gh release verify v0.5.4 -R FaxanFM/chronos
+gh release verify-asset v0.5.4 .\chronos-v0.5.4.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.5.3.sha256`. These controls prove
+Compare the first command with `chronos-v0.5.4.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -75,15 +75,16 @@ codex.cmd plugin add chronos@chronos
 ```
 
 Open a new task and confirm that the installed plugin reports the expected
-version. v0.5.3 automatically migrates inactive Governor v1 state. It fails
-closed when legacy state contains an active lease; finish or release that work
-with the previous version before retrying.
+version. v0.5.4 migrates inactive Governor version 1 or 2 state from Git
+metadata into its sandbox-writable per-user state store. It fails closed when
+legacy state contains an active lease; finish or release that work with the
+previous version before retrying.
 
 ## Rollback
 
 Fully close Codex. Install the desired prior tagged release or restore the prior
 plugin cache, then open a new task. Do not edit Governor state to force a
-rollback. v0.5.3 state is version 2 and older Governor versions may not
+rollback. v0.5.4 state is version 3 and older Governor versions may not
 understand it; preserve it for audit and begin delegation only after confirming
 the selected version's state behavior. Rollback never requires changing the
 Codex diagnostic SQLite database or deleting user work.

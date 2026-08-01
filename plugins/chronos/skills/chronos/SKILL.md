@@ -36,6 +36,19 @@ It reports aggregate parser-integrity counters for malformed, duplicated,
 out-of-order, and incomplete-tail records. Those counters do not alter health
 thresholds or scoring.
 
+Use `machineHealth` for process, memory, handle, CPU, and disk pressure. The
+leading `CHRONOS` level remains an aggregate advisory across machine,
+filesystem-helper, and diagnostic-database conditions; do not present that
+aggregate as proof that the PC is failing when `machineHealth=HEALTHY`.
+
+Read `tokenCoverageWindowHours`, eligible and selected file counts,
+`tokenCoverageCapped`, truncated tails, and `tokenCoverageContinuity` before
+interpreting numeric totals. `tokenSpawnObservation` and
+`tokenCompactionObservation` distinguish observed events, a complete
+not-observed result, partial coverage, unsupported event formats, and
+unavailable data. A zero with `partial`, `unsupported`, or `unavailable` is not
+evidence that the event never occurred.
+
 Interpret the result:
 
 - `HEALTHY`: continue normally.
@@ -67,6 +80,11 @@ Interpret `quotaRisk` separately from the overall machine-health status:
 - `HIGH`: recommend the relevant `tokenAdvice` actions before extending the
   task substantially. Continue the user's requested work.
 - `UNAVAILABLE`: no recent compatible rollout aggregate was found.
+
+Report `tokenQuotaContributors` whenever quota risk is elevated or high. These
+tags identify the already-measured threshold clauses responsible for the
+classification; they are explanatory and do not change scoring. `tokenAdvice`
+may still be `none` when no supported remediation tag matches.
 
 Apply the `tokenAdvice` tags:
 

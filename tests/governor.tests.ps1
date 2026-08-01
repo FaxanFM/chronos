@@ -14,9 +14,13 @@ $requiredSafetyControls = @(
   'lease-expiry', 'detached-head', 'worktree-serialization', 'equivalent-path',
   'reparse-path', 'concurrent-writers', 'stale-lock-recovery',
   'live-lock-preservation', 'malformed-state', 'interrupted-write',
-  'privacy-state', 'custom-state-disabled'
+  'privacy-state', 'custom-state-disabled', 'state-store-outside-git',
+  'state-store-preflight', 'plan-token', 'canonical-worker-id',
+  'flattened-scopes', 'git-metadata-readonly', 'legacy-state-migration',
+  'legacy-active-failsafe'
 )
 $coveredSafetyControls = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+$stateDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 function Register-SafetyControl([string]$Name) {
   if ($requiredSafetyControls -notcontains $Name) { throw "Unknown safety control: $Name" }
@@ -70,6 +74,37 @@ function Get-WorkspaceId {
   (Get-GovernorData $status).workspace_id
 }
 
+function Get-StatePath {
+  param([string]$Repo = $fixtureRepo)
+  $status = Invoke-Governor @('-Action', 'status') $Repo
+  Assert-Success $status 'Governor status failed while resolving state identity.'
+  $repositoryId = (Get-GovernorData $status).repository_id
+  $directory = Join-Path (Join-Path ([System.IO.Path]::GetTempPath()) 'Chronos\Governor') $repositoryId
+  $null = $stateDirectories.Add([System.IO.Path]::GetFullPath($directory))
+  Join-Path $directory 'governor-state.json'
+}
+
+function New-TestPlan {
+  param(
+    [string]$Task,
+    [string]$Mode = 'read',
+    [string[]]$AllowedScope = @('src/**'),
+    [string]$Class = 'simple-code',
+    [string]$Repo = $fixtureRepo,
+    [string]$Attribution = '',
+    [string[]]$Extra = @()
+  )
+  $arguments = @(
+    '-Action', 'plan', '-TaskId', $Task, '-TaskClass', $Class,
+    '-AccessMode', $Mode, '-Scope'
+  ) + $AllowedScope
+  if ($Mode -eq 'write') {
+    if (-not $Attribution) { $Attribution = 'attr-' + $Task }
+    $arguments += @('-ExpectedWorkspaceId', (Get-WorkspaceId $Repo), '-MutationAttributionId', $Attribution, '-MutationAttributionVerified')
+  }
+  Invoke-Governor ($arguments + $Extra) $Repo
+}
+
 function New-TestLease {
   param(
     [string]$Task,
@@ -80,14 +115,13 @@ function New-TestLease {
     [string]$Repo = $fixtureRepo,
     [string]$Attribution = ''
   )
-  $arguments = @(
-    '-Action', 'lease', '-TaskId', $Task, '-TaskClass', $Class,
-    '-AccessMode', $Mode, '-Scope'
-  ) + $AllowedScope + @('-WorkerId', $Worker, '-ReasoningEffort', $(if ($Class -in @('simple-code', 'tests', 'review')) { 'medium' } else { 'low' }))
-  if ($Mode -eq 'write') {
-    if (-not $Attribution) { $Attribution = 'attr-' + $Task }
-    $arguments += @('-ExpectedWorkspaceId', (Get-WorkspaceId $Repo), '-MutationAttributionId', $Attribution, '-MutationAttributionVerified')
-  }
+  if ($Mode -eq 'write' -and -not $Attribution) { $Attribution = 'attr-' + $Task }
+  $planResult = New-TestPlan $Task $Mode $AllowedScope $Class $Repo $Attribution
+  Assert-Success $planResult "Plan $Task failed."
+  $plan = Get-GovernorData $planResult
+  Assert-Equal $plan.decision 'delegate' "Plan $Task did not authorize delegation."
+  if (-not $plan.plan_token) { throw "Plan $Task did not return an opaque token." }
+  $arguments = @('-Action', 'lease', '-TaskId', $Task, '-WorkerId', $Worker, '-PlanToken', $plan.plan_token)
   $result = Invoke-Governor $arguments $Repo
   Assert-Success $result "Lease $Task failed."
   $data = Get-GovernorData $result
@@ -136,6 +170,40 @@ try {
   New-FixtureRepository $fixtureRepo
   $mainBranch = (& git -C $fixtureRepo branch --show-current).Trim()
   $workspaceId = Get-WorkspaceId
+  $fixtureStatePath = Get-StatePath
+  $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
+  if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Governor runtime state must not be stored beneath Git metadata.'
+  }
+  Register-SafetyControl 'state-store-outside-git'
+
+  $blockedLegacyPath = Join-Path $fixtureRepo '.git\chronos'
+  Set-Content -LiteralPath $blockedLegacyPath -Value 'Git metadata intentionally unavailable for Governor writes.'
+  $metadataReadOnlyLease = New-TestLease 'metadata-readonly' '/root/metadata-reader' 'read' @('README.md') 'review'
+  Assert-Success (Invoke-LeaseAction $metadataReadOnlyLease 'release') 'Governor should work when its former Git-metadata path is unwritable.'
+  Remove-Item -LiteralPath $blockedLegacyPath -Force
+  Register-SafetyControl 'git-metadata-readonly'
+  Register-SafetyControl 'canonical-worker-id'
+  Register-SafetyControl 'plan-token'
+
+  $flattenedPlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'flattened-scopes', '-TaskClass', 'docs',
+    '-AccessMode', 'read', '-Scope', 'README.md,docs/**'
+  )
+  Assert-Success $flattenedPlan 'Flattened scope planning failed.'
+  $flattenedPlanData = Get-GovernorData $flattenedPlan
+  Assert-Equal @($flattenedPlanData.scopes).Count 2 'Comma-flattened scopes must normalize to two entries.'
+  $flattenedLease = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'flattened-scopes', '-WorkerId', '/root/flattened',
+    '-PlanToken', $flattenedPlanData.plan_token
+  )
+  Assert-Success $flattenedLease 'Flattened scope plan token should lease without reparsing scopes.'
+  $flattenedLeaseData = Get-GovernorData $flattenedLease
+  Assert-Success (Invoke-Governor @(
+    '-Action', 'release', '-TaskId', 'flattened-scopes', '-WorkerId', '/root/flattened',
+    '-LeaseId', $flattenedLeaseData.lease_id, '-FencingToken', $flattenedLeaseData.fencing_token
+  )) 'Flattened scope lease release failed.'
+  Register-SafetyControl 'flattened-scopes'
 
   $readPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-order', '-TaskClass', 'simple-code',
@@ -224,13 +292,9 @@ try {
   Assert-Success $renewed 'Lease renewal failed.'
   Register-SafetyControl 'lease-renewal'
 
-  $secondWriter = Invoke-Governor @(
-    '-Action', 'lease', '-TaskId', 'write-second', '-TaskClass', 'docs',
-    '-AccessMode', 'write', '-Scope', 'docs/**', '-WorkerId', 'writer-second',
-    '-ReasoningEffort', 'low', '-ExpectedWorkspaceId', $workspaceId,
-    '-MutationAttributionId', 'attr-write-second', '-MutationAttributionVerified'
-  )
-  Assert-Failure $secondWriter 'single_writer_lease_active' 'A second writer in the repository must be serialized.'
+  $secondWriter = New-TestPlan 'write-second' 'write' @('docs/**') 'docs' $fixtureRepo 'attr-write-second'
+  Assert-Success $secondWriter 'Second-writer planning failed.'
+  Assert-Equal (Get-GovernorData $secondWriter).reason 'single_writer_lease_active' 'A second writer in the repository must be serialized.'
   Register-SafetyControl 'single-writer'
 
   Set-Content -LiteralPath (Join-Path $fixtureRepo 'src\app.ps1') -Value "'worker change'"
@@ -292,7 +356,7 @@ try {
   Assert-Success (Invoke-LeaseAction $correctionLease 'retire') 'Worker retirement failed.'
 
   $expiredLease = New-TestLease 'expired' 'reader-expired' 'read' @('src/**') 'explore'
-  $statePath = Join-Path $fixtureRepo '.git\chronos\governor-state.json'
+  $statePath = Get-StatePath
   $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
   $state.leases.expired.expires_at = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
   $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $statePath -Encoding UTF8
@@ -363,15 +427,20 @@ try {
   $concurrentRepo = Join-Path $testRoot 'concurrent-repo'
   New-FixtureRepository $concurrentRepo
   $concurrentWorkspace = Get-WorkspaceId $concurrentRepo
+  $racePlans = @{}
+  foreach ($index in 1..2) {
+    $racePlanResult = New-TestPlan "race-$index" 'write' @('src/**') 'simple-code' $concurrentRepo "attr-race-$index"
+    Assert-Success $racePlanResult "Concurrent writer plan $index failed."
+    $racePlanData = Get-GovernorData $racePlanResult
+    Assert-Equal $racePlanData.decision 'delegate' "Concurrent writer plan $index should be eligible before either lease starts."
+    $racePlans[$index] = $racePlanData.plan_token
+  }
   $jobs = @()
   foreach ($index in 1..2) {
     $args = @(
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $governorScript,
-      '-Repository', $concurrentRepo, '-RuntimeModels', $runtimeModels, '-Action', 'lease',
-      '-TaskId', "race-$index", '-TaskClass', 'simple-code', '-AccessMode', 'write',
-      '-Scope', 'src/**', '-WorkerId', "race-worker-$index", '-ReasoningEffort', 'medium',
-      '-ExpectedWorkspaceId', $concurrentWorkspace, '-MutationAttributionId', "attr-race-$index",
-      '-MutationAttributionVerified'
+      '-Repository', $concurrentRepo, '-Action', 'lease', '-TaskId', "race-$index",
+      '-WorkerId', "race-worker-$index", '-PlanToken', $racePlans[$index]
     )
     $jobs += Start-Job -ScriptBlock {
       param($ProcessArguments)
@@ -382,7 +451,7 @@ try {
   $raceResults = @($jobs | Wait-Job | Receive-Job)
   $jobs | Remove-Job -Force
   Assert-Equal @($raceResults | Where-Object { $_.ExitCode -eq 0 }).Count 1 'Exactly one concurrent writer lease should succeed.'
-  Assert-Equal @($raceResults | Where-Object { $_.Text -match 'single_writer_lease_active|state_locked' }).Count 1 'The competing writer must fail safely.'
+  Assert-Equal @($raceResults | Where-Object { $_.Text -match 'single_writer_lease_active|state_lock_unavailable' }).Count 1 'The competing writer must fail safely.'
   Register-SafetyControl 'concurrent-writers'
   $raceWinner = Get-GovernorData ($raceResults | Where-Object { $_.ExitCode -eq 0 } | Select-Object -First 1)
   $raceRelease = Invoke-Governor @(
@@ -393,17 +462,28 @@ try {
 
   $lockRepo = Join-Path $testRoot 'lock-repo'
   New-FixtureRepository $lockRepo
-  $lockStateDirectory = Join-Path $lockRepo '.git\chronos'
-  $lockDirectory = Join-Path $lockStateDirectory 'governor-state.json.lock'
+  $lockStatePath = Get-StatePath $lockRepo
+  $lockDirectory = $lockStatePath + '.lock'
   New-Item -ItemType Directory -Path $lockDirectory -Force | Out-Null
   Set-Content -LiteralPath (Join-Path $lockDirectory 'owner.json') -Value '{partial'
   (Get-Item -LiteralPath (Join-Path $lockDirectory 'owner.json')).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
-  $staleRecovered = Invoke-Governor @(
-    '-Action', 'lease', '-TaskId', 'stale-lock', '-TaskClass', 'explore',
-    '-AccessMode', 'read', '-Scope', 'src/**', '-WorkerId', 'reader-stale',
-    '-ReasoningEffort', 'low', '-LockStaleSeconds', '1'
+  $stalePlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'stale-lock', '-TaskClass', 'explore',
+    '-AccessMode', 'read', '-Scope', 'src/**', '-LockStaleSeconds', '1'
   ) $lockRepo
-  Assert-Success $staleRecovered 'Malformed stale lock should be quarantined and recovered.'
+  Assert-Success $stalePlan 'Malformed stale lock should be quarantined and recovered during planning.'
+  $stalePlanData = Get-GovernorData $stalePlan
+  Assert-Equal $stalePlanData.decision 'delegate' 'Recovered stale lock should permit delegation.'
+  $staleRecovered = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'stale-lock', '-WorkerId', 'reader-stale',
+    '-PlanToken', $stalePlanData.plan_token, '-LockStaleSeconds', '1'
+  ) $lockRepo
+  Assert-Success $staleRecovered 'Recovered plan token should lease.'
+  $replayedPlan = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'stale-lock', '-WorkerId', 'reader-replay',
+    '-PlanToken', $stalePlanData.plan_token
+  ) $lockRepo
+  Assert-Failure $replayedPlan 'plan_already_consumed' 'A plan token must be single use.'
   Register-SafetyControl 'stale-lock-recovery'
   $staleData = Get-GovernorData $staleRecovered
   Assert-Success (Invoke-Governor @(
@@ -421,21 +501,21 @@ try {
   Set-Content -LiteralPath (Join-Path $lockDirectory 'owner.json') -Value $liveOwner
   (Get-Item -LiteralPath (Join-Path $lockDirectory 'owner.json')).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
   $liveBlocked = Invoke-Governor @(
-    '-Action', 'lease', '-TaskId', 'live-lock', '-TaskClass', 'explore',
-    '-AccessMode', 'read', '-Scope', 'src/**', '-WorkerId', 'reader-live',
-    '-ReasoningEffort', 'low', '-LockStaleSeconds', '1'
+    '-Action', 'plan', '-TaskId', 'live-lock', '-TaskClass', 'explore',
+    '-AccessMode', 'read', '-Scope', 'src/**', '-LockStaleSeconds', '1'
   ) $lockRepo
-  Assert-Failure $liveBlocked 'state_locked' 'An old but live lock owner must never be stolen.'
+  Assert-Success $liveBlocked 'A live lock should produce a safe coordinator decision.'
+  Assert-Equal (Get-GovernorData $liveBlocked).reason 'state_lock_unavailable' 'An old but live lock owner must never be stolen.'
   Assert-Equal (Test-Path -LiteralPath (Join-Path $lockDirectory 'owner.json')) $true 'Failed lock acquisition must not delete the current owner.'
   Register-SafetyControl 'live-lock-preservation'
 
-  $stateText = Get-Content -Raw -LiteralPath (Join-Path $fixtureRepo '.git\chronos\governor-state.json')
+  $stateText = Get-Content -Raw -LiteralPath (Get-StatePath)
   if ($stateText -match [regex]::Escape($fixtureRepo) -or $stateText -match 'objective|prompt|response|tool_output|commands_executed|example.invalid') {
     throw "Governor state contains forbidden content.`n$stateText"
   }
   Register-SafetyControl 'privacy-state'
 
-  $statePath = Join-Path $fixtureRepo '.git\chronos\governor-state.json'
+  $statePath = Get-StatePath
   $stateBackup = Join-Path $testRoot 'state-backup.json'
   Copy-Item -LiteralPath $statePath -Destination $stateBackup
   Set-Content -LiteralPath $statePath -Value '{not-json'
@@ -448,6 +528,51 @@ try {
   $interruptedStatus = Invoke-Governor @('-Action', 'status')
   Assert-Success $interruptedStatus 'An interrupted temporary state write must not replace valid state.'
   Register-SafetyControl 'interrupted-write'
+
+  $unwritableRepo = Join-Path $testRoot 'unwritable-store-repo'
+  New-FixtureRepository $unwritableRepo
+  $unwritableStatePath = Get-StatePath $unwritableRepo
+  $unwritableDirectory = Split-Path -Parent $unwritableStatePath
+  New-Item -ItemType Directory -Path (Split-Path -Parent $unwritableDirectory) -Force | Out-Null
+  Set-Content -LiteralPath $unwritableDirectory -Value 'A file deliberately blocks Governor state-directory creation.'
+  $unwritablePlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'unwritable-store', '-TaskClass', 'explore',
+    '-AccessMode', 'read', '-Scope', 'src/**'
+  ) $unwritableRepo
+  Assert-Success $unwritablePlan 'Unwritable state store should fail closed without a process error.'
+  Assert-Equal (Get-GovernorData $unwritablePlan).decision 'coordinator' 'Unwritable state store must prevent delegation.'
+  Assert-Equal (Get-GovernorData $unwritablePlan).reason 'state_store_unwritable' 'Unwritable state store must be explainable.'
+  Remove-Item -LiteralPath $unwritableDirectory -Force
+  Register-SafetyControl 'state-store-preflight'
+
+  $legacyRepo = Join-Path $testRoot 'legacy-state-repo'
+  New-FixtureRepository $legacyRepo
+  $legacyStatePath = Join-Path $legacyRepo '.git\chronos\governor-state.json'
+  New-Item -ItemType Directory -Path (Split-Path -Parent $legacyStatePath) -Force | Out-Null
+  @{
+    version = 2; state_revision = 7; workers = @{}; tasks = @{}; leases = @{}
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $legacyStatePath
+  $legacyPlan = New-TestPlan 'legacy-migration' 'read' @('src/**') 'explore' $legacyRepo
+  Assert-Success $legacyPlan 'Inactive legacy state migration failed.'
+  Assert-Equal (Get-GovernorData $legacyPlan).decision 'delegate' 'Inactive legacy state should migrate before delegation.'
+  $migratedStatePath = Get-StatePath $legacyRepo
+  Assert-Equal (Get-Content -Raw -LiteralPath $migratedStatePath | ConvertFrom-Json).version 3 'Migrated state must use version 3.'
+  Register-SafetyControl 'legacy-state-migration'
+
+  $activeLegacyRepo = Join-Path $testRoot 'active-legacy-state-repo'
+  New-FixtureRepository $activeLegacyRepo
+  $activeLegacyStatePath = Join-Path $activeLegacyRepo '.git\chronos\governor-state.json'
+  New-Item -ItemType Directory -Path (Split-Path -Parent $activeLegacyStatePath) -Force | Out-Null
+  @{
+    version = 2
+    state_revision = 7
+    workers = @{}
+    tasks = @{}
+    leases = @{ legacy = @{ status = 'working' } }
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $activeLegacyStatePath
+  $activeLegacyPlan = New-TestPlan 'active-legacy' 'read' @('src/**') 'explore' $activeLegacyRepo
+  Assert-Failure $activeLegacyPlan 'state_migration_active_leases' 'Active legacy leases must fail closed during migration.'
+  Register-SafetyControl 'legacy-active-failsafe'
 
   $customState = Join-Path $testRoot 'custom-state.json'
   Set-Content -LiteralPath $customState -Value '{private-test}'
@@ -473,6 +598,13 @@ try {
   $resolvedTest = [System.IO.Path]::GetFullPath($testRoot)
   if ($resolvedTest.StartsWith($resolvedTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
     Remove-Item -LiteralPath $resolvedTest -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $governorTempRoot = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) 'Chronos\Governor'))
+  foreach ($stateDirectory in $stateDirectories) {
+    $resolvedStateDirectory = [System.IO.Path]::GetFullPath($stateDirectory)
+    if ($resolvedStateDirectory.StartsWith($governorTempRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Remove-Item -LiteralPath $resolvedStateDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 }
 

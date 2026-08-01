@@ -32,8 +32,11 @@ Governor canonicalizes Windows paths before hashing them.
 - Junction or equivalent paths that resolve to the same worktree produce the
   same workspace identity.
 
-No absolute path is persisted. Custom state paths are disabled because a second
-state file could bypass repository-wide writer exclusion.
+No absolute path is persisted. State is keyed by `repository_id` beneath the
+current user's Windows temporary application-data directory, so linked
+worktrees share serialization without requiring writes to `.git`. Custom state
+paths are disabled because a second state file could bypass repository-wide
+writer exclusion.
 
 ## Write Safety
 
@@ -58,11 +61,18 @@ silently attributed to the result.
 ## Leases And Locks
 
 ```text
-plan -> lease -> renew as needed -> result -> verify -> accept
+plan (persist token) -> lease (consume token) -> renew as needed -> result -> verify -> accept
                   |                         |
                   +-> correct once --------+
                   +-> retire or release
 ```
+
+A delegating plan first acquires the state lock and atomically persists its
+normalized scopes, model selection, workspace identity, and attribution state.
+It returns a short-lived opaque token only after persistence succeeds. Lease
+activation accepts that token and the runtime-issued worker ID, then consumes
+the plan exactly once. This prevents command-line scope flattening or
+plan-to-lease normalization drift.
 
 Every lease has an opaque lease ID, fencing token, expiry, repository identity,
 workspace identity, base commit, scope, and attribution hash. Lifecycle actions
@@ -83,6 +93,7 @@ owner's lock.
 | --- | --- |
 | Active workers | 2 |
 | Active writers per repository | 1 |
+| Plan-token duration | 5 minutes |
 | Lease duration | 30 minutes |
 | Total attempts per task | 3 |
 | Corrections per worker | 1 |
@@ -105,8 +116,15 @@ Run `governor.ps1 -Action status` to inspect opaque counts and identities.
   pass that exact workspace ID.
 - `mutation_attribution_unverified`: keep the write with the coordinator unless
   the runtime exposes reliable attribution.
-- `state_locked`: another live state writer owns the lock. Wait briefly. Do not
+- `state_store_unwritable`: no worker was authorized because the local state
+  location could not be written. Continue with the coordinator.
+- `state_lock_unavailable`: another live state writer owns the lock. Wait
+  briefly or continue with the coordinator. Do not
   delete it manually.
+- `plan_token_required`, `plan_token_mismatch`, or `plan_expired`: discard the
+  worker assignment, plan again, and do not bypass Governor.
+- `invalid_worker_id`: use the exact runtime-issued ID. Canonical IDs such as
+  `/root/name` are supported; malformed paths are rejected.
 - `lease_expired`: explicitly release the abandoned lease with coordinator
   acceptance, then plan again.
 - `state_invalid_json`: preserve the state file for diagnosis. Governor will not
@@ -114,14 +132,16 @@ Run `governor.ps1 -Action status` to inspect opaque counts and identities.
 - `workspace_changed_after_result`: inspect all changes and take over locally;
   the original result can no longer be attributed safely.
 
-Interrupted `.tmp-*` files do not replace valid state. State version 1 migrates
-only when it has no active leases; an active legacy lease fails closed.
+Interrupted `.tmp-*` files do not replace valid state. Inactive version 1 or 2
+state beneath Git metadata migrates to the per-user store. An active legacy
+lease fails closed and must be finished with the previous release.
 
 ## State And Privacy
 
-State lives at `chronos/governor-state.json` under Git's canonical common
-directory. It contains only opaque IDs, hashes, base commits, relative scopes,
-model labels, counters, status, and timestamps. It never stores prompts,
+State lives at `Chronos/Governor/<repository-hash>/governor-state.json` beneath
+the current user's Windows temporary application-data directory. It contains
+only opaque IDs, hashes, base commits, relative scopes, model labels, counters,
+status, and timestamps. It never stores prompts,
 responses, objectives, source, diffs, commands, tool arguments, tool output,
 credentials, usernames, environment values, or absolute paths. Chronos does not
 transmit this state or create telemetry.
