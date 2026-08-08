@@ -18,6 +18,8 @@ $tokenIntegrityHome = Join-Path $testRoot "token-integrity-home"
 $largeTailHome = Join-Path $testRoot "large-tail-home"
 $aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
 $v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
+$reviewerHealthHome = Join-Path $testRoot "reviewer-health-home"
+$forkReplayHome = Join-Path $testRoot "fork-replay-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -30,7 +32,7 @@ function Assert-Match($value, $pattern, $message) {
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
-    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $forkReplayHome `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -289,6 +291,164 @@ try {
   if (($tokenOutput -join "`n") -match "private fixture arguments") {
     throw "Chronos output exposed tool arguments."
   }
+
+  $reviewerSessionDay = Join-Path (Join-Path (Join-Path $reviewerHealthHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $reviewerSessionDay = Join-Path $reviewerSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $reviewerSessionDay -Force | Out-Null
+  $reviewerPath = Join-Path $reviewerSessionDay "rollout-reviewer-fixture.jsonl"
+  $reviewerRecords = [System.Collections.Generic.List[string]]::new()
+  $reviewerStart = [DateTimeOffset]::UtcNow.AddMinutes(-10)
+  $reviewerRecords.Add((@{
+    timestamp = $reviewerStart.AddSeconds(-1).ToString("o")
+    type = "session_meta"
+    payload = @{
+      multi_agent_version = 2
+      codex_version = "0.146.0-alpha.3.1"
+      auth_provider = "chatgpt"
+      auto_review_model_configurable = $false
+      parent_thread_id = "private-parent-id-must-not-be-returned"
+    }
+  } | ConvertTo-Json -Compress -Depth 8))
+  foreach ($index in 0..589) {
+    $reviewerRecords.Add((@{
+      timestamp = $reviewerStart.AddSeconds($index).ToString("o")
+      type = "turn_context"
+      payload = @{ model = "codex-auto-review"; approval_mode = "auto" }
+    } | ConvertTo-Json -Compress -Depth 8))
+    if ($index -lt 589) {
+      $reviewerRecords.Add((@{
+        timestamp = $reviewerStart.AddSeconds($index).AddMilliseconds(1).ToString("o")
+        type = "thread_settings_applied"
+        payload = @{ model = "codex-auto-review" }
+      } | ConvertTo-Json -Compress -Depth 8))
+    }
+  }
+  foreach ($index in 0..9) {
+    $reviewerRecords.Add((@{
+      timestamp = $reviewerStart.AddSeconds(590 + $index).ToString("o")
+      type = "event_msg"
+      payload = @{
+        type = "exec_approval_request"
+        tool_name = "shell"
+        permission_class = "workspace-read"
+        operation_class = "read"
+        command = "private command text must never be returned"
+      }
+    } | ConvertTo-Json -Compress -Depth 8))
+  }
+  $reviewerRecords.Add((@{
+    timestamp = $reviewerStart.AddSeconds(599).AddMilliseconds(1).ToString("o")
+    type = "event_msg"
+    payload = @{
+      type = "apply_patch_approval_request"
+      tool_name = "apply_patch"
+      permission_class = "workspace-write"
+      operation_class = "write"
+    }
+  } | ConvertTo-Json -Compress -Depth 8))
+  $reviewerRecords.Add((@{
+    timestamp = $reviewerStart.AddSeconds(599).AddMilliseconds(2).ToString("o")
+    type = "event_msg"
+    payload = @{ type = "approval_decision"; decision = "denied" }
+  } | ConvertTo-Json -Compress -Depth 8))
+  $duplicateCompaction = (@{
+    timestamp = $reviewerStart.AddSeconds(600).ToString("o")
+    type = "event_msg"
+    payload = @{ type = "context_compacted" }
+  } | ConvertTo-Json -Compress -Depth 8)
+  $reviewerRecords.Add($duplicateCompaction)
+  [System.IO.File]::WriteAllLines($reviewerPath, $reviewerRecords, [System.Text.UTF8Encoding]::new($false))
+  $reviewerDuplicatePath = Join-Path $reviewerSessionDay "rollout-reviewer-duplicate-fixture.jsonl"
+  [System.IO.File]::WriteAllText(
+    $reviewerDuplicatePath,
+    $duplicateCompaction + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $reviewerOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $reviewerHealthHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos reviewer-health inspection failed." }
+  Assert-Match $reviewerOutput " approvalReviewTurnsObserved=590 " `
+    "Reviewer turns must count only turn_context records, not matching bookkeeping records."
+  Assert-Match $reviewerOutput " approvalReviewerSessionsObserved=1 " `
+    "Reviewer sessions should be counted without exposing session identifiers."
+  Assert-Match $reviewerOutput " approvalReviewerModels=codex-auto-review " `
+    "The observed reviewer model was not surfaced."
+  Assert-Match $reviewerOutput " approvalReviewObservation=observed " `
+    "Complete reviewer coverage should qualify the count as observed."
+  Assert-Match $reviewerOutput " approvalAverageIntervalSeconds=1([.,]0)? " `
+    "Reviewer intervals should be calculated from structured timestamps."
+  Assert-Match $reviewerOutput " approvalPeakPerMinute=60 approvalConcurrentPeak=1 approvalParentLinksObserved=1 " `
+    "Reviewer peak, concurrency, and parent-link aggregates were not reported."
+  Assert-Match $reviewerOutput " approvalRequestsObserved=11 approvalUniqueClasses=2 approvalRepeatedRequests=9 approvalRepeatPct=81([.,]8)? " `
+    "Structured approval requests should be classed without reading command text."
+  Assert-Match $reviewerOutput " approvalSources=filesystem:1,shell:10 approvalDeniedObserved=1 approvalDeniedObservation=observed " `
+    "Approval source and denial aggregates were not reported."
+  Assert-Match $reviewerOutput " rolloutLineageLinksObserved=1 rolloutForkFilesObserved=1 " `
+    "Sanitized lineage counts should recognize the parent link."
+  Assert-Match $reviewerOutput " codexVersionsObserved=0\.146\.0-alpha\.3\.1 authProvidersObserved=chatgpt " `
+    "Sanitized runtime metadata should be reported when available."
+  Assert-Match $reviewerOutput " approvalModesObserved=auto reviewerControlCapability=unsupported reviewerCompatibility=diagnostic_only " `
+    "Reviewer-control capability must be explicit and must not invent an override."
+  Assert-Match $reviewerOutput " rolloutCrossFileDuplicateCompactions=1 " `
+    "Exact cross-rollout compaction duplicates should be identified separately."
+  Assert-Match $reviewerOutput " approvalRequestObservation=observed approvalOptimization=manual_narrow_rule_review " `
+    "Observed structured repetition should recommend only manual narrow-rule review."
+  if (($reviewerOutput -join "`n") -match "private-parent-id|private command text") {
+    throw "Chronos output exposed a session identifier or approval command."
+  }
+
+  $forkSessionDay = Join-Path (Join-Path (Join-Path $forkReplayHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $forkSessionDay = Join-Path $forkSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $forkSessionDay -Force | Out-Null
+  function New-ForkTokenRecord([string]$Timestamp, [long]$InputTokens) {
+    @{
+      timestamp = $Timestamp
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = $InputTokens
+            cached_input_tokens = 0
+            cache_write_input_tokens = 0
+            output_tokens = 1000
+            reasoning_output_tokens = 100
+            total_tokens = $InputTokens + 1000
+          }
+          last_token_usage = @{ total_tokens = 1000 }
+        }
+      }
+    } | ConvertTo-Json -Compress -Depth 8
+  }
+  $sharedForkToken = New-ForkTokenRecord "2026-08-01T12:00:00Z" 10000000L
+  $childForkToken = New-ForkTokenRecord "2026-08-01T12:01:00Z" 12000000L
+  $primaryTurn = @{
+    timestamp = "2026-08-01T11:59:00Z"
+    type = "turn_context"
+    payload = @{ model = "gpt-primary"; effort = "medium" }
+  } | ConvertTo-Json -Compress -Depth 8
+  $parentForkPath = Join-Path $forkSessionDay "rollout-parent.jsonl"
+  [System.IO.File]::WriteAllLines(
+    $parentForkPath, @($primaryTurn, $sharedForkToken), [System.Text.UTF8Encoding]::new($false)
+  )
+  Start-Sleep -Milliseconds 20
+  $childForkPath = Join-Path $forkSessionDay "rollout-child.jsonl"
+  [System.IO.File]::WriteAllLines(
+    $childForkPath, @($primaryTurn, $sharedForkToken, $childForkToken),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $forkOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $forkReplayHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos fork replay inspection failed." }
+  Assert-Match $forkOutput " tokenFiles=2 tokenSamples=3 tokenSessionInputM=12([.,]0)? " `
+    "Exact inherited token snapshots must contribute only the child's observed delta."
+  Assert-Match $forkOutput " tokenInheritedSnapshots=1 tokenLineageDeltaFiles=1 " `
+    "Exact inherited snapshot and lineage-delta counts were not reported."
+  Assert-Match $forkOutput " rolloutCrossFileDuplicateRecords=2 " `
+    "Exact duplicated turn and token records should be counted across rollouts."
 
   $largeSessionDay = Join-Path (Join-Path (Join-Path $largeTailHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")

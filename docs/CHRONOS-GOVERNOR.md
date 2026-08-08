@@ -15,11 +15,20 @@ passes them in advertised order:
 model-a=low,medium,high;model-b=low,medium
 ```
 
+Optional runtime-supplied cost rank uses:
+
+```text
+model-a=low,medium,high|cost=20;model-b=low,medium|cost=1
+```
+
 An explicitly requested model must be present and support the requested effort.
-Without an explicit request, Governor selects the first compatible advertised
-entry. It returns the inventory hash, selected index, and reason so the choice is
-deterministic and auditable. Missing, malformed, stale, or incompatible
-inventories return the work to the coordinator.
+Without an explicit request, Governor selects the lowest compatible cost rank
+only when every compatible entry carries verified ranking metadata. If ranking
+is absent or partial, it preserves runtime inventory order. It returns the
+inventory hash, selected index, optional cost rank, and reason so the choice is
+deterministic and auditable. Chronos never infers cost from model names. Missing,
+malformed, stale, or incompatible inventories return the work to the
+coordinator.
 
 ## Identity Model
 

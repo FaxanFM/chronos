@@ -332,19 +332,34 @@ function Read-RuntimeModelInventory {
     $model = Normalize-ModelIdentifier $parts[0].Trim()
     $key = $model.ToLowerInvariant()
     if ($seen.ContainsKey($key)) { Throw-GovernorError "invalid_model_inventory" }
-    $efforts = @($parts[1].Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+    $metadataParts = @($parts[1].Split('|'))
+    if ($metadataParts.Count -gt 2) { Throw-GovernorError "invalid_model_inventory" }
+    $efforts = @($metadataParts[0].Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
     if ($efforts.Count -eq 0) { Throw-GovernorError "invalid_model_inventory" }
     foreach ($effort in $efforts) {
       if ($effort -notin @('low', 'medium', 'high', 'xhigh', 'max', 'ultra')) {
         Throw-GovernorError "invalid_model_inventory"
       }
     }
+    $costRank = $null
+    if ($metadataParts.Count -eq 2) {
+      $costParts = @($metadataParts[1].Trim().Split('=', 2))
+      $parsedRank = 0
+      if (
+        $costParts.Count -ne 2 -or $costParts[0].Trim().ToLowerInvariant() -ne 'cost' -or
+        -not [int]::TryParse($costParts[1].Trim(), [ref]$parsedRank) -or
+        $parsedRank -lt 0 -or $parsedRank -gt 1000000
+      ) { Throw-GovernorError "invalid_model_inventory" }
+      $costRank = $parsedRank
+    }
     $seen[$key] = $true
-    $models += ,@{ id = $model; efforts = @($efforts); index = $index }
+    $models += ,@{ id = $model; efforts = @($efforts); index = $index; cost_rank = $costRank }
     $index++
   }
   if ($models.Count -eq 0) { Throw-GovernorError "invalid_model_inventory" }
-  $canonical = @($models | ForEach-Object { $_.id + '=' + ($_.efforts -join ',') }) -join ';'
+  $canonical = @($models | ForEach-Object {
+      $_.id + '=' + ($_.efforts -join ',') + $(if ($null -ne $_.cost_rank) { '|cost=' + $_.cost_rank } else { '' })
+    }) -join ';'
   @{ models = @($models); hash = Get-TextHash $canonical; available = $true }
 }
 
@@ -362,13 +377,24 @@ function Select-RuntimeModel {
     if ($match[0].efforts -notcontains $Effort) {
       return @{ selected = $false; reason = 'model_effort_unsupported'; model = $null; index = $null }
     }
-    return @{ selected = $true; reason = 'requested_model_validated'; model = $match[0].id; index = $match[0].index }
+    return @{ selected = $true; reason = 'requested_model_validated'; model = $match[0].id; index = $match[0].index; cost_rank = $match[0].cost_rank }
   }
-  $compatible = @($Inventory.models | Where-Object { $_.efforts -contains $Effort } | Select-Object -First 1)
+  $compatible = @($Inventory.models | Where-Object { $_.efforts -contains $Effort })
   if ($compatible.Count -eq 0) {
     return @{ selected = $false; reason = 'no_compatible_worker_model'; model = $null; index = $null }
   }
-  @{ selected = $true; reason = 'runtime_inventory_order'; model = $compatible[0].id; index = $compatible[0].index }
+  $allRanked = @($compatible | Where-Object { $null -eq $_.cost_rank }).Count -eq 0
+  if ($allRanked) {
+    $ranked = @($compatible | Sort-Object @{ Expression = { $_.cost_rank } }, @{ Expression = { $_.index } })
+    return @{
+      selected = $true; reason = 'runtime_cost_rank'; model = $ranked[0].id
+      index = $ranked[0].index; cost_rank = $ranked[0].cost_rank
+    }
+  }
+  @{
+    selected = $true; reason = 'runtime_inventory_order_unranked'; model = $compatible[0].id
+    index = $compatible[0].index; cost_rank = $null
+  }
 }
 
 function Get-HeadState {
@@ -750,6 +776,7 @@ try {
           model_selection_reason = $selection.reason
           model_inventory_hash = $inventory.hash
           model_inventory_index = $selection.index
+          model_cost_rank = $selection.cost_rank
           reasoning_effort = $effort
           mutation_attribution_hash = $attributionHash
           mutation_attribution_verified = [bool]$MutationAttributionVerified
@@ -785,6 +812,7 @@ try {
       model_selection_reason = $selection.reason
       model_inventory_hash = $inventory.hash
       model_inventory_index = $selection.index
+      model_cost_rank = $selection.cost_rank
       reasoning_effort = $effort
       access_mode = $AccessMode
       scopes = $scopes
@@ -830,6 +858,7 @@ try {
         selected = $true
         model = [string]$plan.selected_model
         index = $plan.model_inventory_index
+        cost_rank = $plan.model_cost_rank
       }
       $active = @(Get-ActiveLeases $state)
       if ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
@@ -894,6 +923,7 @@ try {
         model_verification = if ($EffectiveModel) { 'reported' } else { 'runtime_not_exposed' }
         model_inventory_hash = $plan.model_inventory_hash
         model_inventory_index = $selection.index
+        model_cost_rank = $selection.cost_rank
         reasoning_effort = $ReasoningEffort
         access_mode = $AccessMode
         status = 'leased'
@@ -940,6 +970,7 @@ try {
         selected_model = $selection.model
         model_inventory_hash = $plan.model_inventory_hash
         model_inventory_index = $selection.index
+        model_cost_rank = $selection.cost_rank
         attempt = $attempts
         max_attempts = $MaxTotalAttempts
         max_delegation_depth = 1

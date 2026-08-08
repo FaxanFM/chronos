@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.0
+
+- Add exact, schema-aware `codex-auto-review` turn counting that excludes
+  similarly named bookkeeping records.
+- Add reviewer-session, review-rate, reviewer-versus-primary aggregate, and
+  review-coverage fields without exposing identifiers, prompts, commands, or
+  raw rollout content.
+- Add bounded rollout storage, explicitly estimated growth and projection,
+  lineage counts, exact replay bytes, near-size clusters, and compaction
+  duplication observations.
+- Deduplicate exact inherited token snapshots by observed lineage delta while
+  labeling non-exact totals as selected-rollout snapshots rather than billing.
+- Classify structured approval sources and repeated request classes from safe
+  categorical fields, with unavailable states when the schema is insufficient.
+- Select a compatible worker by runtime-supplied cost rank only when ranking
+  metadata is complete; otherwise preserve deterministic runtime order.
+- Add 590-turn reviewer, approval-class, lineage-delta, privacy, ranked-model,
+  and duplicate-compaction regressions.
+
+No warning threshold, critical threshold, scoring weight, approval rule,
+predictive claim, or calibration-sensitive behavior changed in this release.
+
 ## v0.5.4
 
 - Move Governor runtime state out of Git metadata into a sandbox-writable,

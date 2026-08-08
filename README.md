@@ -16,6 +16,9 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Separates cached reads from observed GPT-5.6 cache writes and flags quota
   amplification from large contexts, high reasoning, subagents, and repeated
   compaction.
+- Counts actual automatic-review turns from structured `turn_context` records,
+  distinguishes them from bookkeeping, and reports only bounded aggregate review
+  and rollout-growth observations.
 - Recommends the safest next step for the current condition.
 - Routes exploration, documentation, tests, mechanical edits, simple code, and
   focused verification to bounded Codex workers.
@@ -66,11 +69,16 @@ the coordinator.
 
 See [Codex Token and Quota Findings](docs/TOKEN-QUOTA-FINDINGS.md) for the
 source-backed GPT-5.6 findings and conservative local settings.
+See [Efficiency Governor](docs/EFFICIENCY-GOVERNOR.md) for bounded approval-review
+and rollout-amplification observations, their coverage rules, and hard safety
+limits.
+See [Builder Requirements](docs/BUILDER-REQUIREMENTS.md) for the consolidated
+handoff ledger and explicit unavailable and calibration boundaries.
 See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.5.4 safety
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.6.0 safety
 and release model.
 
 ## Self-service agents
@@ -95,7 +103,8 @@ will be added here as each agent is published.
 - Opens the known Codex diagnostic database read-only and never installs
   triggers, deletes rows, checkpoints, or vacuums it.
 - Reads only bounded 2 MiB tails of up to eight recently active rollout files for
-  structured aggregate token, effort, compaction, subagent, and parser-integrity
+  structured aggregate token, effort, automatic-review, compaction, subagent,
+  rollout-duplication, and parser-integrity
   counts.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.

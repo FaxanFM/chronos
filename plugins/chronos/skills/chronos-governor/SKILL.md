@@ -48,11 +48,20 @@ same order supplied by the runtime:
 model-a=low,medium,high;model-b=low,medium
 ```
 
+When the runtime also advertises a verified numeric cost rank, append it to
+every entry:
+
+```text
+model-a=low,medium,high|cost=20;model-b=low,medium|cost=1
+```
+
 Pass it as `-RuntimeModels`. Never carry a model inventory forward from a prior
 task, installation, catalog, or Chronos version. Governor validates an explicit
-request or deterministically selects the first advertised model that supports
-the required effort. When the inventory is missing, malformed, or has no
-compatible model, keep the work with the coordinator.
+request. Without one, it selects the lowest cost rank only when every compatible
+model has runtime-supplied ranking metadata; otherwise it deterministically
+preserves advertised inventory order. Never infer cost from a model name. When
+the inventory is missing, malformed, or has no compatible model, keep the work
+with the coordinator.
 
 - Use `low` reasoning for exploration, documentation, formatting, mechanical edits, command execution, and focused verification.
 - Use `medium` reasoning for simple code changes, focused tests, and nontrivial review.

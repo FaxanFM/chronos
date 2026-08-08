@@ -5,7 +5,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $governorScript = Join-Path $repoRoot "plugins\chronos\skills\chronos-governor\scripts\governor.ps1"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-governor-tests-" + [guid]::NewGuid())
 $fixtureRepo = Join-Path $testRoot "repo"
-$runtimeModels = "gpt-5.6-sol=low,medium,high,xhigh,max,ultra;gpt-5.6-terra=low,medium,high,xhigh,max,ultra;gpt-5.6-luna=low,medium,high,xhigh,max"
+$runtimeModels = "gpt-5.6-sol=low,medium,high,xhigh,max,ultra|cost=20;gpt-5.6-terra=low,medium,high,xhigh,max,ultra|cost=10;gpt-5.6-luna=low,medium,high,xhigh,max|cost=1"
 $requiredSafetyControls = @(
   'runtime-model-inventory', 'requested-model-validation', 'no-inventory-failsafe',
   'workspace-identity', 'mutation-attribution', 'scope-traversal', 'global-lock',
@@ -212,10 +212,31 @@ try {
   Assert-Success $readPlan 'Runtime model planning failed.'
   $readPlanData = Get-GovernorData $readPlan
   Assert-Equal $readPlanData.decision 'delegate' 'A compatible advertised model should be selected.'
-  Assert-Equal $readPlanData.requested_model 'gpt-5.6-sol' 'Model selection must preserve advertised inventory order.'
-  Assert-Equal $readPlanData.model_inventory_index 0 'Model selection index should be auditable.'
+  Assert-Equal $readPlanData.requested_model 'gpt-5.6-luna' 'Verified runtime cost rank should select the lightest compatible model.'
+  Assert-Equal $readPlanData.model_inventory_index 2 'Model selection index should be auditable.'
+  Assert-Equal $readPlanData.model_cost_rank 1 'Runtime cost rank should be auditable.'
+  Assert-Equal $readPlanData.model_selection_reason 'runtime_cost_rank' 'Ranked selection should expose its reason.'
   Assert-Equal $readPlanData.reasoning_effort 'medium' 'Simple code should use medium effort.'
   Register-SafetyControl 'runtime-model-inventory'
+
+  $unrankedPlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'model-unranked', '-TaskClass', 'docs',
+    '-AccessMode', 'read', '-Scope', 'docs/**',
+    '-RuntimeModels', 'runtime-first=low,medium;runtime-second=low,medium'
+  )
+  Assert-Success $unrankedPlan 'Unranked runtime model planning failed.'
+  $unrankedData = Get-GovernorData $unrankedPlan
+  Assert-Equal $unrankedData.requested_model 'runtime-first' 'Unranked models must preserve runtime inventory order.'
+  Assert-Equal $unrankedData.model_selection_reason 'runtime_inventory_order_unranked' 'Unranked fallback reason should be explicit.'
+
+  $mixedRankPlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'model-mixed-rank', '-TaskClass', 'docs',
+    '-AccessMode', 'read', '-Scope', 'docs/**',
+    '-RuntimeModels', 'runtime-first=low,medium;runtime-ranked=low,medium|cost=0'
+  )
+  Assert-Success $mixedRankPlan 'Mixed rank runtime model planning failed.'
+  Assert-Equal (Get-GovernorData $mixedRankPlan).requested_model 'runtime-first' `
+    'Partial ranking metadata must not silently outrank an unranked compatible model.'
 
   $requestedPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-requested', '-TaskClass', 'docs',

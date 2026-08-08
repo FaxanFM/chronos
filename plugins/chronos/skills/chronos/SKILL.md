@@ -30,11 +30,15 @@ never returns log text or paths.
 
 For quota diagnostics, it reads at most 2 MiB from each of up to eight rollout
 files modified in the last six hours. It retains only structured token-count,
-turn-context, compaction-count, and `spawn_agent` count fields. It never returns
-raw rollout lines, prompts, responses, tool arguments, tool output, or paths.
-It reports aggregate parser-integrity counters for malformed, duplicated,
-out-of-order, and incomplete-tail records. Those counters do not alter health
-thresholds or scoring.
+turn-context, compaction-count, and `spawn_agent` count fields. It counts an
+automatic review only when a `turn_context` record reports
+`model=codex-auto-review`; similarly named bookkeeping records do not count as
+reviews. It never returns raw rollout lines, prompts, responses, tool arguments,
+tool output, identifiers, or paths. It reports aggregate parser-integrity,
+reviewer, safe categorical approval-class, lineage, and exact cross-rollout
+duplication counters. It uses ephemeral hashes to identify exact copied records
+and exact ancestor token snapshots, then discards them when the process exits.
+Those counters do not alter health thresholds or scoring.
 
 Use `machineHealth` for process, memory, handle, CPU, and disk pressure. The
 leading `CHRONOS` level remains an aggregate advisory across machine,
@@ -48,6 +52,32 @@ interpreting numeric totals. `tokenSpawnObservation` and
 not-observed result, partial coverage, unsupported event formats, and
 unavailable data. A zero with `partial`, `unsupported`, or `unavailable` is not
 evidence that the event never occurred.
+
+`approvalReviewTurnsObserved`, `approvalReviewerSessionsObserved`, review rate,
+interval, peak, concurrency, parent-link, source, repeat-class, and denial fields
+are bounded observations, not account-wide billing totals. Check
+`approvalReviewObservation`, `approvalReviewCoverage`, and
+`approvalRequestObservation` before interpreting them. `unsupported_schema` or
+`observed_insufficient_structure` means the rollout did not expose enough safe
+categorical data; do not infer a cause from model names or text. The inspector
+never reads a command to create an approval class and never returns identifiers.
+It is diagnostic-only: it never changes reviewer models, approval modes, or
+trusted command rules.
+
+Use `approvalModesObserved`, `reviewerControlCapability`, and
+`reviewerCompatibility` as a capability probe. `supported` means only that the
+runtime explicitly reported configurability; it does not prove a compatible
+lightweight reviewer is advertised. `unsupported` or `unavailable` must remain
+diagnostic-only.
+
+`rolloutSelectedMiB`, growth, projection, lineage, replay, and compaction fields
+describe only the bounded selected files. Growth and 24-hour projection use
+file-lifetime metadata and are estimates, as declared by
+`rolloutGrowthObservation`. Exact cross-file duplicates are a replay signal, not
+proof of billed-token duplication. `tokenInheritedSnapshots` and
+`tokenLineageDeltaFiles` show exact ancestor deltas that were removed;
+non-exact history is not inferred. `tokenUsageScope` means the token total is not
+a usage invoice and must not be presented as one.
 
 Interpret the result:
 
@@ -70,7 +100,8 @@ Interpret the filesystem-helper fields separately:
 
 Treat `logDb=WARNING` or `logDb=CRITICAL` as a product-level diagnostic-log
 churn condition. Explain that sequence counts demonstrate row churn, not exact
-physical SSD writes or confirmed drive damage.
+physical SSD writes or confirmed drive damage. Report `logDbReasons` and keep
+`logDbPerformanceImpact=not_measured` separate from `machineHealth`.
 
 Interpret `quotaRisk` separately from the overall machine-health status:
 
@@ -84,7 +115,8 @@ Interpret `quotaRisk` separately from the overall machine-health status:
 Report `tokenQuotaContributors` whenever quota risk is elevated or high. These
 tags identify the already-measured threshold clauses responsible for the
 classification; they are explanatory and do not change scoring. `tokenAdvice`
-may still be `none` when no supported remediation tag matches.
+may still be `none` when no supported remediation tag matches; use
+`tokenAdviceReason` to explain that case.
 
 Apply the `tokenAdvice` tags:
 
@@ -99,6 +131,11 @@ Apply the `tokenAdvice` tags:
   focused new task after preserving the required handoff.
 - `cache-write-risk`: GPT-5.6 cache writes can be more expensive than uncached
   input. Chronos can expose the volume but cannot patch Codex request fields.
+
+When automatic review is materially active, first reduce repeated, avoidable
+tool requests and consider a narrowly scoped, reversible approval rule only
+after the user reviews the exact operation. Never create a broad interpreter,
+filesystem-write, network, or shell approval rule to reduce review volume.
 
 Do not describe a high `tokenCachedReadPct` as a leak or as equivalent spend.
 Cache reads indicate reuse and are discounted, but they still contribute to
@@ -137,6 +174,8 @@ process-termination command.
 - Never delete logs, caches, worktrees, or user data.
 - Never create SQLite triggers, delete rows, checkpoint, vacuum, or otherwise
   modify Codex databases.
+- Never change Codex reviewer configuration, approval mode, trusted-command
+  rules, model catalogs, or sandbox permissions.
 - Never expose usernames, local paths, prompts, responses, tool arguments,
   tool output, environment values, or unrelated process details.
 

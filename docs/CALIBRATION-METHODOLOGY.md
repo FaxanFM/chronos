@@ -1,7 +1,7 @@
 # Calibration Methodology
 
 This document defines evidence required for a future calibration release. It
-does not enable collection, telemetry, or threshold changes in v0.5.4.
+does not enable collection, telemetry, or threshold changes in v0.6.0.
 
 ## Freeze
 
@@ -52,3 +52,24 @@ operational cost of unnecessary versus missed restart advice.
 Do not claim prediction when the data supports only association. Publish the
 sanitized method, exclusions, limitations, and negative results. Any resulting
 heuristic change belongs in a later calibration-only release.
+
+## Token-Efficiency A/B Protocol
+
+Token-savings validation is separate from health-threshold calibration. Before
+claiming savings, predeclare a set of matched, bounded tasks and score result
+quality before inspecting usage.
+
+Compare four conditions using the same task, runtime, model availability,
+reasoning effort, repository state, and acceptance checks:
+
+1. Default automatic review with no Chronos approval recommendation.
+2. Default reviewer with one user-approved narrow rule derived from repeated
+   structured request classes.
+3. A runtime-supported lightweight reviewer with the same approval rules.
+4. The narrow rule and supported lightweight reviewer together.
+
+Measure primary, reviewer, and other-agent token usage; review calls; unique and
+repeated classes; tool calls; latency; approvals and denials; rework; failed
+verification; and final result quality. Report matched-task medians and ranges,
+missing-data rate, confidence intervals when sample size permits, and negative
+results. Observed repeated share is not a forecast of future savings.

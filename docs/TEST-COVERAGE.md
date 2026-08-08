@@ -32,6 +32,15 @@ advisory-only cleanup compatibility. Coverage assertions distinguish complete,
 partial, unsupported, and unavailable event observations and require quota-risk
 contributors even when no advice tag applies.
 
+The suite also proves schema-aware automatic-review counting with 590
+`turn_context` records plus 589 similarly named bookkeeping records, ensuring
+the result is 590 rather than a text-match total. It covers bounded review
+coverage semantics, anonymized reviewer-session aggregates, safe approval
+classes, denial records, lineage counts, exact ancestor-token deltas, and exact
+cross-rollout duplicated-compaction detection. Governor coverage includes
+complete runtime cost ranking plus deterministic unranked and partially ranked
+fallback behavior without assuming a model name.
+
 ## Release Coverage
 
 `tests/release.tests.ps1` requires two identical package hashes, sorted entries,

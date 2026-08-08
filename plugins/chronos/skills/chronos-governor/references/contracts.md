@@ -12,7 +12,8 @@ Every assignment must state:
 - `repository`: Repository identity.
 - `base_commit`: Commit from which the work starts.
 - `workspace`: Assigned checkout or worktree identity.
-- `model_inventory_hash` and `model_inventory_index`: Runtime discovery evidence.
+- `model_inventory_hash`, `model_inventory_index`, and optional
+  `model_cost_rank`: Runtime discovery and selection evidence.
 - `access_mode`: `read` or `write`.
 - `allowed_scope`: Repository-relative file or component scope.
 - `required_verification`: Checks the worker must perform.
