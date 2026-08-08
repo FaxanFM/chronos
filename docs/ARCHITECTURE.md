@@ -11,16 +11,18 @@ from at most eight recently active files.
 
 The rollout parser retains only numeric token aggregates, effort labels,
 structured automatic-review counts, compaction counts, spawn counts, bounded
-rollout metadata, and parser-integrity counters. It counts a review only from a
+rollout metadata, approval-state categories, and parser-integrity counters. It counts a review only from a
 `turn_context` record whose model is exactly `codex-auto-review`; bookkeeping
 records are not additional reviews. It ignores a partially written final record,
 rejects invalid or negative counters, reports exact cross-file duplicates and
 duplicated compactions separately, and chooses the greatest valid cumulative
 token total per file. When a child contains an exact ancestor token snapshot,
 the child contributes only the observed cumulative delta. Ephemeral hashes and
-safe categorical approval classes exist only for the inspection process. Raw
-lines, prompts, responses, arguments, output, identifiers, and paths are never
-returned or persisted.
+safe categorical approval classes exist only for the inspection process.
+Structured prefix arrays and correlation identifiers may be converted to
+ephemeral hashes for repetition and state-transition analysis. Raw lines,
+prompts, responses, arguments, prefixes, hashes, output, identifiers, and paths
+are never returned or persisted.
 
 Every token metric reports its six-hour coverage window, eligible and selected
 file counts, tail truncation, and continuity. Spawn and compaction counts also
@@ -33,9 +35,18 @@ Automatic-review counts, review rate, and reviewer-versus-primary aggregates
 are bounded observations. The parser reports its coverage and labels token
 totals as selected-rollout cumulative snapshots, never as account billing.
 Request-level approval causes and structural equivalence are reported only when
-the rollout schema exposes sufficient whitelisted categorical data. Chronos
-never reads command text to create a class and never modifies approval policies,
-reviewer configuration, runtime model catalogs, or sandbox permissions.
+the rollout schema exposes sufficient structured data. A persistence runaway
+requires an allowed request, an unresolved pending state, and an equivalent
+regenerated request; review volume alone is insufficient. Repeated prefixes,
+inspection-shaped operations, reviewer-originated escalations, nested reviewer
+lineage, worker fork history, worker effort, and root/child spawn origin remain
+separate concepts. Chronos never modifies approval state, policies, reviewer
+configuration, runtime model catalogs, or sandbox permissions.
+
+The Rule Governor reads only supported files in the known Codex rules directory.
+It calculates aggregate length and structure statistics and detects
+credential-shaped patterns in memory. It never returns rule contents, prefix
+hashes, commands, assignments, or credential values and never edits rules.
 
 Filesystem-helper detection parses a timestamped event envelope and compares
 the complete event message against known failure forms. Marker text embedded in
@@ -60,6 +71,10 @@ Failure at any identity, attribution, scope, lease, fencing, fingerprint, or
 verification boundary returns work to the coordinator without deleting or
 reverting files.
 
+When the runtime exposes an effective worker model, binding and result reporting
+must match the model persisted by `plan`. A difference fails with
+`model_plan_mismatch`; absent runtime evidence remains `runtime_not_exposed`.
+
 ## Persistent Data
 
 The inspector persists nothing. Governor persists only metadata beneath the
@@ -71,6 +86,6 @@ cleans worktrees.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.6.0 deliberately changes parser observability without changing any
+of failure. v0.6.1 deliberately changes parser observability without changing any
 warning threshold, critical threshold, scoring weight, predictive claim, or
 heuristic interpretation. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

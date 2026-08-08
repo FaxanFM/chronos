@@ -19,12 +19,14 @@ $largeTailHome = Join-Path $testRoot "large-tail-home"
 $aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
 $v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
 $reviewerHealthHome = Join-Path $testRoot "reviewer-health-home"
+$machine2Home = Join-Path $testRoot "machine2-home"
+$ruleMissHome = Join-Path $testRoot "rule-miss-home"
 $forkReplayHome = Join-Path $testRoot "fork-replay-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
 function Assert-Match($value, $pattern, $message) {
-  if ($value -notmatch $pattern) {
+  if (($value -join "`n") -notmatch $pattern) {
     throw "$message`nOutput: $value"
   }
 }
@@ -32,7 +34,7 @@ function Assert-Match($value, $pattern, $message) {
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
-    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $forkReplayHome `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -286,7 +288,7 @@ try {
     "Observed worker and compaction events should be qualified."
   Assert-Match $tokenOutput " tokenQuotaContributors=.*(cache-write-volume|input-50m)" `
     "High quota risk should expose contributing measurements."
-  Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,avoid-repeat-compaction,cache-write-risk$" `
+  Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,avoid-repeat-compaction,cache-write-risk(\r?\n|$)" `
     "Token advice did not reflect the aggregate risk signals."
   if (($tokenOutput -join "`n") -match "private fixture arguments") {
     throw "Chronos output exposed tool arguments."
@@ -332,7 +334,8 @@ try {
         type = "exec_approval_request"
         tool_name = "shell"
         permission_class = "workspace-read"
-        operation_class = "read"
+        operation_class = "repository-read"
+        proposed_prefix = @("rg", "synthetic-pattern")
         command = "private command text must never be returned"
       }
     } | ConvertTo-Json -Compress -Depth 8))
@@ -396,6 +399,183 @@ try {
     "Observed structured repetition should recommend only manual narrow-rule review."
   if (($reviewerOutput -join "`n") -match "private-parent-id|private command text") {
     throw "Chronos output exposed a session identifier or approval command."
+  }
+  Assert-Match $reviewerOutput " metricSource=local_rollout dashboardEquivalence=unsupported billingInference=unsupported " `
+    "Local approval metrics must not be presented as dashboard or billing equivalents."
+  Assert-Match $reviewerOutput " approvalRepeatedPrefixRequests=9 approvalLargestPrefixRepeat=10 approvalRuleMissDiagnosis=repeated_rule_miss_candidate " `
+    "Repeated structured prefixes should be identified as rule-miss candidates."
+  Assert-Match $reviewerOutput " inspectionShapedApprovalRequests=10 inspectionShapedApprovalPct=90([.,]9)? " `
+    "Inspection-shaped approval pressure should remain a descriptive measurement."
+  Assert-Match $reviewerOutput " approvalRateConfidence=low " `
+    "A sub-fifteen-minute reviewer sample must have low normalized-rate confidence."
+
+  $machine2Rules = Join-Path $machine2Home "rules"
+  New-Item -ItemType Directory -Path $machine2Rules -Force | Out-Null
+  $longLiteral = "x" * 300
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $machine2Rules "default.rules"),
+    @(
+      "prefix_rule(pattern=[`"powershell.exe`",`"$longLiteral`"], decision=`"allow`")",
+      "prefix_rule(pattern=[`"python`"], decision=`"allow`")",
+      "prefix_rule(pattern=[`"npm.cmd`",`"run`",`"test`"], decision=`"allow`")",
+      "prefix_rule(pattern=[`"cmd`",`"API_KEY=synthetic_value_for_test_only`"], decision=`"allow`")"
+    ),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $machine2Home "config.toml"),
+    @('approvals_reviewer="guardian_subagent"', 'model_reasoning_effort="xhigh"'),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $machine2SessionDay = Join-Path (Join-Path (Join-Path $machine2Home "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $machine2SessionDay = Join-Path $machine2SessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $machine2SessionDay -Force | Out-Null
+  $machine2Path = Join-Path $machine2SessionDay "rollout-machine2-regression.jsonl"
+  $machine2Records = [System.Collections.Generic.List[string]]::new()
+  $machine2Start = [DateTimeOffset]::UtcNow.AddDays(-28)
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.ToString("o")
+    type = "session_meta"
+    payload = @{ id = "root-machine-2"; multi_agent_version = 2 }
+  } | ConvertTo-Json -Compress -Depth 8))
+  foreach ($index in 0..589) {
+    $machine2Records.Add((@{
+      timestamp = $machine2Start.AddSeconds($index + 1).ToString("o")
+      type = "turn_context"
+      payload = @{ model = "codex-auto-review"; approval_mode = "auto" }
+    } | ConvertTo-Json -Compress -Depth 8))
+  }
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.AddSeconds(600).ToString("o")
+    type = "event_msg"
+    payload = @{
+      type = "exec_approval_request"
+      approval_id = "approval-machine2"
+      approval_state = "pending"
+      operation_class = "repository-read"
+      access_mode = "read"
+      boundary_cause = "policy-rule-miss"
+      proposed_prefix = @("rg", "synthetic-pattern")
+    }
+  } | ConvertTo-Json -Compress -Depth 8))
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.AddSeconds(600).AddMilliseconds(1).ToString("o")
+    type = "event_msg"
+    payload = @{ type = "approval_decision"; approval_id = "approval-machine2"; decision = "allow" }
+  } | ConvertTo-Json -Compress -Depth 8))
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.AddSeconds(600).AddMilliseconds(2).ToString("o")
+    type = "event_msg"
+    payload = @{ type = "approval_state_persistence_error"; approval_id = "approval-machine2" }
+  } | ConvertTo-Json -Compress -Depth 8))
+  foreach ($index in 1..581) {
+    $machine2Records.Add((@{
+      timestamp = $machine2Start.AddSeconds(600 + $index).ToString("o")
+      type = "event_msg"
+      payload = @{
+        type = "exec_approval_request"
+        approval_id = "approval-machine2"
+        approval_state = "pending"
+        operation_class = "repository-read"
+        access_mode = "read"
+        boundary_cause = "policy-rule-miss"
+        proposed_prefix = @("rg", "synthetic-pattern")
+      }
+    } | ConvertTo-Json -Compress -Depth 8))
+  }
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.AddSeconds(1182).ToString("o")
+    type = "response_item"
+    payload = @{
+      type = "function_call"
+      name = "spawn_agent"
+      arguments = (@{ fork_turns = "all"; task_complexity = "simple"; reasoning_effort = "max" } | ConvertTo-Json -Compress)
+    }
+  } | ConvertTo-Json -Compress -Depth 8))
+  foreach ($index in 0..1) {
+    $machine2Records.Add((@{
+      timestamp = $machine2Start.AddSeconds(1183 + $index).ToString("o")
+      type = "response_item"
+      payload = @{
+        type = "function_call"
+        name = "shell_command"
+        arguments = (@{ sandbox_permissions = "require_escalated"; prefix_rule = @("rg", "synthetic-pattern") } | ConvertTo-Json -Compress)
+      }
+    } | ConvertTo-Json -Compress -Depth 8))
+  }
+  [System.IO.File]::WriteAllLines($machine2Path, $machine2Records, [System.Text.UTF8Encoding]::new($false))
+  $machine2Output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $machine2Home -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos Machine 2 regression inspection failed." }
+  Assert-Match $machine2Output " approvalReviewTurnsObserved=590 " `
+    "Machine 1 regression must retain 590 distinct reviewer turn_context records."
+  Assert-Match $machine2Output " approvalDecisionsObserved=1 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalAllowPct=100 " `
+    "Allowed decisions and allow rate were not accounted separately."
+  Assert-Match $machine2Output " approvalPersistenceRetries=581 approvalPersistenceFailures=1 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
+    "The 590-turn persistence regression was not classified as a persistence runaway."
+  Assert-Match $machine2Output " reviewerToolCalls=3 reviewerEscalationsObserved=2 reviewerEscalationUniquePrefixes=1 reviewerEscalationRepeatedPrefixes=1 reviewerEscalationLargestPrefix=2 " `
+    "Reviewer-originated escalation traffic was not classified independently."
+  Assert-Match $machine2Output " ruleCount=4 ruleMonolithic=1 ruleReusableNarrow=2 ruleBroadInterpreter=1 ruleCredentialShaped=1 " `
+    "Rule health did not classify brittle, narrow, broad, and credential-shaped rules."
+  Assert-Match $machine2Output " ruleStatus=CRITICAL ruleValuesReturned=false " `
+    "Credential-shaped rule output must be critical and must never return values."
+  Assert-Match $machine2Output " ruleBrittlenessDiagnosis=rule_brittleness_warning ruleSecretDiagnosis=rule_secret_exposure ruleBroadInterpreterDiagnosis=broad_interpreter_rule " `
+    "Named rule defect classes were not emitted."
+  Assert-Match $machine2Output " spawnForkAll=1 spawnForkAllDefaulted=0 spawnForkNone=0 spawnForkBounded=0 spawnHighEffort=1 spawnMaxEffort=1 " `
+    "Full-history and high-effort worker amplification was not measured."
+  Assert-Match $machine2Output " spawnContextAmplification=observed rootAgentSpawns=1 childAgentSpawns=0 nestedAgentObservation=not_observed " `
+    "Root-only spawning must not be misreported as recursive child-agent fan-out."
+  Assert-Match $machine2Output " configuredReviewer=guardian_subagent effectiveReviewer=auto_review managedReviewer=unavailable reviewerConfigurationComparison=different_labels_mapping_possible primaryReasoningDefault=xhigh" `
+    "Configured and effective reviewer labels should be surfaced without asserting incompatibility."
+  if (($machine2Output -join "`n") -match "synthetic_value_for_test_only|API_KEY|synthetic-pattern|approval-machine2|root-machine-2") {
+    throw "Chronos output exposed a credential, prefix, approval identifier, or session identifier."
+  }
+
+  $ruleMissSessionDay = Join-Path (Join-Path (Join-Path $ruleMissHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $ruleMissSessionDay = Join-Path $ruleMissSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $ruleMissSessionDay -Force | Out-Null
+  $ruleMissPath = Join-Path $ruleMissSessionDay "rollout-rule-miss-regression.jsonl"
+  $ruleMissRecords = [System.Collections.Generic.List[string]]::new()
+  $ruleMissStart = [DateTimeOffset]::UtcNow.AddMinutes(-10)
+  $ruleMissRecords.Add((@{
+    timestamp = $ruleMissStart.ToString("o"); type = "session_meta"; payload = @{ id = "rule-miss-root" }
+  } | ConvertTo-Json -Compress -Depth 8))
+  foreach ($index in 0..306) {
+    $requestId = "resolved-request-$index"
+    $ruleMissRecords.Add((@{
+      timestamp = $ruleMissStart.AddMilliseconds(3 * $index + 1).ToString("o")
+      type = "event_msg"
+      payload = @{
+        type = "exec_approval_request"; approval_id = $requestId; approval_state = "pending"
+        operation_class = "repository-read"; access_mode = "read"; boundary_cause = "policy-rule-miss"
+        proposed_prefix = @("get-content", "synthetic-file")
+      }
+    } | ConvertTo-Json -Compress -Depth 8))
+    $ruleMissRecords.Add((@{
+      timestamp = $ruleMissStart.AddMilliseconds(3 * $index + 2).ToString("o")
+      type = "event_msg"
+      payload = @{ type = "approval_decision"; approval_id = $requestId; decision = "allow" }
+    } | ConvertTo-Json -Compress -Depth 8))
+    $ruleMissRecords.Add((@{
+      timestamp = $ruleMissStart.AddMilliseconds(3 * $index + 3).ToString("o")
+      type = "event_msg"
+      payload = @{ type = "approval_resolved"; approval_id = $requestId; status = "resolved" }
+    } | ConvertTo-Json -Compress -Depth 8))
+  }
+  [System.IO.File]::WriteAllLines($ruleMissPath, $ruleMissRecords, [System.Text.UTF8Encoding]::new($false))
+  $ruleMissOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $ruleMissHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos repeated rule-miss regression failed." }
+  Assert-Match $ruleMissOutput " approvalDecisionsObserved=307 approvalAllowedObserved=307 approvalDeniedObserved=0 approvalAllowPct=100 " `
+    "Repeated allowed decisions were not aggregated."
+  Assert-Match $ruleMissOutput " approvalPersistenceRetries=0 approvalPersistenceFailures=0 approvalPersistenceDiagnosis=not_observed " `
+    "Resolved approvals must not be classified as persistence failures."
+  Assert-Match $ruleMissOutput " approvalRepeatedPrefixRequests=306 approvalLargestPrefixRepeat=307 approvalRuleMissDiagnosis=repeated_rule_miss_candidate approvalProblemClass=rule_miss_amplification " `
+    "The exact 307-review prefix regression was not classified as a repeated rule miss."
+  if (($ruleMissOutput -join "`n") -match "synthetic-file|resolved-request|rule-miss-root") {
+    throw "Repeated rule-miss output exposed a prefix or local identifier."
   }
 
   $forkSessionDay = Join-Path (Join-Path (Join-Path $forkReplayHome "sessions") `
@@ -507,6 +687,8 @@ try {
     "Token totals larger than Int32.MaxValue should remain 64-bit."
   Assert-Match $largeTailOutput " tokenTailTruncatedFiles=1 tokenUnreadableFiles=0 tokenCoverageContinuity=partial " `
     "A bounded tail must disclose partial continuity."
+  Assert-Match $largeTailOutput " quotaConfidence=low " `
+    "A truncated token sample must not support high quota confidence."
 
   $v2SessionDay = Join-Path (Join-Path (Join-Path $v2CoverageHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -546,7 +728,7 @@ try {
   Assert-Match $v2Output " tokenSpawnCalls=0 " "No unsupported spawn event should be invented."
   Assert-Match $v2Output " tokenCoverageContinuity=complete tokenSpawnObservation=unsupported tokenCompactionObservation=not_observed_in_window " `
     "Numeric zero must distinguish unsupported V2 spawn format from a complete no-compaction observation."
-  Assert-Match $v2Output " tokenQuotaContributors=input-10m tokenAdvice=none$" `
+  Assert-Match $v2Output " tokenQuotaContributors=input-10m tokenAdvice=none(\r?\n|$)" `
     "Elevated risk without advice must still explain its contributing threshold."
 
   $aggregateSessionDay = Join-Path (Join-Path (Join-Path $aggregateOverflowHome "sessions") `

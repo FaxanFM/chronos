@@ -7,7 +7,7 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-governor-tests
 $fixtureRepo = Join-Path $testRoot "repo"
 $runtimeModels = "gpt-5.6-sol=low,medium,high,xhigh,max,ultra|cost=20;gpt-5.6-terra=low,medium,high,xhigh,max,ultra|cost=10;gpt-5.6-luna=low,medium,high,xhigh,max|cost=1"
 $requiredSafetyControls = @(
-  'runtime-model-inventory', 'requested-model-validation', 'no-inventory-failsafe',
+  'runtime-model-inventory', 'requested-model-validation', 'model-plan-contract', 'no-inventory-failsafe',
   'workspace-identity', 'mutation-attribution', 'scope-traversal', 'global-lock',
   'fencing', 'lease-renewal', 'single-writer', 'result-fingerprint',
   'coordinator-verification', 'read-only', 'scope-enforcement', 'correction-limit',
@@ -245,6 +245,32 @@ try {
   Assert-Success $requestedPlan 'Advertised model validation failed.'
   Assert-Equal (Get-GovernorData $requestedPlan).requested_model 'gpt-5.6-luna' 'An advertised requested model should be honored.'
   Register-SafetyControl 'requested-model-validation'
+
+  $modelContractPlan = Invoke-Governor @(
+    '-Action', 'plan', '-TaskId', 'model-contract', '-TaskClass', 'docs',
+    '-AccessMode', 'read', '-Scope', 'docs/**', '-RequestedModel', 'gpt-5.6-sol'
+  )
+  Assert-Success $modelContractPlan 'Model-contract plan failed.'
+  $modelContractData = Get-GovernorData $modelContractPlan
+  $modelMismatchLease = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'model-contract', '-WorkerId', '/root/model-contract',
+    '-PlanToken', $modelContractData.plan_token, '-EffectiveModel', 'gpt-5.6-luna'
+  )
+  Assert-Failure $modelMismatchLease 'model_plan_mismatch' 'A mismatched effective model must fail at worker binding.'
+  $modelContractLeaseOutput = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'model-contract', '-WorkerId', '/root/model-contract',
+    '-PlanToken', $modelContractData.plan_token, '-EffectiveModel', 'gpt-5.6-sol'
+  )
+  Assert-Success $modelContractLeaseOutput 'An exactly matching effective model should lease.'
+  $modelContractLeaseData = Get-GovernorData $modelContractLeaseOutput
+  $modelContractLease = @{
+    Task = 'model-contract'; Worker = '/root/model-contract'; Mode = 'read'; Repo = $fixtureRepo
+    LeaseId = $modelContractLeaseData.lease_id; FencingToken = $modelContractLeaseData.fencing_token
+  }
+  Assert-Failure (Invoke-LeaseAction $modelContractLease 'result' @('-EffectiveModel', 'gpt-5.6-luna')) `
+    'model_plan_mismatch' 'A later conflicting effective-model report must fail explicitly.'
+  Assert-Success (Invoke-LeaseAction $modelContractLease 'release') 'Model-contract lease release failed.'
+  Register-SafetyControl 'model-plan-contract'
 
   $missingModel = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-missing', '-TaskClass', 'docs',

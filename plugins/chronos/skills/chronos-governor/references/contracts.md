@@ -29,6 +29,8 @@ The worker returns a structured report containing coordination metadata and evid
 
 - `task_id`, `worker_id`, and `status`.
 - `lease_id`, `fencing_token`, and the bound mutation-attribution ID.
+- The effective worker model when the runtime exposes it. It must match the
+  persisted plan model or binding fails with `model_plan_mismatch`.
 - `requested_model`, `effective_model`, and `transport`, when available.
 - `base_commit` and workspace or branch identity.
 - `files_inspected` and `files_changed`.

@@ -30,15 +30,22 @@ never returns log text or paths.
 
 For quota diagnostics, it reads at most 2 MiB from each of up to eight rollout
 files modified in the last six hours. It retains only structured token-count,
-turn-context, compaction-count, and `spawn_agent` count fields. It counts an
+turn-context, compaction, approval-state, and worker-call fields. It counts an
 automatic review only when a `turn_context` record reports
 `model=codex-auto-review`; similarly named bookkeeping records do not count as
 reviews. It never returns raw rollout lines, prompts, responses, tool arguments,
 tool output, identifiers, or paths. It reports aggregate parser-integrity,
-reviewer, safe categorical approval-class, lineage, and exact cross-rollout
-duplication counters. It uses ephemeral hashes to identify exact copied records
-and exact ancestor token snapshots, then discards them when the process exits.
-Those counters do not alter health thresholds or scoring.
+reviewer, safe categorical approval, lineage, fork-context, and exact
+cross-rollout duplication counters. Structured proposed-prefix arrays and
+approval identifiers may be hashed in memory for repetition and state-transition
+analysis. The inspector never returns prefixes, hashes, rule text, identifiers,
+or credential-shaped values. Ephemeral hashes are discarded when the process
+exits. Those counters do not alter health thresholds or scoring.
+
+The same on-demand inspection reads up to 32 supported files only from the known
+Codex rules directory. It returns aggregate rule structure and secret-shape
+counts, never rules, commands, assignments, paths, hashes, or values. It does not
+edit a rule.
 
 Use `machineHealth` for process, memory, handle, CPU, and disk pressure. The
 leading `CHRONOS` level remains an aggregate advisory across machine,
@@ -54,15 +61,39 @@ unavailable data. A zero with `partial`, `unsupported`, or `unavailable` is not
 evidence that the event never occurred.
 
 `approvalReviewTurnsObserved`, `approvalReviewerSessionsObserved`, review rate,
-interval, peak, concurrency, parent-link, source, repeat-class, and denial fields
+interval, burst, confidence, parent-link, source, repeat-class, allowed/denied,
+inspection-shaped, boundary-cause, and persistence fields
 are bounded observations, not account-wide billing totals. Check
 `approvalReviewObservation`, `approvalReviewCoverage`, and
 `approvalRequestObservation` before interpreting them. `unsupported_schema` or
 `observed_insufficient_structure` means the rollout did not expose enough safe
-categorical data; do not infer a cause from model names or text. The inspector
-never reads a command to create an approval class and never returns identifiers.
-It is diagnostic-only: it never changes reviewer models, approval modes, or
-trusted command rules.
+categorical data; do not infer a cause from model names or unstructured text.
+`metricSource=local_rollout`, `dashboardEquivalence=unsupported`, and
+`billingInference=unsupported` are hard semantic boundaries. The inspector is
+diagnostic-only: it never changes reviewer models, approval modes, or trusted
+command rules.
+
+Interpret approval problem classes independently:
+
+- `persistence_runaway` requires a structured `ALLOW`, unresolved pending
+  state, and equivalent regenerated request, or an explicit persistence failure.
+  Recommend repairing approval persistence before changing reviewer cost.
+- `rule_miss_amplification` means a structured proposed prefix repeated after
+  independently resolved reviews. Review the exact operation manually before
+  considering one narrow, reversible rule.
+- `legitimate_or_diverse_boundary_volume` means the available evidence does not
+  prove either defect. Do not weaken the sandbox.
+
+`reviewerEscalationsObserved` means reviewer-originated escalation traffic. Do
+not call it reviewer recursion unless `approvalRecursionRisk=observed`, which
+also requires directly observed nested reviewer lineage.
+
+Use the Rule Governor fields separately. `rule_secret_exposure` requires removal
+of credential material and rotation if it may remain valid, but never repeat the
+value. `rule_brittleness_warning` identifies literals longer than 256 characters.
+`broad_interpreter_rule` identifies interpreter-wide trust. Never create or
+recommend broad PowerShell, shell, Python, Node, curl, network, filesystem-write,
+or outside-workspace rules.
 
 Use `approvalModesObserved`, `reviewerControlCapability`, and
 `reviewerCompatibility` as a capability probe. `supported` means only that the
@@ -78,6 +109,14 @@ proof of billed-token duplication. `tokenInheritedSnapshots` and
 `tokenLineageDeltaFiles` show exact ancestor deltas that were removed;
 non-exact history is not inferred. `tokenUsageScope` means the token total is not
 a usage invoice and must not be presented as one.
+
+Use task-age, top-lineage review share, fork, effort, and spawn-origin fields as
+bounded efficiency observations. For simple work with
+`spawnContextAmplification=observed`, recommend `fork_turns="none"` or the
+smallest sufficient positive history. `nestedAgentObservation=not_observed`
+must not be described as recursive fan-out. Surface a configured/effective
+reviewer difference as a possible mapping or policy layer, not automatically a
+defect. Do not rewrite the primary reasoning default.
 
 Interpret the result:
 
@@ -132,10 +171,11 @@ Apply the `tokenAdvice` tags:
 - `cache-write-risk`: GPT-5.6 cache writes can be more expensive than uncached
   input. Chronos can expose the volume but cannot patch Codex request fields.
 
-When automatic review is materially active, first reduce repeated, avoidable
-tool requests and consider a narrowly scoped, reversible approval rule only
-after the user reviews the exact operation. Never create a broad interpreter,
-filesystem-write, network, or shell approval rule to reduce review volume.
+When automatic review is materially active, remove pathological review
+regeneration first, then reduce avoidable tool calls, then inspect rule quality,
+then bound task and worker amplification. Make unavoidable reviews cheaper only
+after those causes are addressed. Try operations expected to be sandbox-safe
+before escalating; request escalation only after a real boundary is identified.
 
 Do not describe a high `tokenCachedReadPct` as a leak or as equivalent spend.
 Cache reads indicate reuse and are discounted, but they still contribute to

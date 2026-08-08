@@ -83,6 +83,11 @@ activation accepts that token and the runtime-issued worker ID, then consumes
 the plan exactly once. This prevents command-line scope flattening or
 plan-to-lease normalization drift.
 
+When the runtime reports an effective worker model, lease binding and later
+result reporting compare it with the persisted selected model. A difference
+returns `model_plan_mismatch` before activation or result acceptance. Missing
+runtime evidence remains explicitly unverified rather than guessed.
+
 Every lease has an opaque lease ID, fencing token, expiry, repository identity,
 workspace identity, base commit, scope, and attribution hash. Lifecycle actions
 must present the matching lease ID and fencing token. An expired lease cannot be

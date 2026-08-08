@@ -155,6 +155,12 @@ normalized plan; it does not reparse scopes, model inventory, workspace
 identity, or mutation attribution from command-line values. Canonical native
 worker IDs such as `/root/name` are accepted after strict segment validation.
 
+When the runtime exposes the worker's effective model, pass it with
+`-EffectiveModel`. It must exactly match the model persisted by `plan` or the
+lease returns `model_plan_mismatch`. Do not spawn again under a different model;
+return the task to the coordinator or create a new plan from a fresh runtime
+inventory.
+
 If leasing fails, close the newly spawned worker and continue the task with the coordinator. Do not retry spawning around the governor.
 
 Retain the returned `lease_id`, `fencing_token`, and `expires_at` in the current

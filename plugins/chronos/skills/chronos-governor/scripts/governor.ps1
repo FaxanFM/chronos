@@ -860,6 +860,13 @@ try {
         index = $plan.model_inventory_index
         cost_rank = $plan.model_cost_rank
       }
+      if ($EffectiveModel) {
+        $normalizedEffectiveModel = Normalize-ModelIdentifier $EffectiveModel
+        if ($normalizedEffectiveModel -ne [string]$selection.model) {
+          Throw-GovernorError "model_plan_mismatch"
+        }
+        $EffectiveModel = $normalizedEffectiveModel
+      }
       $active = @(Get-ActiveLeases $state)
       if ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         Throw-GovernorError "task_already_leased"
@@ -998,6 +1005,12 @@ try {
 
     if ($Action -eq 'result') {
       if ($lease.status -notin @('working', 'needs_correction')) { Throw-GovernorError "lease_not_working" }
+      if ($EffectiveModel) {
+        $normalizedEffectiveModel = Normalize-ModelIdentifier $EffectiveModel
+        $plannedModel = [string]$state.workers[$lease.worker_id].requested_model
+        if ($normalizedEffectiveModel -ne $plannedModel) { Throw-GovernorError "model_plan_mismatch" }
+        $EffectiveModel = $normalizedEffectiveModel
+      }
       if ($lease.access_mode -eq 'write') {
         if (-not $MutationAttributionVerified -or -not $MutationAttributionId) { Throw-GovernorError "mutation_attribution_unverified" }
         if ((Get-TextHash $MutationAttributionId) -ne $lease.mutation_attribution_hash) { Throw-GovernorError "mutation_attribution_mismatch" }

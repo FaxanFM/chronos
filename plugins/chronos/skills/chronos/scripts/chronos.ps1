@@ -396,6 +396,146 @@ function Get-RecordHash {
   }
 }
 
+function Get-TextFingerprint {
+  param([string]$Text)
+  if ([string]::IsNullOrEmpty($Text)) { return $null }
+  $algorithm = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    ([System.BitConverter]::ToString($algorithm.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $algorithm.Dispose()
+  }
+}
+
+function ConvertFrom-StructuredArguments {
+  param($Value)
+  if ($null -eq $Value) { return $null }
+  if ($Value -is [string]) {
+    try { return ($Value | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+  }
+  if ($Value -is [pscustomobject] -or $Value -is [hashtable]) { return $Value }
+  $null
+}
+
+function Get-CanonicalPrefixFingerprint {
+  param($Object)
+  if (-not $Object) { return $null }
+  foreach ($name in @("proposed_prefix", "prefix_rule", "command_prefix")) {
+    $property = $Object.PSObject.Properties[$name]
+    if (-not $property -or $null -eq $property.Value) { continue }
+    $tokens = @($property.Value | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    if ($tokens.Count -eq 0 -or $tokens.Count -gt 16) { continue }
+    return Get-TextFingerprint ((@($tokens | ForEach-Object { $_.ToLowerInvariant() }) | ConvertTo-Json -Compress))
+  }
+  $null
+}
+
+function Get-InspectionOperationClass {
+  param($Object)
+  $operation = Get-SafeCategory $Object @("operation_class", "operation", "tool_name", "tool")
+  if ($operation) { return $operation }
+  if (-not $Object) { return $null }
+  foreach ($name in @("proposed_prefix", "prefix_rule", "command_prefix")) {
+    $property = $Object.PSObject.Properties[$name]
+    if (-not $property -or $null -eq $property.Value) { continue }
+    $tokens = @($property.Value)
+    if ($tokens.Count -eq 0) { continue }
+    $candidate = [System.IO.Path]::GetFileNameWithoutExtension(([string]$tokens[0]).Trim()).ToLowerInvariant()
+    if ($candidate -in @("get-content", "rg", "get-childitem", "select-string", "resolve-path", "test-path")) {
+      return $candidate
+    }
+  }
+  $null
+}
+
+function Get-RuleHealth {
+  $result = [ordered]@{
+    Observation = "unavailable"
+    Count = 0
+    Monolithic = 0
+    ReusableNarrow = 0
+    BroadInterpreter = 0
+    CredentialShaped = 0
+    AverageLength = $null
+    MaximumLiteralLength = 0
+    Status = "UNAVAILABLE"
+    ValuesReturned = $false
+    FilesEligible = 0
+    FilesSelected = 0
+    CoverageCapped = $false
+  }
+  $rulesRoot = Join-Path $CodexHome "rules"
+  if (-not (Test-Path -LiteralPath $rulesRoot -PathType Container)) {
+    $result.Observation = "not_found"
+    return [pscustomobject]$result
+  }
+  $eligibleFiles = @(Get-ChildItem -LiteralPath $rulesRoot -File -ErrorAction SilentlyContinue | Where-Object {
+      $_.Extension -in @(".rules", ".toml")
+    } | Sort-Object FullName)
+  $result.FilesEligible = $eligibleFiles.Count
+  $files = @($eligibleFiles | Select-Object -First 32)
+  $result.FilesSelected = $files.Count
+  $result.CoverageCapped = $eligibleFiles.Count -gt $files.Count
+  if ($files.Count -eq 0) {
+    $result.Observation = "no_supported_files"
+    return [pscustomobject]$result
+  }
+  $lengthTotal = 0L
+  foreach ($file in $files) {
+    foreach ($line in @(Get-Content -LiteralPath $file.FullName -TotalCount 2048 -ErrorAction SilentlyContinue)) {
+      $trimmed = $line.Trim()
+      if (-not $trimmed -or $trimmed.StartsWith("#") -or $trimmed -notmatch '(?i)prefix_rule') { continue }
+      $result.Count++
+      $lengthTotal += $trimmed.Length
+      $literalMatches = @([regex]::Matches($trimmed, '"(?:\\.|[^"\\])*"'))
+      $literalLengths = @($literalMatches | ForEach-Object { [math]::Max(0, $_.Value.Length - 2) })
+      $maxLiteral = if ($literalLengths.Count) { [int](@($literalLengths | Measure-Object -Maximum).Maximum) } else { 0 }
+      if ($maxLiteral -gt $result.MaximumLiteralLength) { $result.MaximumLiteralLength = $maxLiteral }
+      $isMonolithic = $maxLiteral -gt 256
+      if ($isMonolithic) { $result.Monolithic++ }
+
+      $firstLiteral = if ($literalMatches.Count) {
+        $literalMatches[0].Value.Trim('"').Trim().ToLowerInvariant()
+      } else { "" }
+      $firstExecutable = [System.IO.Path]::GetFileNameWithoutExtension($firstLiteral)
+      $isBroad = $firstExecutable -in @("powershell", "pwsh", "bash", "python", "python3", "node", "curl") -and $literalMatches.Count -le 2
+      if ($isBroad) { $result.BroadInterpreter++ }
+      if (-not $isMonolithic -and -not $isBroad) { $result.ReusableNarrow++ }
+
+      $secretShape = $trimmed -match '(?i)(token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)\s*[=:]' -or
+        $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+      if ($secretShape) { $result.CredentialShaped++ }
+    }
+  }
+  $result.Observation = if ($result.CoverageCapped) { "observed_partial" } else { "observed" }
+  if ($result.Count -gt 0) { $result.AverageLength = [math]::Round($lengthTotal / [double]$result.Count, 1) }
+  $result.Status = if ($result.CredentialShaped -gt 0) { "CRITICAL" } elseif (
+    $result.Monolithic -gt 0 -or $result.BroadInterpreter -gt 0
+  ) { "WARNING" } else { "HEALTHY" }
+  [pscustomobject]$result
+}
+
+function Get-CodexConfigurationHealth {
+  $result = [ordered]@{
+    ConfiguredReviewer = "unavailable"
+    ManagedReviewer = "unavailable"
+    PrimaryReasoningDefault = "unavailable"
+  }
+  $path = Join-Path $CodexHome "config.toml"
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]$result }
+  foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+    if ($line -match '^\s*approvals_reviewer\s*=\s*["'']([a-zA-Z0-9_.-]{1,64})["'']') {
+      $result.ConfiguredReviewer = $Matches[1].ToLowerInvariant()
+    } elseif ($line -match '^\s*managed_approvals_reviewer\s*=\s*["'']([a-zA-Z0-9_.-]{1,64})["'']') {
+      $result.ManagedReviewer = $Matches[1].ToLowerInvariant()
+    } elseif ($line -match '^\s*(model_reasoning_effort|reasoning_effort)\s*=\s*["''](low|medium|high|xhigh|max|ultra)["'']') {
+      $result.PrimaryReasoningDefault = $Matches[2].ToLowerInvariant()
+    }
+  }
+  [pscustomobject]$result
+}
+
 function ConvertTo-TokenInt64 {
   param($Object, [string]$Name, [switch]$Optional)
   $property = if ($Object) { $Object.PSObject.Properties[$Name] } else { $null }
@@ -468,6 +608,14 @@ function Get-ApprovalRequestClass {
     "filesystem_approval_request" { "filesystem" }
     default { "unknown" }
   }
+  $prefixFingerprint = Get-CanonicalPrefixFingerprint $Record.payload
+  $operationClass = Get-InspectionOperationClass $Record.payload
+  $accessMode = Get-SafeCategory $Record.payload @("access_mode")
+  $boundaryCause = Get-SafeCategory $Record.payload @(
+    "escalation_reason", "boundary_cause", "approval_cause", "permission_class"
+  )
+  $state = Get-SafeCategory $Record.payload @("approval_state", "state", "status")
+  $correlation = Get-SafeCategory $Record.payload @("approval_id", "request_id", "call_id")
   $dimensions = [System.Collections.Generic.List[string]]::new()
   foreach ($definition in @(
       @{ label = "tool"; names = @("tool_name", "tool") },
@@ -481,22 +629,41 @@ function Get-ApprovalRequestClass {
   }
   [pscustomobject]@{
     Source = $source
+    PrefixFingerprint = $prefixFingerprint
+    OperationClass = if ($operationClass) { $operationClass } else { "unknown" }
+    InspectionShaped = $operationClass -in @(
+      "get-content", "rg", "get-childitem", "select-string", "resolve-path", "test-path",
+      "repository-read", "filesystem-read"
+    )
+    AccessMode = if ($accessMode) { $accessMode } else { "unknown" }
+    BoundaryCause = if ($boundaryCause) { $boundaryCause } else { "unknown" }
+    State = if ($state) { $state } else { "unknown" }
+    CorrelationFingerprint = if ($correlation) { Get-TextFingerprint $correlation } else { $null }
     Signature = if ($dimensions.Count -gt 0) {
       $payloadType + "|" + (@($dimensions | Sort-Object) -join "|")
-    } else { $null }
+    } elseif ($prefixFingerprint) { $payloadType + "|prefix:" + $prefixFingerprint } else { $null }
   }
 }
 
-function Test-DeniedApprovalRecord {
+function Get-ApprovalDecisionRecord {
   param($Record)
-  if (-not $Record -or -not $Record.payload) { return $false }
+  if (-not $Record -or -not $Record.payload) { return $null }
   $payloadType = Get-SafeCategory $Record.payload @("type")
   if ($payloadType -notin @(
       "approval_decision", "approval_response", "exec_approval_response",
       "apply_patch_approval_response"
-    )) { return $false }
+    )) { return $null }
   $decision = Get-SafeCategory $Record.payload @("decision", "status", "outcome")
-  $decision -in @("denied", "rejected", "declined")
+  $normalized = if ($decision -in @("allowed", "allow", "approved", "approve")) {
+    "allowed"
+  } elseif ($decision -in @("denied", "rejected", "declined")) {
+    "denied"
+  } else { "unknown" }
+  $correlation = Get-SafeCategory $Record.payload @("approval_id", "request_id", "call_id")
+  [pscustomobject]@{
+    Decision = $normalized
+    CorrelationFingerprint = if ($correlation) { Get-TextFingerprint $correlation } else { $null }
+  }
 }
 
 function Get-QuotaHealth {
@@ -536,8 +703,14 @@ function Get-QuotaHealth {
     ReviewerObservation = "unavailable"
     ReviewerCoverage = "unknown"
     ReviewerReviewsPerHour = $null
+    ReviewerObservationSeconds = 0
+    ReviewerRateNormalized = $false
+    ReviewerRateConfidence = "unavailable"
     ReviewerAverageIntervalSeconds = $null
+    ReviewerMedianIntervalSeconds = $null
     ReviewerPeakPerMinute = 0
+    ReviewerP95PerMinute = 0
+    ReviewerConsecutiveActiveMinutes = 0
     ReviewerConcurrentPeak = 0
     ReviewerParentLinksObserved = 0
     ReviewerInputM = $null
@@ -550,7 +723,31 @@ function Get-QuotaHealth {
     ApprovalRepeatPercent = $null
     ApprovalSources = "unavailable"
     ApprovalDeniedObserved = 0
+    ApprovalDecisionsObserved = 0
+    ApprovalAllowedObserved = 0
+    ApprovalAllowPercent = $null
     ApprovalDeniedObservation = "unavailable"
+    ApprovalPersistenceRetries = 0
+    ApprovalPersistenceFailures = 0
+    ApprovalPersistenceDiagnosis = "not_observed"
+    ApprovalRepeatedPrefixRequests = 0
+    ApprovalLargestPrefixRepeat = 0
+    ApprovalRuleMissDiagnosis = "not_observed"
+    InspectionShapedApprovalRequests = 0
+    InspectionShapedApprovalPercent = $null
+    ApprovalBoundaryCauses = "unavailable"
+    ApprovalMetricSource = "local_rollout"
+    DashboardEquivalence = "unsupported"
+    BillingInference = "unsupported"
+    PrimaryTurnsObserved = 0
+    ApprovalReviewTurnShare = $null
+    ReviewerToolCalls = 0
+    ReviewerEscalationsObserved = 0
+    ReviewerEscalationUniquePrefixes = 0
+    ReviewerEscalationRepeatedPrefixes = 0
+    ReviewerEscalationLargestPrefix = 0
+    NestedReviewerSessionsObserved = 0
+    ApprovalRecursionRisk = "not_observed"
     ApprovalOptimization = "diagnostic_only"
     ApprovalModesObserved = "unavailable"
     ReviewerControlCapability = "unavailable"
@@ -570,12 +767,49 @@ function Get-QuotaHealth {
     RolloutLineageLinksObserved = 0
     RolloutForkFilesObserved = 0
     RolloutNearSizeClusterFiles = 0
+    RolloutMaxTaskAgeDays = $null
+    RolloutTop1ReviewShare = $null
+    RolloutTop3ReviewShare = $null
+    SpawnForkAll = 0
+    SpawnForkAllDefaulted = 0
+    SpawnForkNone = 0
+    SpawnForkBounded = 0
+    SpawnHighEffort = 0
+    SpawnMaxEffort = 0
+    SpawnInheritedTurnsObserved = 0
+    SpawnContextAmplification = "not_observed"
+    RootAgentSpawns = 0
+    ChildAgentSpawns = 0
+    NestedAgentObservation = "unavailable"
     CodexVersionsObserved = "unavailable"
     AuthProvidersObserved = "unavailable"
     TokenUsageScope = "selected_rollout_cumulative_snapshots"
     QuotaContributors = "none"
     Advice = "none"
     AdviceReason = "no_supported_action_threshold_crossed"
+    QuotaConfidence = "unavailable"
+    EffectiveReviewer = "unavailable"
+    ConfiguredReviewer = "unavailable"
+    ManagedReviewer = "unavailable"
+    ReviewerConfigurationComparison = "unavailable"
+    PrimaryReasoningDefault = "unavailable"
+    RuleObservation = "unavailable"
+    RuleCount = 0
+    RuleMonolithic = 0
+    RuleReusableNarrow = 0
+    RuleBroadInterpreter = 0
+    RuleCredentialShaped = 0
+    RuleAverageLength = $null
+    RuleMaximumLiteralLength = 0
+    RuleStatus = "UNAVAILABLE"
+    RuleValuesReturned = $false
+    RuleFilesEligible = 0
+    RuleFilesSelected = 0
+    RuleCoverageCapped = $false
+    RuleBrittlenessDiagnosis = "not_observed"
+    RuleSecretDiagnosis = "not_observed"
+    RuleBroadInterpreterDiagnosis = "not_observed"
+    ApprovalProblemClass = "unavailable"
   }
 
   $inputTokens = 0L
@@ -601,7 +835,11 @@ function Get-QuotaHealth {
   $crossFileCompactions = @{}
   $tokenSnapshotOwners = @{}
   $approvalClasses = @{}
+  $approvalPrefixes = @{}
+  $approvalBoundaryCauses = @{}
+  $approvalStates = @{}
   $approvalSources = @{}
+  $reviewerEscalationPrefixes = @{}
   $codexVersions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   $authProviders = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   $approvalModes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -610,10 +848,33 @@ function Get-QuotaHealth {
   )
   $reviewTimestamps = [System.Collections.Generic.List[DateTimeOffset]]::new()
   $reviewerIntervals = [System.Collections.Generic.List[object]]::new()
+  $fileStats = [System.Collections.Generic.List[object]]::new()
   $selectedBytes = 0L
   $parsedBytes = 0L
   $growthRateTotal = 0.0
   $growthRateFiles = 0
+
+  $configurationHealth = Get-CodexConfigurationHealth
+  $health.ConfiguredReviewer = $configurationHealth.ConfiguredReviewer
+  $health.ManagedReviewer = $configurationHealth.ManagedReviewer
+  $health.PrimaryReasoningDefault = $configurationHealth.PrimaryReasoningDefault
+  $ruleHealth = Get-RuleHealth
+  $health.RuleObservation = $ruleHealth.Observation
+  $health.RuleCount = $ruleHealth.Count
+  $health.RuleMonolithic = $ruleHealth.Monolithic
+  $health.RuleReusableNarrow = $ruleHealth.ReusableNarrow
+  $health.RuleBroadInterpreter = $ruleHealth.BroadInterpreter
+  $health.RuleCredentialShaped = $ruleHealth.CredentialShaped
+  $health.RuleAverageLength = $ruleHealth.AverageLength
+  $health.RuleMaximumLiteralLength = $ruleHealth.MaximumLiteralLength
+  $health.RuleStatus = $ruleHealth.Status
+  $health.RuleValuesReturned = $ruleHealth.ValuesReturned
+  $health.RuleFilesEligible = $ruleHealth.FilesEligible
+  $health.RuleFilesSelected = $ruleHealth.FilesSelected
+  $health.RuleCoverageCapped = $ruleHealth.CoverageCapped
+  if ($ruleHealth.Monolithic -gt 0) { $health.RuleBrittlenessDiagnosis = "rule_brittleness_warning" }
+  if ($ruleHealth.CredentialShaped -gt 0) { $health.RuleSecretDiagnosis = "rule_secret_exposure" }
+  if ($ruleHealth.BroadInterpreter -gt 0) { $health.RuleBroadInterpreterDiagnosis = "broad_interpreter_rule" }
 
   foreach ($file in @($sessionFiles | Sort-Object CreationTimeUtc, LastWriteTimeUtc)) {
     $selectedBytes += [long]$file.Length
@@ -663,6 +924,15 @@ function Get-QuotaHealth {
     $reviewerFileFirst = [DateTimeOffset]::MaxValue
     $reviewerFileLast = [DateTimeOffset]::MinValue
     $fileParentLinkSeen = $false
+    $fileSessionKey = Get-TextFingerprint $file.FullName
+    $fileParentKey = $null
+    $fileReviewerTurns = 0
+    $fileCompactions = 0
+    $fileToolCalls = 0
+    $fileSpawns = 0
+    $fileTurnCount = 0
+    $currentTurnIsReviewer = $false
+    $fileFirstRecordTimestamp = [DateTimeOffset]::MaxValue
     $lines = @($tail -split "`r?`n")
     if (-not $tail.EndsWith("`n", [System.StringComparison]::Ordinal)) {
       $health.TailIncompleteFiles++
@@ -695,6 +965,7 @@ function Get-QuotaHealth {
 
       $recordTimestamp = Get-RecordTimestamp $record
       if ($recordTimestamp) {
+        if ($recordTimestamp -lt $fileFirstRecordTimestamp) { $fileFirstRecordTimestamp = $recordTimestamp }
         if ($seenRecords.ContainsKey($recordHash)) {
           $health.DuplicateRecords++
           continue
@@ -708,6 +979,14 @@ function Get-QuotaHealth {
       $ordinal++
 
       if ($record.type -eq "session_meta") {
+        $sessionIdentifier = Get-SafeCategory $record.payload @("thread_id", "session_id", "id")
+        if ($sessionIdentifier) { $fileSessionKey = Get-TextFingerprint $sessionIdentifier }
+        $effectiveReviewer = Get-SafeCategory $record.payload @(
+          "effective_approvals_reviewer", "effective_approval_reviewer", "approval_reviewer"
+        )
+        if ($effectiveReviewer) { $health.EffectiveReviewer = $effectiveReviewer }
+        $managedReviewer = Get-SafeCategory $record.payload @("managed_approvals_reviewer", "managed_approval_reviewer")
+        if ($managedReviewer) { $health.ManagedReviewer = $managedReviewer }
         $versionProperty = if ($record.payload) { $record.payload.PSObject.Properties["multi_agent_version"] } else { $null }
         if ($versionProperty -and [string]$versionProperty.Value -match '^\d+$' -and [int]$versionProperty.Value -ge 2) {
           $multiAgentV2Seen = $true
@@ -732,6 +1011,7 @@ function Get-QuotaHealth {
           $parentProperty = if ($record.payload) { $record.payload.PSObject.Properties[$parentName] } else { $null }
           if ($parentProperty -and $parentProperty.Value) {
             $fileParentLinkSeen = $true
+            $fileParentKey = Get-TextFingerprint ([string]$parentProperty.Value)
             break
           }
         }
@@ -747,11 +1027,14 @@ function Get-QuotaHealth {
       }
 
       if ($record.type -eq "turn_context") {
+        $fileTurnCount++
         $modelProperty = if ($record.payload) { $record.payload.PSObject.Properties["model"] } else { $null }
         $approvalMode = Get-SafeCategory $record.payload @("approval_mode", "approval_policy")
         if ($approvalMode) { $null = $approvalModes.Add($approvalMode) }
         if ($modelProperty -and [string]$modelProperty.Value -eq "codex-auto-review") {
+          $currentTurnIsReviewer = $true
           $health.ReviewerTurnsObserved++
+          $fileReviewerTurns++
           $null = $reviewerModels.Add("codex-auto-review")
           if (-not $reviewerSeenInFile) {
             $health.ReviewerSessionsObserved++
@@ -762,6 +1045,9 @@ function Get-QuotaHealth {
             if ($recordTimestamp -lt $reviewerFileFirst) { $reviewerFileFirst = $recordTimestamp }
             if ($recordTimestamp -gt $reviewerFileLast) { $reviewerFileLast = $recordTimestamp }
           }
+        } else {
+          $currentTurnIsReviewer = $false
+          $health.PrimaryTurnsObserved++
         }
         if (-not $recordTimestamp -or $recordTimestamp -ge $lastTurnContextTimestamp) {
           $lastTurnContext = $record.payload
@@ -774,6 +1060,10 @@ function Get-QuotaHealth {
         $approvalClass = Get-ApprovalRequestClass $record
         if ($approvalClass) {
           $health.ApprovalRequestsObserved++
+          if ($approvalClass.InspectionShaped) { $health.InspectionShapedApprovalRequests++ }
+          if ($approvalBoundaryCauses.ContainsKey($approvalClass.BoundaryCause)) {
+            $approvalBoundaryCauses[$approvalClass.BoundaryCause]++
+          } else { $approvalBoundaryCauses[$approvalClass.BoundaryCause] = 1 }
           if ($approvalSources.ContainsKey($approvalClass.Source)) {
             $approvalSources[$approvalClass.Source]++
           } else {
@@ -786,8 +1076,44 @@ function Get-QuotaHealth {
               $approvalClasses[$approvalClass.Signature] = 1
             }
           }
+          if ($approvalClass.PrefixFingerprint) {
+            if ($approvalPrefixes.ContainsKey($approvalClass.PrefixFingerprint)) {
+              $approvalPrefixes[$approvalClass.PrefixFingerprint]++
+            } else { $approvalPrefixes[$approvalClass.PrefixFingerprint] = 1 }
+          }
+          $approvalStateKey = if ($approvalClass.CorrelationFingerprint) {
+            $approvalClass.CorrelationFingerprint
+          } else { $approvalClass.Signature }
+          if ($approvalStateKey) {
+            if ($approvalStates.ContainsKey($approvalStateKey)) {
+              $priorApproval = $approvalStates[$approvalStateKey]
+              if ($priorApproval.decision -eq "allowed" -and $approvalClass.State -eq "pending" -and -not $priorApproval.resolved) {
+                $health.ApprovalPersistenceRetries++
+              }
+            }
+            $approvalStates[$approvalStateKey] = @{
+              decision = if ($approvalStates.ContainsKey($approvalStateKey)) { $approvalStates[$approvalStateKey].decision } else { "unknown" }
+              resolved = $false
+            }
+          }
         }
-        if (Test-DeniedApprovalRecord $record) { $health.ApprovalDeniedObserved++ }
+        $approvalDecision = Get-ApprovalDecisionRecord $record
+        if ($approvalDecision) {
+          $health.ApprovalDecisionsObserved++
+          if ($approvalDecision.Decision -eq "allowed") { $health.ApprovalAllowedObserved++ }
+          if ($approvalDecision.Decision -eq "denied") { $health.ApprovalDeniedObserved++ }
+          if ($approvalDecision.CorrelationFingerprint -and $approvalStates.ContainsKey($approvalDecision.CorrelationFingerprint)) {
+            $approvalStates[$approvalDecision.CorrelationFingerprint].decision = $approvalDecision.Decision
+          }
+        }
+        $payloadType = Get-SafeCategory $record.payload @("type")
+        if ($payloadType -in @("approval_resolved", "approval_state_applied")) {
+          $resolvedId = Get-SafeCategory $record.payload @("approval_id", "request_id", "call_id")
+          $resolvedKey = if ($resolvedId) { Get-TextFingerprint $resolvedId } else { $null }
+          if ($resolvedKey -and $approvalStates.ContainsKey($resolvedKey)) { $approvalStates[$resolvedKey].resolved = $true }
+        } elseif ($payloadType -in @("approval_state_persistence_error", "approval_persistence_error")) {
+          $health.ApprovalPersistenceFailures++
+        }
         if ($record.payload.type -eq "token_count") {
           $snapshot = Get-ValidatedTokenSnapshot $record.payload.info
           if (-not $snapshot) {
@@ -819,6 +1145,7 @@ function Get-QuotaHealth {
           }
         } elseif ($record.payload.type -eq "context_compacted") {
           $health.Compactions++
+          $fileCompactions++
           if ($crossFileCompactions.ContainsKey($recordHash)) {
             if ($crossFileCompactions[$recordHash] -ne $file.FullName) {
               $health.CrossFileDuplicateCompactions++
@@ -832,12 +1159,49 @@ function Get-QuotaHealth {
         continue
       }
 
-      if (
-        $record.type -eq "response_item" -and
-        $record.payload.type -eq "function_call" -and
-        $record.payload.name -eq "spawn_agent"
-      ) {
-        $health.SpawnCalls++
+      if ($record.type -eq "response_item" -and $record.payload.type -eq "function_call") {
+        $fileToolCalls++
+        $functionName = Get-SafeCategory $record.payload @("name")
+        $arguments = ConvertFrom-StructuredArguments $record.payload.arguments
+        if ($currentTurnIsReviewer) {
+          $health.ReviewerToolCalls++
+          $sandboxPermission = Get-SafeCategory $arguments @("sandbox_permissions", "permission_class")
+          if ($sandboxPermission -eq "require_escalated") {
+            $health.ReviewerEscalationsObserved++
+            $escalationPrefix = Get-CanonicalPrefixFingerprint $arguments
+            if ($escalationPrefix) {
+              if ($reviewerEscalationPrefixes.ContainsKey($escalationPrefix)) {
+                $reviewerEscalationPrefixes[$escalationPrefix]++
+              } else { $reviewerEscalationPrefixes[$escalationPrefix] = 1 }
+            }
+          }
+        }
+        if ($functionName -eq "spawn_agent") {
+          $health.SpawnCalls++
+          $fileSpawns++
+          if ($fileParentLinkSeen) { $health.ChildAgentSpawns++ } else { $health.RootAgentSpawns++ }
+          $forkProperty = if ($arguments) { $arguments.PSObject.Properties["fork_turns"] } else { $null }
+          $forkValue = if ($forkProperty -and $null -ne $forkProperty.Value) {
+            ([string]$forkProperty.Value).Trim().ToLowerInvariant()
+          } else { "all" }
+          if (-not $forkProperty) { $health.SpawnForkAllDefaulted++ }
+          if ($forkValue -eq "all") {
+            $health.SpawnForkAll++
+            $health.SpawnInheritedTurnsObserved += $fileTurnCount
+          } elseif ($forkValue -eq "none") {
+            $health.SpawnForkNone++
+          } elseif ($forkValue -match '^\d+$') {
+            $health.SpawnForkBounded++
+            $health.SpawnInheritedTurnsObserved += [math]::Min($fileTurnCount, [int]$forkValue)
+          }
+          $workerEffort = Get-SafeCategory $arguments @("reasoning_effort", "effort")
+          if ($workerEffort -in @("high", "xhigh", "max", "ultra")) { $health.SpawnHighEffort++ }
+          if ($workerEffort -in @("max", "ultra")) { $health.SpawnMaxEffort++ }
+          $taskComplexity = Get-SafeCategory $arguments @("task_complexity", "complexity")
+          if ($forkValue -eq "all" -and $taskComplexity -in @("simple", "low", "bounded", "mechanical")) {
+            $health.SpawnContextAmplification = "observed"
+          }
+        }
       }
     }
 
@@ -850,6 +1214,22 @@ function Get-QuotaHealth {
     ) {
       $reviewerIntervals.Add([pscustomobject]@{ Start = $reviewerFileFirst; End = $reviewerFileLast })
     }
+    $fileStats.Add([pscustomobject]@{
+        SessionKey = $fileSessionKey
+        ParentKey = $fileParentKey
+        HasParent = $fileParentLinkSeen
+        ReviewerTurns = $fileReviewerTurns
+        Compactions = $fileCompactions
+        ToolCalls = $fileToolCalls
+        Spawns = $fileSpawns
+        AgeDays = [math]::Max(0.0, (
+            (Get-Date).ToUniversalTime() -
+            $(if ($fileFirstRecordTimestamp -ne [DateTimeOffset]::MaxValue) {
+                $fileFirstRecordTimestamp.UtcDateTime
+              } else { $file.CreationTimeUtc })
+          ).TotalDays)
+        IsReviewer = $reviewerSeenInFile
+      })
 
     if ($lastSnapshot) {
       $health.Files++
@@ -912,6 +1292,97 @@ function Get-QuotaHealth {
   } else {
     $health.CoverageContinuity = "complete"
   }
+  $health.QuotaConfidence = if ($health.FilesSelected -eq 0) {
+    "unavailable"
+  } elseif ($health.CoverageContinuity -eq "complete") { "high" } else { "low" }
+  if ($health.ReviewerTurnsObserved -gt 0) { $health.EffectiveReviewer = "auto_review" }
+  $health.ReviewerConfigurationComparison = if (
+    $health.ConfiguredReviewer -eq "unavailable" -or $health.EffectiveReviewer -eq "unavailable"
+  ) { "unavailable" } elseif ($health.ConfiguredReviewer -eq $health.EffectiveReviewer) {
+    "same_label"
+  } else { "different_labels_mapping_possible" }
+  $comparableTurns = $health.ReviewerTurnsObserved + $health.PrimaryTurnsObserved
+  if ($comparableTurns -gt 0) {
+    $health.ApprovalReviewTurnShare = [math]::Round(100.0 * $health.ReviewerTurnsObserved / $comparableTurns, 1)
+  }
+  if ($health.ApprovalDecisionsObserved -gt 0) {
+    $health.ApprovalAllowPercent = [math]::Round(
+      100.0 * $health.ApprovalAllowedObserved / $health.ApprovalDecisionsObserved, 2
+    )
+  }
+  if ($health.ApprovalRequestsObserved -gt 0) {
+    $health.InspectionShapedApprovalPercent = [math]::Round(
+      100.0 * $health.InspectionShapedApprovalRequests / $health.ApprovalRequestsObserved, 1
+    )
+  }
+  if ($approvalBoundaryCauses.Count -gt 0) {
+    $health.ApprovalBoundaryCauses = @($approvalBoundaryCauses.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        $_.Name + ":" + $_.Value
+      }) -join ","
+  }
+  if ($health.ApprovalPersistenceRetries -gt 0 -or $health.ApprovalPersistenceFailures -gt 0) {
+    $health.ApprovalPersistenceDiagnosis = "approval_state_persistence_runaway"
+    $health.ApprovalProblemClass = "persistence_runaway"
+  }
+  if ($approvalPrefixes.Count -gt 0) {
+    $health.ApprovalRepeatedPrefixRequests = [int](@($approvalPrefixes.Values | ForEach-Object {
+          [math]::Max(0, [int]$_ - 1)
+        } | Measure-Object -Sum).Sum)
+    $health.ApprovalLargestPrefixRepeat = [int](@($approvalPrefixes.Values | Measure-Object -Maximum).Maximum)
+    if ($health.ApprovalRepeatedPrefixRequests -gt 0 -and $health.ApprovalPersistenceDiagnosis -eq "not_observed") {
+      $health.ApprovalRuleMissDiagnosis = "repeated_rule_miss_candidate"
+      $health.ApprovalProblemClass = "rule_miss_amplification"
+    }
+  }
+  if ($health.ApprovalProblemClass -eq "unavailable" -and $health.ApprovalRequestsObserved -gt 0) {
+    $health.ApprovalProblemClass = "legitimate_or_diverse_boundary_volume"
+  }
+  if ($reviewerEscalationPrefixes.Count -gt 0) {
+    $health.ReviewerEscalationUniquePrefixes = $reviewerEscalationPrefixes.Count
+    $health.ReviewerEscalationRepeatedPrefixes = [int](@($reviewerEscalationPrefixes.Values | ForEach-Object {
+          [math]::Max(0, [int]$_ - 1)
+        } | Measure-Object -Sum).Sum)
+    $health.ReviewerEscalationLargestPrefix = [int](@($reviewerEscalationPrefixes.Values | Measure-Object -Maximum).Maximum)
+  }
+
+  $statsBySession = @{}
+  foreach ($stat in $fileStats) { $statsBySession[$stat.SessionKey] = $stat }
+  foreach ($stat in @($fileStats | Where-Object { $_.IsReviewer -and $_.ParentKey })) {
+    if ($statsBySession.ContainsKey($stat.ParentKey) -and $statsBySession[$stat.ParentKey].IsReviewer) {
+      $health.NestedReviewerSessionsObserved++
+    }
+  }
+  if ($health.ReviewerEscalationsObserved -gt 0 -and $health.NestedReviewerSessionsObserved -gt 0) {
+    $health.ApprovalRecursionRisk = "observed"
+  }
+  $health.NestedAgentObservation = if ($health.SpawnCalls -eq 0) {
+    "unavailable"
+  } elseif ($health.ChildAgentSpawns -gt 0) { "observed" } else { "not_observed" }
+  if ($fileStats.Count -gt 0) {
+    $health.RolloutMaxTaskAgeDays = [math]::Round(
+      [double](@($fileStats | Measure-Object AgeDays -Maximum).Maximum), 1
+    )
+    $lineageReviews = @{}
+    foreach ($stat in $fileStats) {
+      $root = $stat.SessionKey
+      $cursor = $stat
+      for ($depth = 0; $depth -lt 16; $depth++) {
+        if (-not $cursor.ParentKey -or -not $statsBySession.ContainsKey($cursor.ParentKey)) { break }
+        $root = $cursor.ParentKey
+        $cursor = $statsBySession[$cursor.ParentKey]
+      }
+      if ($lineageReviews.ContainsKey($root)) { $lineageReviews[$root] += $stat.ReviewerTurns }
+      else { $lineageReviews[$root] = $stat.ReviewerTurns }
+    }
+    if ($health.ReviewerTurnsObserved -gt 0) {
+      $rankedLineages = @($lineageReviews.Values | Sort-Object -Descending)
+      if ($rankedLineages.Count -gt 0) {
+        $health.RolloutTop1ReviewShare = [math]::Round(100.0 * $rankedLineages[0] / $health.ReviewerTurnsObserved, 1)
+        $top3 = [int](@($rankedLineages | Select-Object -First 3 | Measure-Object -Sum).Sum)
+        $health.RolloutTop3ReviewShare = [math]::Round(100.0 * $top3 / $health.ReviewerTurnsObserved, 1)
+      }
+    }
+  }
   $health.SpawnObservation = if ($health.SpawnCalls -gt 0) {
     "observed"
   } elseif ($multiAgentV2Seen) {
@@ -956,9 +1427,12 @@ function Get-QuotaHealth {
   }
   if ($reviewTimestamps.Count -ge 2) {
     $orderedReviewTimestamps = @($reviewTimestamps | Sort-Object)
-    $reviewDurationHours = ($orderedReviewTimestamps[-1] - $orderedReviewTimestamps[0]).TotalHours
+    $reviewDuration = $orderedReviewTimestamps[-1] - $orderedReviewTimestamps[0]
+    $health.ReviewerObservationSeconds = [math]::Round($reviewDuration.TotalSeconds, 1)
+    $reviewDurationHours = $reviewDuration.TotalHours
     if ($reviewDurationHours -gt 0) {
       $health.ReviewerReviewsPerHour = [math]::Round($health.ReviewerTurnsObserved / $reviewDurationHours, 1)
+      $health.ReviewerRateNormalized = $true
     }
     $reviewIntervalsSeconds = for ($index = 1; $index -lt $orderedReviewTimestamps.Count; $index++) {
       ($orderedReviewTimestamps[$index] - $orderedReviewTimestamps[$index - 1]).TotalSeconds
@@ -967,12 +1441,43 @@ function Get-QuotaHealth {
       $health.ReviewerAverageIntervalSeconds = [math]::Round(
         (@($reviewIntervalsSeconds | Measure-Object -Average).Average), 1
       )
+      $orderedIntervals = @($reviewIntervalsSeconds | Sort-Object)
+      $middle = [int][math]::Floor($orderedIntervals.Count / 2)
+      $median = if ($orderedIntervals.Count % 2 -eq 0) {
+        ($orderedIntervals[$middle - 1] + $orderedIntervals[$middle]) / 2.0
+      } else { $orderedIntervals[$middle] }
+      $health.ReviewerMedianIntervalSeconds = [math]::Round($median, 1)
     }
-    $health.ReviewerPeakPerMinute = @($orderedReviewTimestamps | Group-Object {
+    $minuteGroups = @($orderedReviewTimestamps | Group-Object {
         $_.ToUniversalTime().ToString("yyyyMMddHHmm")
-      } | Measure-Object Count -Maximum).Maximum
+      } | Sort-Object Name)
+    $health.ReviewerPeakPerMinute = @($minuteGroups | Measure-Object Count -Maximum).Maximum
+    $minuteCounts = @($minuteGroups | ForEach-Object { $_.Count } | Sort-Object)
+    if ($minuteCounts.Count -gt 0) {
+      $p95Index = [math]::Max(0, [int][math]::Ceiling(0.95 * $minuteCounts.Count) - 1)
+      $health.ReviewerP95PerMinute = $minuteCounts[$p95Index]
+    }
+    $longestActive = 0
+    $currentActive = 0
+    $priorMinute = $null
+    foreach ($group in $minuteGroups) {
+      $minute = [DateTime]::ParseExact($group.Name, "yyyyMMddHHmm", [System.Globalization.CultureInfo]::InvariantCulture)
+      if ($priorMinute -and ($minute - $priorMinute).TotalMinutes -eq 1) { $currentActive++ } else { $currentActive = 1 }
+      if ($currentActive -gt $longestActive) { $longestActive = $currentActive }
+      $priorMinute = $minute
+    }
+    $health.ReviewerConsecutiveActiveMinutes = $longestActive
+    $health.ReviewerRateConfidence = if (
+      $health.CoverageContinuity -ne "complete" -or $reviewDuration.TotalMinutes -lt 15 -or
+      $health.ReviewerTurnsObserved -lt 20
+    ) { "low" } elseif ($reviewDuration.TotalHours -lt 1 -or $health.ReviewerTurnsObserved -lt 100) {
+      "medium"
+    } else { "high" }
   } elseif ($reviewTimestamps.Count -eq 1) {
     $health.ReviewerPeakPerMinute = 1
+    $health.ReviewerP95PerMinute = 1
+    $health.ReviewerConsecutiveActiveMinutes = 1
+    $health.ReviewerRateConfidence = "low"
   }
   foreach ($interval in $reviewerIntervals) {
     $concurrent = @($reviewerIntervals | Where-Object {
@@ -1010,14 +1515,18 @@ function Get-QuotaHealth {
         $_.Name + ":" + $_.Value
       }) -join ","
   }
-  $health.ApprovalDeniedObservation = if ($health.ApprovalDeniedObserved -gt 0) {
+  $health.ApprovalDeniedObservation = if ($health.ApprovalDecisionsObserved -gt 0) {
     "observed"
   } elseif ($health.ApprovalRequestsObserved -gt 0) {
     "response_schema_unavailable"
   } else {
     "unavailable"
   }
-  $health.ApprovalOptimization = if ($health.ApprovalRepeatedRequests -gt 0) {
+  $health.ApprovalOptimization = if ($health.ApprovalPersistenceDiagnosis -eq "approval_state_persistence_runaway") {
+    "repair_persistence_before_cost_optimization"
+  } elseif ($health.ApprovalRepeatedPrefixRequests -gt 0) {
+    "manual_narrow_rule_review"
+  } elseif ($health.ApprovalRepeatedRequests -gt 0) {
     "manual_narrow_rule_review"
   } elseif ($health.ApprovalRequestsObserved -gt 0) {
     "no_change_recommended"
@@ -1323,6 +1832,81 @@ if ($Action -eq "inspect") {
     $quotaHealth.ReviewerCompatibility,
     $quotaHealth.QuotaContributors,
     $quotaHealth.Advice)
+  $efficiencyFields = [ordered]@{
+    metricSource = $quotaHealth.ApprovalMetricSource
+    dashboardEquivalence = $quotaHealth.DashboardEquivalence
+    billingInference = $quotaHealth.BillingInference
+    quotaConfidence = $quotaHealth.QuotaConfidence
+    primaryTurnsObserved = $quotaHealth.PrimaryTurnsObserved
+    approvalReviewTurnsObserved = $quotaHealth.ReviewerTurnsObserved
+    approvalReviewTurnShare = $quotaHealth.ApprovalReviewTurnShare
+    approvalDecisionsObserved = $quotaHealth.ApprovalDecisionsObserved
+    approvalAllowedObserved = $quotaHealth.ApprovalAllowedObserved
+    approvalDeniedObserved = $quotaHealth.ApprovalDeniedObserved
+    approvalAllowPct = $quotaHealth.ApprovalAllowPercent
+    approvalPersistenceRetries = $quotaHealth.ApprovalPersistenceRetries
+    approvalPersistenceFailures = $quotaHealth.ApprovalPersistenceFailures
+    approvalPersistenceDiagnosis = $quotaHealth.ApprovalPersistenceDiagnosis
+    approvalRepeatedPrefixRequests = $quotaHealth.ApprovalRepeatedPrefixRequests
+    approvalLargestPrefixRepeat = $quotaHealth.ApprovalLargestPrefixRepeat
+    approvalRuleMissDiagnosis = $quotaHealth.ApprovalRuleMissDiagnosis
+    approvalProblemClass = $quotaHealth.ApprovalProblemClass
+    inspectionShapedApprovalRequests = $quotaHealth.InspectionShapedApprovalRequests
+    inspectionShapedApprovalPct = $quotaHealth.InspectionShapedApprovalPercent
+    approvalBoundaryCauses = $quotaHealth.ApprovalBoundaryCauses
+    approvalObservationSeconds = $quotaHealth.ReviewerObservationSeconds
+    approvalRateNormalized = $quotaHealth.ReviewerRateNormalized
+    approvalRateConfidence = $quotaHealth.ReviewerRateConfidence
+    approvalMedianIntervalSeconds = $quotaHealth.ReviewerMedianIntervalSeconds
+    approvalP95PerMinute = $quotaHealth.ReviewerP95PerMinute
+    approvalConsecutiveActiveMinutes = $quotaHealth.ReviewerConsecutiveActiveMinutes
+    reviewerToolCalls = $quotaHealth.ReviewerToolCalls
+    reviewerEscalationsObserved = $quotaHealth.ReviewerEscalationsObserved
+    reviewerEscalationUniquePrefixes = $quotaHealth.ReviewerEscalationUniquePrefixes
+    reviewerEscalationRepeatedPrefixes = $quotaHealth.ReviewerEscalationRepeatedPrefixes
+    reviewerEscalationLargestPrefix = $quotaHealth.ReviewerEscalationLargestPrefix
+    nestedReviewerSessionsObserved = $quotaHealth.NestedReviewerSessionsObserved
+    approvalRecursionRisk = $quotaHealth.ApprovalRecursionRisk
+    ruleObservation = $quotaHealth.RuleObservation
+    ruleCount = $quotaHealth.RuleCount
+    ruleMonolithic = $quotaHealth.RuleMonolithic
+    ruleReusableNarrow = $quotaHealth.RuleReusableNarrow
+    ruleBroadInterpreter = $quotaHealth.RuleBroadInterpreter
+    ruleCredentialShaped = $quotaHealth.RuleCredentialShaped
+    ruleAverageLength = $quotaHealth.RuleAverageLength
+    ruleMaximumLiteralLength = $quotaHealth.RuleMaximumLiteralLength
+    ruleStatus = $quotaHealth.RuleStatus
+    ruleValuesReturned = $quotaHealth.RuleValuesReturned
+    ruleFilesEligible = $quotaHealth.RuleFilesEligible
+    ruleFilesSelected = $quotaHealth.RuleFilesSelected
+    ruleCoverageCapped = $quotaHealth.RuleCoverageCapped
+    ruleBrittlenessDiagnosis = $quotaHealth.RuleBrittlenessDiagnosis
+    ruleSecretDiagnosis = $quotaHealth.RuleSecretDiagnosis
+    ruleBroadInterpreterDiagnosis = $quotaHealth.RuleBroadInterpreterDiagnosis
+    rolloutMaxTaskAgeDays = $quotaHealth.RolloutMaxTaskAgeDays
+    rolloutTop1ReviewShare = $quotaHealth.RolloutTop1ReviewShare
+    rolloutTop3ReviewShare = $quotaHealth.RolloutTop3ReviewShare
+    spawnForkAll = $quotaHealth.SpawnForkAll
+    spawnForkAllDefaulted = $quotaHealth.SpawnForkAllDefaulted
+    spawnForkNone = $quotaHealth.SpawnForkNone
+    spawnForkBounded = $quotaHealth.SpawnForkBounded
+    spawnHighEffort = $quotaHealth.SpawnHighEffort
+    spawnMaxEffort = $quotaHealth.SpawnMaxEffort
+    spawnInheritedTurnsObserved = $quotaHealth.SpawnInheritedTurnsObserved
+    spawnContextAmplification = $quotaHealth.SpawnContextAmplification
+    rootAgentSpawns = $quotaHealth.RootAgentSpawns
+    childAgentSpawns = $quotaHealth.ChildAgentSpawns
+    nestedAgentObservation = $quotaHealth.NestedAgentObservation
+    configuredReviewer = $quotaHealth.ConfiguredReviewer
+    effectiveReviewer = $quotaHealth.EffectiveReviewer
+    managedReviewer = $quotaHealth.ManagedReviewer
+    reviewerConfigurationComparison = $quotaHealth.ReviewerConfigurationComparison
+    primaryReasoningDefault = $quotaHealth.PrimaryReasoningDefault
+  }
+  $efficiencyText = @($efficiencyFields.GetEnumerator() | ForEach-Object {
+      $_.Key + "=" + (Format-Metric $_.Value)
+    }) -join " "
+  Write-Output ("CHRONOS EFFICIENCY " + $efficiencyText)
   exit 0
 }
 

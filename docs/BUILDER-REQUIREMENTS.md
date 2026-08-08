@@ -1,10 +1,11 @@
 # Consolidated Builder Requirements
 
-This ledger maps the consolidated 0.6.0 builder handoff to shipped behavior.
+This ledger maps the consolidated Machine 1 and Machine 2 builder handoffs to
+shipped behavior through 0.6.1.
 "Unavailable" is an implemented result state when the bounded local schema does
 not expose enough evidence. It is not converted to zero or inferred from text.
 
-| Area | 0.6.0 disposition |
+| Area | 0.6.1 disposition |
 | --- | --- |
 | Reviewer discovery and exact turn counting | Implemented from exact `turn_context` model records; bookkeeping is excluded. |
 | Reviewer identity and parent lineage | Sanitized counts implemented; raw session and parent IDs are intentionally not returned. |
@@ -30,10 +31,28 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Safety and privacy | Inspector is read-only and ephemeral; no telemetry, scheduler, process termination, database mutation, approval mutation, or raw content output. |
 | Token-savings validation | Protocol is documented; savings claims remain disabled until matched observations exist. |
 | Threshold calibration | Frozen. A separate release requires the predeclared 14-day labeled study in `CALIBRATION-METHODOLOGY.md`. |
+| Machine-count comparability | Machine, date range, schema, source, coverage, and continuity remain distinct. Local rollout counts are explicitly not dashboard-equivalent. |
+| Allowed decision and approval share | Structured allowed/denied totals, allow percentage, comparable primary/reviewer turn share, duration, normalization, and confidence are implemented. |
+| Approval persistence runaway | Implemented only for the strong `ALLOW` plus unresolved pending plus equivalent regenerated request pattern or an explicit persistence-write failure. |
+| Fail closed after upstream approval persistence failure | Not enforceable by a diagnostic plugin. Chronos identifies the defect and recommends bounded fail-closed handling; Codex owns approval persistence and review regeneration. |
+| Three approval problem classes | Persistence runaway, repeated rule-miss amplification, and legitimate/diverse boundary volume are reported separately. |
+| Inspection-shaped approval pressure | Implemented from structured operation/prefix fields with actual boundary-cause categories when present. Read-only shape is never treated as proof that review was unnecessary. |
+| Permission Rule Governor | Implemented for rule counts, long literals, brittle monolithic rules, reusable narrow candidates, broad interpreter rules, and secret-shaped structures. No rule is changed. |
+| Credential-shaped rule safety | Implemented as counts and named diagnosis only. Values, rule text, prefixes, hashes, assignments, and paths are never returned. |
+| Repeated prefix rule miss | Implemented from ephemeral structured prefix hashes; exact prefix recommendations require later explicit user review and are never auto-created. |
+| Reviewer-originated escalation | Tool calls, escalated calls, unique/repeated prefix counts, and largest repeat are implemented separately from nested reviewer evidence. |
+| Reviewer recursion | Reported only when escalation and directly observed nested reviewer lineage coexist. Reviewer escalation alone is not called recursion. |
+| Long lineage and concentration | Selected-window maximum task age and top-one/top-three reviewer share are implemented without returning lineage identity. |
+| Fork context and worker effort | Explicit/defaulted full history, none, bounded history, inherited turns, high/max effort, and root/child spawn origin are implemented. Context amplification requires an explicit low/simple task label. |
+| Infinite child fan-out negative case | Root-only spawning produces `nestedAgentObservation=not_observed`; it is not mislabeled as recursion. |
+| Configured/effective reviewer | Safe labels are reported separately; a difference is `different_labels_mapping_possible`, not automatically a configuration defect. |
+| Primary reasoning default | A safe configured effort label is reported for manual audit. Chronos never rewrites it. |
+| Local token billing | Always `billingInference=unsupported`; partial rollout coverage produces low quota confidence. |
+| Governor model contract | A reported effective model must equal the persisted planned model at binding and result reporting or return `model_plan_mismatch`. |
 
 ## Release Acceptance
 
-The release gate requires diagnostics tests, 35 of 35 Governor safety controls,
+The release gate requires diagnostics tests, 36 of 36 Governor safety controls,
 plugin and skill validation, two byte-identical release builds, a signed release
 commit, a signed annotated tag, GitHub verification, artifact attestation, and
 immutable release verification.

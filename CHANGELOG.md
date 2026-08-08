@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.6.1
+
+- Add an explicit approval-state persistence-runaway diagnosis that requires a
+  structured `ALLOW`, an unresolved pending state, and an equivalent regenerated
+  request; explicit persistence-write failures are counted separately.
+- Add allowed/denied decision totals, allow rate, inspection-shaped pressure,
+  boundary-cause categories, three-way approval-problem classification, and
+  source, dashboard-equivalence, billing, duration, and confidence semantics.
+- Add an on-demand Rule Governor for brittle monolithic rules, narrow reusable
+  rules, overbroad interpreter rules, and credential-shaped rules. Rule text and
+  credential values are never returned, persisted, or transmitted.
+- Add reviewer-originated escalation, burst, nested-reviewer, configured versus
+  effective reviewer, primary reasoning-default, task-age, dominant-lineage,
+  `fork_turns`, worker-effort, inherited-turn, and root/child spawn observations.
+- Reject a reported worker model that differs from the persisted Governor plan
+  with the explicit `model_plan_mismatch` error at binding or result reporting.
+- Add regressions for 590 review turns with 581 unresolved retries, 307 resolved
+  repeated-prefix reviews, synthetic secret-shaped rules, inspection causes,
+  reviewer escalations, full-history workers, root-only spawning, short-rate
+  confidence, partial quota confidence, and exact/mismatched Governor leases.
+
+Chronos remains advisory and does not alter approval state, reviewer settings,
+permission rules, sandbox policy, or model configuration. Bounded fail-closed
+handling after an approval persistence failure remains an upstream Codex runtime
+requirement. No existing warning threshold, critical threshold, scoring weight,
+quota heuristic, or predictive claim changed in this release.
+
 ## v0.6.0
 
 - Add exact, schema-aware `codex-auto-review` turn counting that excludes

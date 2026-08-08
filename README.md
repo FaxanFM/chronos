@@ -19,6 +19,12 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 - Counts actual automatic-review turns from structured `turn_context` records,
   distinguishes them from bookkeeping, and reports only bounded aggregate review
   and rollout-growth observations.
+- Separates approval persistence failures, repeated permission-rule misses, and
+  legitimate boundary volume; reports reviewer escalations without calling them
+  recursion unless nested reviewer lineage is directly observed.
+- Audits brittle, overbroad, and credential-shaped Codex permission rules
+  without returning rule text or values, and measures full-history worker forks,
+  effort, task age, and lineage concentration.
 - Recommends the safest next step for the current condition.
 - Routes exploration, documentation, tests, mechanical edits, simple code, and
   focused verification to bounded Codex workers.
@@ -78,7 +84,7 @@ See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.6.0 safety
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.6.1 safety
 and release model.
 
 ## Self-service agents
@@ -106,6 +112,9 @@ will be added here as each agent is published.
   structured aggregate token, effort, automatic-review, compaction, subagent,
   rollout-duplication, and parser-integrity
   counts.
+- Reads supported files only in the known Codex rules directory to return
+  aggregate rule-health and secret-shape counts; rule text, prefixes, hashes,
+  assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   local paths.
 - Creates no recurring task, service, telemetry, or persistent log.
