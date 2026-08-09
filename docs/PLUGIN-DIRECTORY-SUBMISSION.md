@@ -1,8 +1,12 @@
 # OpenAI Plugin Directory Submission Packet
 
-Status: package-ready for a publisher draft after the v0.7.2 release. OpenAI
-review and publication have not occurred. Publisher identity and organization
-permissions must be verified in the authenticated OpenAI Platform.
+Status: package-ready for a publisher draft. The signed, immutable
+[v0.7.2 release](https://github.com/FaxanFM/chronos/releases/tag/v0.7.2) is
+published and its ZIP SHA-256 is
+`6e99374122a212bb67dc92466310e232f8c57e0f6875efa3a2907f1949d22785`.
+OpenAI review and publication have not occurred. Publisher identity and
+organization permissions must be verified in the authenticated OpenAI
+Platform.
 
 Chronos remains installable from its public Codex marketplace while directory
 review is pending.
