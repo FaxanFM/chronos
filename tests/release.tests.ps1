@@ -16,7 +16,10 @@ try {
     'Require verified commit and annotated tag',
     'tagObject.verification.verified',
     'commit.commit.verification.verified',
-    'actions/attest@v4',
+    'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
+    'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+    'timeout-minutes:',
+    'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
     '--draft',
     'gh release edit $env:GITHUB_REF_NAME --draft=false',
     'function Invoke-ReleaseVerification',
@@ -31,9 +34,10 @@ try {
   }
   $draftIndex = $releaseWorkflow.IndexOf('gh release create')
   $publishIndex = $releaseWorkflow.IndexOf('gh release edit $env:GITHUB_REF_NAME --draft=false')
+  $preVerifyIndex = $releaseWorkflow.IndexOf('gh attestation verify $Path --repo $env:GITHUB_REPOSITORY')
   $verifyIndex = $releaseWorkflow.IndexOf('gh release verify $env:GITHUB_REF_NAME')
-  if ($draftIndex -lt 0 -or $publishIndex -le $draftIndex -or $verifyIndex -le $publishIndex) {
-    throw "Release workflow must create a draft, publish it, and then verify it in that order."
+  if ($preVerifyIndex -lt 0 -or $draftIndex -le $preVerifyIndex -or $publishIndex -le $draftIndex -or $verifyIndex -le $publishIndex) {
+    throw "Release workflow must verify the attestation, create a draft, publish it, and then verify the immutable release in that order."
   }
 
   $firstOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
@@ -79,6 +83,30 @@ try {
 
   $checksum = (Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.sha256")).Trim()
   if ($checksum -ne ($firstHash.ToLowerInvariant() + "  " + $artifactName)) { throw "Checksum file does not match the artifact." }
+  $releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.release.json") | ConvertFrom-Json
+  if ($releaseManifest.schema_version -ne 2 -or @($releaseManifest.files).Count -ne $releaseManifest.packaged_files) {
+    throw "Release manifest must contain a versioned per-file inventory."
+  }
+  $archive = [System.IO.Compression.ZipFile]::OpenRead($firstArtifact)
+  try {
+    foreach ($fileRecord in @($releaseManifest.files)) {
+      $entry = $archive.GetEntry([string]$fileRecord.path)
+      if (-not $entry) { throw "Release manifest references a missing entry: $($fileRecord.path)" }
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      $entryStream = $entry.Open()
+      try {
+        $entryHash = ([System.BitConverter]::ToString($sha.ComputeHash($entryStream))).Replace('-', '').ToLowerInvariant()
+      } finally {
+        $entryStream.Dispose()
+        $sha.Dispose()
+      }
+      if ($entryHash -ne [string]$fileRecord.sha256 -or [long]$entry.Length -ne [long]$fileRecord.bytes) {
+        throw "Release manifest hash or size mismatch: $($fileRecord.path)"
+      }
+    }
+  } finally {
+    $archive.Dispose()
+  }
   Write-Output "Chronos release tests passed. Reproducibility: 2/2 identical builds."
 } finally {
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())

@@ -6,25 +6,11 @@ $governorScript = Join-Path $repoRoot "plugins\chronos\skills\chronos-governor\s
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-governor-tests-" + [guid]::NewGuid())
 $fixtureRepo = Join-Path $testRoot "repo"
 $runtimeModels = "gpt-5.6-sol=low,medium,high,xhigh,max,ultra|cost=20;gpt-5.6-terra=low,medium,high,xhigh,max,ultra|cost=10;gpt-5.6-luna=low,medium,high,xhigh,max|cost=1"
-$requiredSafetyControls = @(
-  'runtime-model-inventory', 'requested-model-validation', 'model-plan-contract', 'no-inventory-failsafe',
-  'workspace-identity', 'mutation-attribution', 'scope-traversal', 'global-lock',
-  'fencing', 'lease-renewal', 'single-writer', 'result-fingerprint',
-  'coordinator-verification', 'read-only', 'scope-enforcement', 'correction-limit',
-  'lease-expiry', 'detached-head', 'worktree-serialization', 'equivalent-path',
-  'reparse-path', 'concurrent-writers', 'stale-lock-recovery',
-  'live-lock-preservation', 'malformed-state', 'interrupted-write',
-  'privacy-state', 'custom-state-disabled', 'state-store-outside-git',
-  'state-store-preflight', 'plan-token', 'canonical-worker-id',
-  'flattened-scopes', 'git-metadata-readonly', 'legacy-state-migration',
-  'legacy-active-failsafe'
-)
-$coveredSafetyControls = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+$validatedScenarios = 0
 $stateDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 function Register-SafetyControl([string]$Name) {
-  if ($requiredSafetyControls -notcontains $Name) { throw "Unknown safety control: $Name" }
-  $null = $coveredSafetyControls.Add($Name)
+  $script:validatedScenarios++
 }
 
 function Invoke-Governor {
@@ -41,8 +27,15 @@ function Invoke-Governor {
     $command += @('-RuntimeModels', $runtimeModels)
   }
   $command += $Arguments
-  $output = @(& powershell.exe @command 2>&1)
-  [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = ($output -join "`n") }
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = @(& powershell.exe @command 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  [pscustomobject]@{ ExitCode = $exitCode; Text = ($output -join "`n") }
 }
 
 function Get-GovernorData {
@@ -287,29 +280,18 @@ try {
   Assert-Equal (Get-GovernorData $noInventory).reason 'model_inventory_unavailable' 'Missing runtime inventory must prevent delegation.'
   Register-SafetyControl 'no-inventory-failsafe'
 
-  $unverifiedWrite = Invoke-Governor @(
-    '-Action', 'plan', '-TaskId', 'unverified-write', '-TaskClass', 'simple-code',
-    '-AccessMode', 'write', '-Scope', 'src/**'
-  )
-  Assert-Success $unverifiedWrite 'Unverified write planning failed.'
-  Assert-Equal (Get-GovernorData $unverifiedWrite).reason 'workspace_identity_unverified' 'Write planning must fail closed without workspace identity.'
-
-  $identityOnly = Invoke-Governor @(
-    '-Action', 'plan', '-TaskId', 'identity-only', '-TaskClass', 'simple-code',
-    '-AccessMode', 'write', '-Scope', 'src/**', '-ExpectedWorkspaceId', $workspaceId
-  )
-  Assert-Success $identityOnly 'Identity-only write planning failed.'
-  Assert-Equal (Get-GovernorData $identityOnly).reason 'mutation_attribution_unverified' 'Write planning must fail closed without mutation attribution.'
-  Register-SafetyControl 'workspace-identity'
-  Register-SafetyControl 'mutation-attribution'
-
-  $writePlan = Invoke-Governor @(
-    '-Action', 'plan', '-TaskId', 'write-plan', '-TaskClass', 'simple-code',
-    '-AccessMode', 'write', '-Scope', 'src/**', '-ExpectedWorkspaceId', $workspaceId,
-    '-MutationAttributionId', 'attr-write-plan', '-MutationAttributionVerified'
-  )
-  Assert-Success $writePlan 'Verified write planning failed.'
-  Assert-Equal (Get-GovernorData $writePlan).decision 'delegate' 'Verified same-folder write planning should be eligible.'
+  $writePlan = New-TestPlan 'write-disabled' 'write' @('src/**') 'simple-code' $fixtureRepo 'attr-write-disabled'
+  Assert-Success $writePlan 'Write containment planning failed.'
+  $writePlanData = Get-GovernorData $writePlan
+  Assert-Equal $writePlanData.decision 'coordinator' 'Shared-folder writes must remain with the coordinator.'
+  Assert-Equal $writePlanData.reason 'shared_folder_write_delegation_disabled' 'Write containment reason must be explicit.'
+  Assert-Equal $writePlanData.write_delegation_enabled $false 'Write delegation must be visibly disabled.'
+  Assert-Equal $writePlanData.security_boundary $false 'Governor must not claim to be a security boundary.'
+  Assert-Equal $writePlanData.spawn_contract 'multi_agent_v2' 'Governor must emit the current V2 spawn contract.'
+  Assert-Equal $writePlanData.fork_turns 'none' 'V2 workers must receive fork_turns=none.'
+  if ($writePlanData.PSObject.Properties['fork_context']) { throw 'V2 plans must not emit fork_context.' }
+  Register-SafetyControl 'shared-folder-write-disabled'
+  Register-SafetyControl 'v2-spawn-contract'
 
   $traversal = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'escape', '-TaskClass', 'docs',
@@ -318,62 +300,31 @@ try {
   Assert-Failure $traversal 'invalid_scope' 'Traversal scope must be rejected.'
   Register-SafetyControl 'scope-traversal'
 
-  $globalLock = Invoke-Governor @(
-    '-Action', 'plan', '-TaskId', 'global-lock', '-TaskClass', 'mechanical',
-    '-AccessMode', 'write', '-Scope', 'package.json', '-ExpectedWorkspaceId', $workspaceId,
-    '-MutationAttributionId', 'attr-global-lock', '-MutationAttributionVerified'
-  )
-  Assert-Success $globalLock 'Global-lock planning failed.'
-  Assert-Equal (Get-GovernorData $globalLock).reason 'global_lock_scope' 'Dependency manifests must stay with the coordinator.'
-  Register-SafetyControl 'global-lock'
-
-  $writeLease = New-TestLease 'write-main' 'writer-main' 'write' @('src/**') 'simple-code'
+  $readLease = New-TestLease 'read-clean' 'reader-clean' 'read' @('src/**') 'explore'
   $wrongFence = Invoke-Governor @(
-    '-Action', 'renew', '-TaskId', $writeLease.Task, '-WorkerId', $writeLease.Worker,
-    '-LeaseId', $writeLease.LeaseId, '-FencingToken', 'wrong-token'
+    '-Action', 'renew', '-TaskId', $readLease.Task, '-WorkerId', $readLease.Worker,
+    '-LeaseId', $readLease.LeaseId, '-FencingToken', 'wrong-token'
   )
   Assert-Failure $wrongFence 'fencing_token_mismatch' 'A stale or incorrect fencing token must fail.'
   Register-SafetyControl 'fencing'
-
-  $renewed = Invoke-LeaseAction $writeLease 'renew'
-  Assert-Success $renewed 'Lease renewal failed.'
+  Assert-Success (Invoke-LeaseAction $readLease 'renew') 'Read lease renewal failed.'
   Register-SafetyControl 'lease-renewal'
-
-  $secondWriter = New-TestPlan 'write-second' 'write' @('docs/**') 'docs' $fixtureRepo 'attr-write-second'
-  Assert-Success $secondWriter 'Second-writer planning failed.'
-  Assert-Equal (Get-GovernorData $secondWriter).reason 'single_writer_lease_active' 'A second writer in the repository must be serialized.'
-  Register-SafetyControl 'single-writer'
-
-  Set-Content -LiteralPath (Join-Path $fixtureRepo 'src\app.ps1') -Value "'worker change'"
-  $result = Invoke-LeaseAction $writeLease 'result'
-  Assert-Success $result 'Worker result transition failed.'
-  Add-Content -LiteralPath (Join-Path $fixtureRepo 'src\app.ps1') -Value "'late coordinator change'"
-  $interleavedVerify = Invoke-LeaseAction $writeLease 'verify' @('-VerificationPassed')
-  Assert-Failure $interleavedVerify 'workspace_changed_after_result' 'Changes after result attribution must invalidate verification.'
-  Register-SafetyControl 'result-fingerprint'
-  $released = Invoke-LeaseAction $writeLease 'release'
-  Assert-Success $released 'Interleaved write lease release failed.'
-  & git -C $fixtureRepo checkout -q -- src/app.ps1
-
-  $verifiedLease = New-TestLease 'write-verified' 'writer-verified' 'write' @('src/**') 'simple-code'
-  Set-Content -LiteralPath (Join-Path $fixtureRepo 'src\app.ps1') -Value "'verified worker change'"
-  Assert-Success (Invoke-LeaseAction $verifiedLease 'result') 'Verified result transition failed.'
-  $noEvidence = Invoke-LeaseAction $verifiedLease 'verify'
-  Assert-Failure $noEvidence 'verification_evidence_required' 'Coordinator verification evidence must be explicit.'
-  $verified = Invoke-LeaseAction $verifiedLease 'verify' @('-VerificationPassed')
-  Assert-Success $verified 'Scoped write verification failed.'
-  Assert-Equal (Get-GovernorData $verified).changed_file_count 1 'Exactly one changed file should be attributed.'
-  $unaccepted = Invoke-LeaseAction $verifiedLease 'accept'
-  Assert-Failure $unaccepted 'coordinator_acceptance_required' 'Coordinator acceptance must be explicit.'
-  Assert-Success (Invoke-LeaseAction $verifiedLease 'accept' @('-CoordinatorAccepted')) 'Verified task acceptance failed.'
-  Register-SafetyControl 'coordinator-verification'
-  & git -C $fixtureRepo add src/app.ps1
-  & git -C $fixtureRepo commit -qm 'Accept worker change'
-
-  $readLease = New-TestLease 'read-clean' 'reader-clean' 'read' @('src/**') 'explore'
   Assert-Success (Invoke-LeaseAction $readLease 'result') 'Read result transition failed.'
   Assert-Success (Invoke-LeaseAction $readLease 'verify' @('-VerificationPassed')) 'Unmodified read lease should verify.'
   Assert-Success (Invoke-LeaseAction $readLease 'accept' @('-CoordinatorAccepted')) 'Read lease acceptance failed.'
+  Assert-Failure (Invoke-LeaseAction $readLease 'release') 'invalid_lifecycle_transition' 'Accepted leases must not be rewritten.'
+  Register-SafetyControl 'lifecycle-transition'
+
+  $singleWorkerLease = New-TestLease 'worker-one-active-a' '/root/single-worker' 'read' @('src/**') 'explore'
+  $secondWorkerPlan = New-TestPlan 'worker-one-active-b' 'read' @('docs/**') 'review'
+  $secondWorkerPlanData = Get-GovernorData $secondWorkerPlan
+  $secondWorkerLease = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', 'worker-one-active-b', '-WorkerId', '/root/single-worker',
+    '-PlanToken', $secondWorkerPlanData.plan_token
+  )
+  Assert-Failure $secondWorkerLease 'worker_already_leased' 'One worker ID must not own two active leases.'
+  Assert-Success (Invoke-LeaseAction $singleWorkerLease 'release') 'Single-worker probe lease release failed.'
+  Register-SafetyControl 'worker-one-active-lease'
 
   $readMutation = New-TestLease 'read-mutation' 'reader-mutation' 'read' @('README.md') 'review'
   Add-Content -LiteralPath (Join-Path $fixtureRepo 'README.md') -Value 'unexpected write'
@@ -383,24 +334,6 @@ try {
   Register-SafetyControl 'read-only'
   Assert-Success (Invoke-LeaseAction $readMutation 'release') 'Read mutation release failed.'
   & git -C $fixtureRepo checkout -q -- README.md
-
-  $scopeLease = New-TestLease 'scope-failure' 'writer-scope' 'write' @('src/**') 'simple-code'
-  Set-Content -LiteralPath (Join-Path $fixtureRepo 'docs\unexpected.md') -Value 'outside scope'
-  Assert-Success (Invoke-LeaseAction $scopeLease 'result') 'Out-of-scope result transition failed.'
-  $scopeVerify = Invoke-LeaseAction $scopeLease 'verify' @('-VerificationPassed')
-  Assert-Failure $scopeVerify 'out_of_scope_changes' 'Actual out-of-scope changes must be rejected.'
-  Register-SafetyControl 'scope-enforcement'
-  Assert-Success (Invoke-LeaseAction $scopeLease 'release') 'Out-of-scope lease release failed.'
-  Remove-Item -LiteralPath (Join-Path $fixtureRepo 'docs\unexpected.md') -Force
-
-  $correctionLease = New-TestLease 'correction' 'writer-correction' 'write' @('src/**') 'simple-code'
-  Assert-Success (Invoke-LeaseAction $correctionLease 'result') 'Correction result transition failed.'
-  Assert-Success (Invoke-LeaseAction $correctionLease 'correct') 'First correction should be permitted.'
-  Assert-Success (Invoke-LeaseAction $correctionLease 'result') 'Corrected result transition failed.'
-  $secondCorrection = Invoke-LeaseAction $correctionLease 'correct'
-  Assert-Failure $secondCorrection 'correction_budget_reached' 'A second correction must be rejected.'
-  Register-SafetyControl 'correction-limit'
-  Assert-Success (Invoke-LeaseAction $correctionLease 'retire') 'Worker retirement failed.'
 
   $expiredLease = New-TestLease 'expired' 'reader-expired' 'read' @('src/**') 'explore'
   $statePath = Get-StatePath
@@ -422,7 +355,7 @@ try {
     '-MutationAttributionId', 'attr-detached', '-MutationAttributionVerified'
   )
   Assert-Success $detachedPlan 'Detached HEAD planning failed.'
-  Assert-Equal (Get-GovernorData $detachedPlan).reason 'detached_head_write_unsupported' 'Detached HEAD writes must stay with the coordinator.'
+  Assert-Equal (Get-GovernorData $detachedPlan).reason 'shared_folder_write_delegation_disabled' 'Detached HEAD writes must stay with the coordinator.'
   Register-SafetyControl 'detached-head'
   $detachedRead = New-TestLease 'detached-read' 'reader-detached' 'read' @('src/**') 'explore'
   Assert-Success (Invoke-LeaseAction $detachedRead 'result') 'Detached HEAD read result failed.'
@@ -436,16 +369,14 @@ try {
   $worktreeStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status') $worktreePath)
   Assert-Equal $worktreeStatus.repository_id $primaryStatus.repository_id 'Linked worktrees must share repository identity and lease state.'
   if ($worktreeStatus.workspace_id -eq $primaryStatus.workspace_id) { throw 'Distinct worktrees must have distinct workspace identities.' }
-  $worktreeWriter = New-TestLease 'worktree-writer' 'writer-worktree' 'write' @('src/**') 'simple-code' $worktreePath 'attr-worktree'
-  $primaryWhileWorktreeWrites = Invoke-Governor @(
+  $worktreeWrite = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'primary-collision', '-TaskClass', 'simple-code',
     '-AccessMode', 'write', '-Scope', 'src/**', '-ExpectedWorkspaceId', $primaryStatus.workspace_id,
     '-MutationAttributionId', 'attr-primary-collision', '-MutationAttributionVerified'
-  )
-  Assert-Success $primaryWhileWorktreeWrites 'Cross-worktree collision planning failed.'
-  Assert-Equal (Get-GovernorData $primaryWhileWorktreeWrites).reason 'single_writer_lease_active' 'Linked worktree writes must serialize through the common Git directory.'
+  ) $worktreePath
+  Assert-Success $worktreeWrite 'Cross-worktree containment planning failed.'
+  Assert-Equal (Get-GovernorData $worktreeWrite).reason 'shared_folder_write_delegation_disabled' 'Linked-worktree writes must be disabled.'
   Register-SafetyControl 'worktree-serialization'
-  Assert-Success (Invoke-LeaseAction $worktreeWriter 'release') 'Worktree write release failed.'
 
   if ($env:OS -eq 'Windows_NT') {
     $aliasPath = Join-Path $testRoot 'repo-alias'
@@ -464,7 +395,7 @@ try {
       '-MutationAttributionId', 'attr-reparse', '-MutationAttributionVerified'
     )
     Assert-Success $reparsePlan 'Reparse scope planning failed.'
-    Assert-Equal (Get-GovernorData $reparsePlan).reason 'reparse_scope_risk' 'Reparse-point scopes must fail closed.'
+    Assert-Equal (Get-GovernorData $reparsePlan).reason 'shared_folder_write_delegation_disabled' 'Reparse-point writes must fail closed.'
     Register-SafetyControl 'reparse-path'
   } else {
     Register-SafetyControl 'equivalent-path'
@@ -473,39 +404,16 @@ try {
 
   $concurrentRepo = Join-Path $testRoot 'concurrent-repo'
   New-FixtureRepository $concurrentRepo
-  $concurrentWorkspace = Get-WorkspaceId $concurrentRepo
-  $racePlans = @{}
+  $racePlans = @()
   foreach ($index in 1..2) {
     $racePlanResult = New-TestPlan "race-$index" 'write' @('src/**') 'simple-code' $concurrentRepo "attr-race-$index"
     Assert-Success $racePlanResult "Concurrent writer plan $index failed."
     $racePlanData = Get-GovernorData $racePlanResult
-    Assert-Equal $racePlanData.decision 'delegate' "Concurrent writer plan $index should be eligible before either lease starts."
-    $racePlans[$index] = $racePlanData.plan_token
+    Assert-Equal $racePlanData.decision 'coordinator' "Concurrent writer plan $index must stay with the coordinator."
+    Assert-Equal $racePlanData.reason 'shared_folder_write_delegation_disabled' "Concurrent writer plan $index must fail closed."
+    $racePlans += $racePlanData
   }
-  $jobs = @()
-  foreach ($index in 1..2) {
-    $args = @(
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $governorScript,
-      '-Repository', $concurrentRepo, '-Action', 'lease', '-TaskId', "race-$index",
-      '-WorkerId', "race-worker-$index", '-PlanToken', $racePlans[$index]
-    )
-    $jobs += Start-Job -ScriptBlock {
-      param($ProcessArguments)
-      $output = @(& powershell.exe @ProcessArguments 2>&1)
-      [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = ($output -join "`n") }
-    } -ArgumentList (, $args)
-  }
-  $raceResults = @($jobs | Wait-Job | Receive-Job)
-  $jobs | Remove-Job -Force
-  Assert-Equal @($raceResults | Where-Object { $_.ExitCode -eq 0 }).Count 1 'Exactly one concurrent writer lease should succeed.'
-  Assert-Equal @($raceResults | Where-Object { $_.Text -match 'single_writer_lease_active|state_lock_unavailable' }).Count 1 'The competing writer must fail safely.'
   Register-SafetyControl 'concurrent-writers'
-  $raceWinner = Get-GovernorData ($raceResults | Where-Object { $_.ExitCode -eq 0 } | Select-Object -First 1)
-  $raceRelease = Invoke-Governor @(
-    '-Action', 'release', '-TaskId', $raceWinner.task_id, '-WorkerId', $raceWinner.worker_id,
-    '-LeaseId', $raceWinner.lease_id, '-FencingToken', $raceWinner.fencing_token
-  ) $concurrentRepo
-  Assert-Success $raceRelease 'Concurrent writer winner release failed.'
 
   $lockRepo = Join-Path $testRoot 'lock-repo'
   New-FixtureRepository $lockRepo
@@ -626,7 +534,7 @@ try {
   $customStateResult = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $governorScript -Action status -Repository $fixtureRepo -StatePath $customState 2>&1
   if ($LASTEXITCODE -eq 0 -or ($customStateResult -join "`n") -notmatch 'custom_state_path_disabled') {
-    throw 'Custom state paths should not bypass common-Git writer serialization.'
+    throw 'Custom state paths should not bypass canonical read-coordination state.'
   }
   Assert-Equal (Get-Content -Raw -LiteralPath $customState) "{private-test}`r`n" 'Rejected custom state must remain untouched.'
   Register-SafetyControl 'custom-state-disabled'
@@ -636,10 +544,8 @@ try {
     throw 'Governor script contains a destructive repository or process operation.'
   }
 
-  $missingControls = @($requiredSafetyControls | Where-Object { -not $coveredSafetyControls.Contains($_) })
-  if ($missingControls.Count -gt 0) { throw "Critical safety coverage below 100%: $($missingControls -join ', ')" }
-  Write-Output ("Chronos Governor tests passed. Critical safety controls: {0}/{1} (100%)." -f `
-    $coveredSafetyControls.Count, $requiredSafetyControls.Count)
+  Write-Output ("Chronos Governor deterministic validations passed. Scenarios: {0}. This checklist is not a security-coverage percentage." -f `
+    $validatedScenarios)
 } finally {
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
   $resolvedTest = [System.IO.Path]::GetFullPath($testRoot)

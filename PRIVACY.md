@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective August 8, 2026
+Effective August 9, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
 
@@ -10,13 +10,34 @@ Chronos does not collect, transmit, sell, or share personal data. It does not us
 
 When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It also opens the known Codex diagnostic SQLite database in read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. Results remain in the active Codex task unless the user chooses to share them.
 
-For token and quota diagnostics, Chronos reads at most 2 MiB from the tail of each of up to eight Codex rollout files modified in the previous six hours. It retains in memory only structured aggregate token counts, model and reasoning-effort labels, context-window size, automatic-review counts, categorical approval fields, and counts or byte totals for compactions, `spawn_agent` calls, lineage links, and exact cross-rollout record hashes. For structured approval and worker records, Chronos may inspect a bounded proposed-prefix array, approval correlation identifier, sandbox-permission category, `fork_turns`, worker effort, and task-complexity label. It converts prefixes and identifiers to ephemeral hashes and returns only counts and safe categories. Ephemeral hashes are discarded when the inspection exits. Chronos does not return or persist raw rollout lines, thread IDs, approval IDs, prompts, responses, commands, prefixes, tool arguments, tool output, usernames, or local paths.
+For token and quota diagnostics, Chronos inventories at most 20,000 session
+files, selects up to eight modified in the previous six hours, and reads at
+most 2 MiB from each selected tail. It retains in memory only structured
+aggregate token counts, model and reasoning-effort labels, context-window size,
+automatic-review counts, categorical approval fields, and counts or byte totals
+for compactions, `spawn_agent` calls, lineage links, and exact cross-rollout
+record hashes. For structured approval and worker records, Chronos may inspect
+a bounded proposed-prefix array, approval correlation identifier,
+sandbox-permission category, `fork_turns`, worker effort, and task-complexity
+label. It converts prefixes and identifiers to ephemeral hashes and returns
+only counts and safe categories. Ephemeral hashes are discarded when the
+inspection exits. Chronos does not return or persist raw rollout lines, thread
+IDs, approval IDs, prompts, responses, commands, prefixes, tool arguments, tool
+output, usernames, or absolute paths.
 
-Chronos also reads at most 2,048 lines from each of up to 32 supported `.rules` or `.toml` files in the known local Codex rules directory when an inspection is requested. It reports when the file selection is capped and counts rule length, literal length, narrow-prefix structure, broad interpreter structure, and credential-shaped patterns in memory. It never returns rule text, rule hashes, command literals, environment assignments, or credential-shaped values. This is detection only; Chronos never edits a rule or rotates a credential.
+Chronos also reads at most 2 MiB from each of up to 32 supported `.rules` or
+`.toml` files in the known local Codex rules directory when an inspection is
+requested. Reparse files are rejected. A bounded balanced parser identifies up
+to 2,048 multiline rules and reports incomplete coverage. Chronos counts rule
+length, literal length, narrow-prefix structure, broad interpreter structure,
+and credential-shaped patterns in memory. It never returns rule text, rule
+hashes, command literals, environment assignments, or credential-shaped
+values. This is detection only; Chronos never edits a rule or rotates a
+credential.
 
 Chronos does not read SQLite log bodies, process arguments, live environment variables, user documents, browsing data, or unrelated file contents. A credential-shaped value embedded in a Codex rule can be pattern-matched solely to return a count; the value is never displayed, persisted, or transmitted.
 
-When the user explicitly invokes Chronos Governor, it stores limited local
+When the user explicitly invokes Chronos Governor, it stores limited, untrusted local
 coordination metadata beneath the current user's Windows temporary
 application-data directory, keyed by a hash of Git's canonical common
 directory. This may include
@@ -26,6 +47,8 @@ labels, reasoning effort, status, counters, and timestamps. Governor state does
 not contain assignment text, objectives, prompts, responses, source code, diffs,
 commands, tool arguments, tool output, environment variables, credentials,
 usernames, or absolute paths. It is not transmitted by Chronos.
+Governor verification may return repository-relative changed paths when its
+advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
 ## User control
 

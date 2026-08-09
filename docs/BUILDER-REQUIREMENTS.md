@@ -1,16 +1,16 @@
 # Consolidated Builder Requirements
 
 This ledger maps the consolidated Machine 1 and Machine 2 builder handoffs to
-shipped behavior through 0.6.1.
+shipped behavior through 0.7.0.
 "Unavailable" is an implemented result state when the bounded local schema does
 not expose enough evidence. It is not converted to zero or inferred from text.
 
-| Area | 0.6.1 disposition |
+| Area | 0.7.0 disposition |
 | --- | --- |
 | Reviewer discovery and exact turn counting | Implemented from exact `turn_context` model records; bookkeeping is excluded. |
 | Reviewer identity and parent lineage | Sanitized counts implemented; raw session and parent IDs are intentionally not returned. |
 | Review rate, interval, peak, concurrency, model, version, provider | Implemented when structured values and timestamps are present. |
-| Reviewer versus primary token aggregates | Implemented as bounded lineage-delta snapshots, never described as billing. |
+| Reviewer versus primary token aggregates | Experimental bounded estimates, never described as billing or trusted attribution. |
 | Denied review activity | Implemented only for structured response records; otherwise unavailable. |
 | Runaway reviewer warning | Existing quota contributors remain frozen; raw review measurements are exposed without adding an uncalibrated severity threshold. |
 | Fork and lineage governor | Parent/fork counts, selected bytes, size clusters, exact replay bytes, and replay percentage are implemented without returning IDs. |
@@ -18,7 +18,7 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Rollout growth and projection | Implemented as explicitly labeled file-lifetime metadata estimates. No background history is created. |
 | Compaction amplification | Unique exact snapshots, duplicated snapshots, and duplicated bytes are implemented. |
 | Approval source analysis | Implemented for structured shell, filesystem, network, and unknown request types. |
-| Repeated approval classes | Implemented only from whitelisted categorical fields. Commands, arguments, prompts, and paths are not fingerprints. |
+| Repeated approval classes | Uses whitelisted categories plus an ephemeral hash of bounded structured prefix tokens. Raw commands, arguments, prompts, and paths are never returned. |
 | Approval optimization | Diagnostic advice is implemented; any narrow rule remains manual, explicit, reversible, and user-reviewed. |
 | Reviewer-model compatibility | Governor accepts runtime-advertised models and optional complete numeric cost ranks. It never assumes Luna or edits Codex catalogs. |
 | Native automatic-review override | Reported as unsupported or unavailable unless Codex exposes a supported mechanism. Chronos never patches the harness. |

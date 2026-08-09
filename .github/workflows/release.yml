@@ -6,15 +6,50 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: windows-latest
+  test:
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Parse PowerShell sources
+        shell: powershell
+        run: |
+          $failures = @()
+          foreach ($file in @(Get-ChildItem -Recurse -Filter *.ps1 -File)) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $failures += @($errors | ForEach-Object { "$($file.FullName): $($_.Message)" }) }
+          }
+          if ($failures.Count) { throw ($failures -join "`n") }
+      - name: Test Chronos
+        shell: powershell
+        run: .\tests\chronos.tests.ps1 -PythonPath python
+      - name: Test Chronos Governor
+        shell: powershell
+        run: .\tests\governor.tests.ps1
+      - name: Test reproducible release
+        shell: powershell
+        run: .\tests\release.tests.ps1
+
+  release:
+    needs: test
+    timeout-minutes: 20
+    runs-on: windows-2022
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Validate tag and manifest
@@ -31,41 +66,41 @@ jobs:
         run: |
           $tagRef = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:GITHUB_REF_NAME" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "Could not resolve tag $env:GITHUB_REF_NAME." }
-          if ($tagRef.object.type -ne "tag") {
-            throw "Release tags must be signed annotated tags, not lightweight tags."
-          }
-
+          if ($tagRef.object.type -ne "tag") { throw "Release tags must be signed annotated tags, not lightweight tags." }
           $tagObject = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagRef.object.sha)" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Could not inspect tag $env:GITHUB_REF_NAME." }
-          if (-not $tagObject.verification.verified) {
+          if ($LASTEXITCODE -ne 0 -or -not $tagObject.verification.verified) {
             throw "Tag signature is not verified: $($tagObject.verification.reason)."
           }
-          if ($tagObject.object.type -ne "commit") {
-            throw "Release tag does not point directly to a commit."
-          }
-
+          if ($tagObject.object.type -ne "commit") { throw "Release tag does not point directly to a commit." }
           $commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$($tagObject.object.sha)" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Could not inspect release commit." }
-          if (-not $commit.commit.verification.verified) {
+          if ($LASTEXITCODE -ne 0 -or -not $commit.commit.verification.verified) {
             throw "Release commit signature is not verified: $($commit.commit.verification.reason)."
           }
-      - name: Test Chronos
-        shell: powershell
-        run: .\tests\chronos.tests.ps1 -PythonPath python
-      - name: Test Chronos Governor
-        shell: powershell
-        run: .\tests\governor.tests.ps1
-      - name: Test reproducible release
-        shell: powershell
-        run: .\tests\release.tests.ps1
       - name: Build release artifacts
         shell: powershell
         run: .\scripts\build-release.ps1 -Version $env:GITHUB_REF_NAME -OutputDirectory dist
       - name: Attest release artifact
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: dist/*.zip
-      - name: Publish GitHub release
+      - name: Verify attestation before publication
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          function Test-Attestation {
+            param([string]$Path)
+            for ($attempt = 1; $attempt -le 12; $attempt++) {
+              gh attestation verify $Path --repo $env:GITHUB_REPOSITORY
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($attempt -lt 12) { Start-Sleep -Seconds 5 }
+            }
+            throw "Pre-publication attestation verification failed: $Path"
+          }
+          foreach ($asset in @(Get-ChildItem -LiteralPath dist -Filter *.zip -File)) {
+            Test-Attestation $asset.FullName
+          }
+      - name: Publish and verify GitHub release
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,7 +108,6 @@ jobs:
           $assets = @(Get-ChildItem -LiteralPath dist -File | ForEach-Object { $_.FullName })
           gh release create $env:GITHUB_REF_NAME $assets --verify-tag --generate-notes --draft --title "Chronos $env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw "Could not create draft release." }
-
           gh release edit $env:GITHUB_REF_NAME --draft=false
           if ($LASTEXITCODE -ne 0) { throw "Could not publish immutable release." }
 
@@ -86,12 +120,7 @@ jobs:
             }
             throw $FailureMessage
           }
-
-          Invoke-ReleaseVerification `
-            { gh release verify $env:GITHUB_REF_NAME } `
-            "Immutable release verification failed after waiting for its attestation."
+          Invoke-ReleaseVerification { gh release verify $env:GITHUB_REF_NAME } "Immutable release verification failed."
           foreach ($asset in $assets) {
-            Invoke-ReleaseVerification `
-              { gh release verify-asset $env:GITHUB_REF_NAME $asset } `
-              "Release asset verification failed: $asset"
+            Invoke-ReleaseVerification { gh release verify-asset $env:GITHUB_REF_NAME $asset } "Release asset verification failed: $asset"
           }

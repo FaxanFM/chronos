@@ -50,17 +50,51 @@ function Throw-GovernorError {
 
 function Invoke-Git {
   param([string[]]$Arguments)
-  $output = @(& git -C $script:RepositoryRoot @Arguments 2>&1)
-  if ($LASTEXITCODE -ne 0) { Throw-GovernorError "git_command_failed" }
-  ($output -join "`n").Trim()
+  $output = Invoke-SanitizedGit $Arguments $false
+  if (-not $output.ok) { Throw-GovernorError "git_command_failed" }
+  $output.output
 }
 
 function Try-Invoke-Git {
   param([string[]]$Arguments)
-  $output = @(& git -C $script:RepositoryRoot @Arguments 2>$null)
-  @{
-    ok = ($LASTEXITCODE -eq 0)
-    output = ($output -join "`n").Trim()
+  Invoke-SanitizedGit $Arguments $true
+}
+
+function Invoke-SanitizedGit {
+  param([string[]]$Arguments, [bool]$SuppressError)
+  $names = @(
+    'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+    'GIT_EXTERNAL_DIFF', 'GIT_DIFF_OPTS', 'GIT_PAGER', 'GIT_TRACE',
+    'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_OPTIONAL_LOCKS'
+  )
+  $saved = @{}
+  foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+  try {
+    $env:GIT_CONFIG_COUNT = '0'
+    $env:GIT_EXTERNAL_DIFF = $null
+    $env:GIT_DIFF_OPTS = $null
+    $env:GIT_PAGER = 'cat'
+    $env:GIT_TRACE = $null
+    $env:GIT_TRACE2 = $null
+    $env:GIT_TRACE2_EVENT = $null
+    $env:GIT_OPTIONAL_LOCKS = '0'
+    $gitArguments = @(
+      '-c', 'core.fsmonitor=false',
+      '-c', 'core.hooksPath=NUL',
+      '-c', 'diff.external=',
+      '-c', 'interactive.diffFilter=',
+      '-c', 'pager.diff=false',
+      '-C', $script:RepositoryRoot
+    ) + $Arguments
+    $output = if ($SuppressError) { @(& git @gitArguments 2>$null) } else { @(& git @gitArguments 2>&1) }
+    @{
+      ok = ($LASTEXITCODE -eq 0)
+      output = ($output -join "`n").Trim()
+    }
+  } finally {
+    foreach ($name in $names) {
+      [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+    }
   }
 }
 
@@ -408,7 +442,7 @@ function Get-HeadState {
 
 function Get-TaskChanges {
   param([string]$BaseCommit)
-  $trackedText = Invoke-Git @('diff', '--name-only', '--diff-filter=ACDMRTUXB', $BaseCommit, '--')
+  $trackedText = Invoke-Git @('diff', '--no-ext-diff', '--no-textconv', '--name-only', '--diff-filter=ACDMRTUXB', $BaseCommit, '--')
   $untrackedText = Invoke-Git @('ls-files', '--others', '--exclude-standard')
   $paths = @()
   if ($trackedText) { $paths += @($trackedText -split "`r?`n") }
@@ -420,7 +454,10 @@ function Get-WorkspaceFingerprint {
   param([string]$BaseCommit)
   $head = Get-HeadState
   $status = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
-  $diff = Invoke-Git @('diff', '--no-ext-diff', '--binary', '--full-index', $BaseCommit, '--')
+  $diff = Invoke-Git @('diff', '--no-ext-diff', '--no-textconv', '--full-index', $BaseCommit, '--')
+  if ($status.Length -gt 8388608 -or $diff.Length -gt 8388608) {
+    Throw-GovernorError "workspace_fingerprint_limit_exceeded"
+  }
   $untracked = Invoke-Git @('ls-files', '--others', '--exclude-standard')
   $untrackedParts = @()
   if ($untracked) {
@@ -641,10 +678,10 @@ try {
   if (-not (Test-Path -LiteralPath $resolvedRepository -PathType Container)) {
     Throw-GovernorError "repository_unavailable"
   }
-  $rawRoot = (& git -C $resolvedRepository rev-parse --show-toplevel 2>$null).Trim()
+  $rawRoot = (& git -c core.fsmonitor=false -c core.hooksPath=NUL -C $resolvedRepository rev-parse --show-toplevel 2>$null).Trim()
   if ($LASTEXITCODE -ne 0 -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
   $script:RepositoryRoot = Resolve-CanonicalPath $rawRoot
-  $rawCommonDir = (& git -C $script:RepositoryRoot rev-parse --path-format=absolute --git-common-dir 2>$null).Trim()
+  $rawCommonDir = (& git -c core.fsmonitor=false -c core.hooksPath=NUL -C $script:RepositoryRoot rev-parse --path-format=absolute --git-common-dir 2>$null).Trim()
   if ($LASTEXITCODE -ne 0 -or -not $rawCommonDir) { Throw-GovernorError "git_common_dir_unavailable" }
   $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir
   $repositoryId = Get-TextHash $script:GitCommonDir.ToLowerInvariant()
@@ -690,6 +727,9 @@ try {
       state_version = $state.version
       state_revision = [int64]$state.state_revision
       state_store = 'per_user_temp'
+      state_integrity = 'untrusted_coordination_only'
+      security_boundary = $false
+      write_delegation_enabled = $false
       persistent_content = 'metadata-only'
     }
     exit 0
@@ -713,10 +753,20 @@ try {
       $planLock = Acquire-StateLock
       $state = Read-State
       $active = @(Get-ActiveLeases $state)
+      $nowOffset = [DateTimeOffset]::UtcNow
+      foreach ($planKey in @($state.plans.Keys)) {
+        $existingPlan = $state.plans[$planKey]
+        $expired = try { [DateTimeOffset]::Parse([string]$existingPlan.expires_at) -le $nowOffset } catch { $true }
+        if ($existingPlan.status -ne 'issued' -or $expired) { $state.plans.Remove($planKey) }
+      }
       if ($TaskClass -eq 'risky') {
         $decision = 'coordinator'; $reason = 'risk_requires_coordinator'
+      } elseif ($AccessMode -eq 'write') {
+        $decision = 'coordinator'; $reason = 'shared_folder_write_delegation_disabled'
       } elseif ($Health -eq 'CRITICAL') {
         $decision = 'coordinator'; $reason = 'health_advises_no_new_worker'
+      } elseif ($state.plans.ContainsKey($task) -and $state.plans[$task].status -eq 'issued') {
+        $decision = 'coordinator'; $reason = 'task_plan_already_issued'
       } elseif ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         $decision = 'coordinator'; $reason = 'task_already_leased'
       } elseif ($active.Count -ge $MaxConcurrentWorkers) {
@@ -728,43 +778,23 @@ try {
       }
 
       $attributionHash = $null
-      if ($AccessMode -eq 'write') {
-        $head = Get-HeadState
-        if ($head.mode -eq 'detached') { $decision = 'coordinator'; $reason = 'detached_head_write_unsupported' }
-        if (-not $ExpectedWorkspaceId -or $ExpectedWorkspaceId -ne $workspaceId) {
-          $decision = 'coordinator'; $reason = 'workspace_identity_unverified'
-        } elseif (-not $MutationAttributionVerified -or -not $MutationAttributionId) {
-          $decision = 'coordinator'; $reason = 'mutation_attribution_unverified'
-        } else {
-          Normalize-Identifier $MutationAttributionId 'invalid_mutation_attribution_id' | Out-Null
-          $attributionHash = Get-TextHash $MutationAttributionId
-        }
-        foreach ($scopeItem in $scopes) {
-          if (Test-GlobalLockPath $scopeItem) { $decision = 'coordinator'; $reason = 'global_lock_scope' }
-          if (Test-ScopeReparseRisk $scopeItem) { $decision = 'coordinator'; $reason = 'reparse_scope_risk' }
-        }
-        $dirty = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
-        if ($dirty) { $decision = 'coordinator'; $reason = 'same_folder_write_requires_clean_tree' }
-      }
 
       if ($selection.selected) {
         $reuse = @($state.workers.Values | Where-Object {
           $_.status -eq 'idle' -and $_.repository_id -eq $repositoryId -and
-          $_.role -eq $role -and $_.requested_model -eq $selection.model -and $_.access_mode -eq $AccessMode
+          $_.workspace_id -eq $workspaceId -and $_.role -eq $role -and
+          $_.requested_model -eq $selection.model -and $_.reasoning_effort -eq $effort -and
+          $_.access_mode -eq $AccessMode
         } | Select-Object -First 1)
       }
 
       if ($decision -eq 'delegate') {
-        $nowOffset = [DateTimeOffset]::UtcNow
-        foreach ($planKey in @($state.plans.Keys)) {
-          $existingPlan = $state.plans[$planKey]
-          $expired = try { [DateTimeOffset]::Parse([string]$existingPlan.expires_at) -le $nowOffset } catch { $true }
-          if ($existingPlan.status -ne 'issued' -or $expired) { $state.plans.Remove($planKey) }
-        }
+        $planId = [guid]::NewGuid().ToString('N')
         $planTokenValue = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
         $planExpiresAt = $nowOffset.AddMinutes($PlanMinutes).ToString('o')
         $state.plans[$task] = @{
           task_id = $task
+          plan_id = $planId
           token_hash = Get-TextHash $planTokenValue
           repository_id = $repositoryId
           workspace_id = $workspaceId
@@ -780,6 +810,12 @@ try {
           reasoning_effort = $effort
           mutation_attribution_hash = $attributionHash
           mutation_attribution_verified = [bool]$MutationAttributionVerified
+          policy = @{
+            max_concurrent_workers = $MaxConcurrentWorkers
+            max_total_attempts = $MaxTotalAttempts
+            max_corrections = $MaxCorrections
+            lease_minutes = $LeaseMinutes
+          }
           status = 'issued'
           created_at = $nowOffset.ToString('o')
           expires_at = $planExpiresAt
@@ -817,12 +853,19 @@ try {
       access_mode = $AccessMode
       scopes = $scopes
       plan_token = $planTokenValue
+      plan_id = if ($decision -eq 'delegate') { $planId } else { $null }
       plan_expires_at = $planExpiresAt
+      capacity_reserved = $false
       state_store = 'per_user_temp'
+      state_integrity = 'untrusted_coordination_only'
+      security_boundary = $false
+      write_delegation_enabled = $false
+      read_only_enforcement = 'advisory_git_visible_projection'
       reuse_worker_id = if ($reuse.Count) { $reuse[0].worker_id } else { $null }
-      fork_context = $false
-      max_delegation_depth = 1
-      nested_workers_allowed = $false
+      spawn_contract = 'multi_agent_v2'
+      fork_turns = 'none'
+      delegation_depth_policy = 1
+      nested_workers_policy = 'prohibited_not_runtime_enforced'
       final_coordinator_verification_required = $true
     }
     exit 0
@@ -853,6 +896,7 @@ try {
       $TaskClass = [string]$plan.task_class
       $AccessMode = [string]$plan.access_mode
       $ReasoningEffort = [string]$plan.reasoning_effort
+      if ($AccessMode -eq 'write') { Throw-GovernorError "shared_folder_write_delegation_disabled" }
       $scopes = @($plan.scopes)
       $selection = @{
         selected = $true
@@ -871,7 +915,9 @@ try {
       if ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         Throw-GovernorError "task_already_leased"
       }
-      if ($active.Count -ge $MaxConcurrentWorkers) { Throw-GovernorError "concurrency_budget_reached" }
+      if (@($active | Where-Object { $_.worker_id -eq $worker }).Count -gt 0) {
+        Throw-GovernorError "worker_already_leased"
+      }
       if ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
         Throw-GovernorError "single_writer_lease_active"
       }
@@ -895,13 +941,18 @@ try {
         $corrections = [int]$state.tasks[$task].corrections
         $createdAt = [string]$state.tasks[$task].created_at
       }
-      if ($attempts -gt $MaxTotalAttempts) { Throw-GovernorError "attempt_budget_reached" }
+      $leasePolicy = if ($plan.policy) { $plan.policy } else { @{
+          max_concurrent_workers = $MaxConcurrentWorkers; max_total_attempts = $MaxTotalAttempts
+          max_corrections = $MaxCorrections; lease_minutes = $LeaseMinutes
+        } }
+      if ($active.Count -ge [int]$leasePolicy.max_concurrent_workers) { Throw-GovernorError "concurrency_budget_reached" }
+      if ($attempts -gt [int]$leasePolicy.max_total_attempts) { Throw-GovernorError "attempt_budget_reached" }
 
       $baseCommit = $head.commit
       $baselineFingerprint = Get-WorkspaceFingerprint $baseCommit
       $leaseIdentifier = [guid]::NewGuid().ToString('N')
       $fencing = [guid]::NewGuid().ToString('N')
-      $expiresAt = $nowOffset.AddMinutes($LeaseMinutes).ToString('o')
+      $expiresAt = $nowOffset.AddMinutes([int]$leasePolicy.lease_minutes).ToString('o')
       $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
       $attributionHash = $plan.mutation_attribution_hash
       $taskRecord = @{
@@ -955,6 +1006,7 @@ try {
         created_at = $now
         updated_at = $now
         expires_at = $expiresAt
+        policy = $leasePolicy
       }
       $state.tasks[$task] = $taskRecord
       $state.workers[$worker] = $workerRecord
@@ -979,9 +1031,10 @@ try {
         model_inventory_index = $selection.index
         model_cost_rank = $selection.cost_rank
         attempt = $attempts
-        max_attempts = $MaxTotalAttempts
-        max_delegation_depth = 1
-        nested_workers_allowed = $false
+        max_attempts = [int]$leasePolicy.max_total_attempts
+        delegation_depth_policy = 1
+        nested_workers_policy = 'prohibited_not_runtime_enforced'
+        security_boundary = $false
       }
       exit 0
     }
@@ -996,7 +1049,7 @@ try {
     if ($Action -eq 'renew') {
       if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification', 'verified')) { Throw-GovernorError "lease_not_renewable" }
       $lease.updated_at = $now
-      $lease.expires_at = $nowOffset.AddMinutes($LeaseMinutes).ToString('o')
+      $lease.expires_at = $nowOffset.AddMinutes([int]$lease.policy.lease_minutes).ToString('o')
       $state.tasks[$task].updated_at = $now
       Write-State $state
       Write-GovernorOutput @{ ok = $true; action = 'renew'; task_id = $task; lease_id = $lease.lease_id; expires_at = $lease.expires_at }
@@ -1048,8 +1101,8 @@ try {
       $head = Get-HeadState
       if ($head.mode -ne $lease.head_mode -or $head.reference_hash -ne $lease.reference_hash) { Throw-GovernorError "head_identity_mismatch" }
       $baseCommit = [string]$lease.base_commit
-      & git -C $script:RepositoryRoot merge-base --is-ancestor $baseCommit HEAD 2>$null
-      if ($LASTEXITCODE -ne 0) { Throw-GovernorError "base_commit_mismatch" }
+      $ancestor = Try-Invoke-Git @('merge-base', '--is-ancestor', $baseCommit, 'HEAD')
+      if (-not $ancestor.ok) { Throw-GovernorError "base_commit_mismatch" }
       $changed = @()
       if ($lease.access_mode -eq 'read') {
         if ($currentFingerprint -ne $lease.baseline_fingerprint) { Throw-GovernorError "read_worker_modified_workspace" }
@@ -1092,7 +1145,7 @@ try {
     if ($Action -eq 'correct') {
       if ($lease.status -ne 'awaiting_verification') { Throw-GovernorError "result_not_ready" }
       $corrections = [int]$state.tasks[$task].corrections + 1
-      if ($corrections -gt $MaxCorrections) { Throw-GovernorError "correction_budget_reached" }
+      if ($corrections -gt [int]$lease.policy.max_corrections) { Throw-GovernorError "correction_budget_reached" }
       $state.tasks[$task].corrections = $corrections
       $state.tasks[$task].status = 'needs_correction'
       $state.tasks[$task].updated_at = $now
@@ -1102,7 +1155,7 @@ try {
       $state.workers[$lease.worker_id].status = 'leased'
       $state.workers[$lease.worker_id].updated_at = $now
       Write-State $state
-      Write-GovernorOutput @{ ok = $true; action = 'correct'; task_id = $task; worker_id = $lease.worker_id; correction = $corrections; max_corrections = $MaxCorrections; reuse_same_worker = $true }
+      Write-GovernorOutput @{ ok = $true; action = 'correct'; task_id = $task; worker_id = $lease.worker_id; correction = $corrections; max_corrections = [int]$lease.policy.max_corrections; reuse_same_worker = $true }
       exit 0
     }
 
@@ -1121,6 +1174,7 @@ try {
     }
 
     if ($Action -eq 'retire') {
+      if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification', 'verified')) { Throw-GovernorError "invalid_lifecycle_transition" }
       $lease.status = 'failed'
       $lease.updated_at = $now
       $state.tasks[$task].status = 'failed'
@@ -1133,6 +1187,7 @@ try {
     }
 
     if ($Action -eq 'release') {
+      if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification')) { Throw-GovernorError "invalid_lifecycle_transition" }
       $lease.status = 'released'
       $lease.updated_at = $now
       $state.tasks[$task].status = 'released'

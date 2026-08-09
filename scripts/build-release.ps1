@@ -25,18 +25,48 @@ Remove-Item -LiteralPath $artifactPath, $checksumPath, $releaseManifestPath -For
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$files = @(Get-ChildItem -LiteralPath $pluginRoot -File -Recurse | Where-Object {
-  $_.Name -ne '.gitignore'
+$trackedPaths = @(& git -C $repoRoot ls-files -- plugins/chronos)
+if ($LASTEXITCODE -ne 0) { throw "Could not enumerate tracked plugin files." }
+$untrackedPaths = @(& git -C $repoRoot ls-files --others --exclude-standard -- plugins/chronos)
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect untracked plugin files." }
+if ($untrackedPaths.Count -gt 0) { throw "Plugin source contains untracked files: $($untrackedPaths -join ', ')" }
+$files = @($trackedPaths | Where-Object { $_ -and $_ -notmatch '/\.gitignore$' } | ForEach-Object {
+  Get-Item -LiteralPath (Join-Path $repoRoot $_) -Force
 } | Sort-Object {
   $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
 })
 if ($files.Count -eq 0) { throw "Plugin package has no files." }
 foreach ($file in $files) {
-  if ($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-    throw "Release source contains a reparse point."
+  $current = $file
+  while ($current -and $current.FullName.StartsWith($pluginRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($current.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+      throw "Release source contains a reparse point: $($file.FullName)"
+    }
+    $current = $current.Directory
   }
 }
 
+function Get-PackagedBytes {
+  param([System.IO.FileInfo]$File)
+  $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @(
+    '.json', '.md', '.ps1', '.yaml', '.yml', '.txt'
+  )
+  if ($isText) {
+    $content = [System.IO.File]::ReadAllText($File.FullName)
+    return ,([System.Text.UTF8Encoding]::new($false).GetBytes(
+      $content.Replace("`r`n", "`n").Replace("`r", "`n")
+    ))
+  }
+  ,([System.IO.File]::ReadAllBytes($File.FullName))
+}
+
+function Get-BytesHash {
+  param([byte[]]$Bytes)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try { ([System.BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+$packagedFileManifest = [System.Collections.Generic.List[object]]::new()
 $stream = [System.IO.File]::Open($artifactPath, 'CreateNew', 'ReadWrite', 'None')
 try {
   $archive = [System.IO.Compression.ZipArchive]::new(
@@ -53,19 +83,13 @@ try {
       $entry.LastWriteTime = $fixedTimestamp
       $entryStream = $entry.Open()
       try {
-        $isText = $file.Name -eq 'LICENSE' -or $file.Extension.ToLowerInvariant() -in @(
-          '.json', '.md', '.ps1', '.yaml', '.yml', '.txt'
-        )
-        if ($isText) {
-          $content = [System.IO.File]::ReadAllText($file.FullName)
-          $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes(
-            $content.Replace("`r`n", "`n").Replace("`r", "`n")
-          )
-          $entryStream.Write($bytes, 0, $bytes.Length)
-        } else {
-          $sourceStream = [System.IO.File]::Open($file.FullName, 'Open', 'Read', 'Read')
-          try { $sourceStream.CopyTo($entryStream) } finally { $sourceStream.Dispose() }
-        }
+        $bytes = Get-PackagedBytes $file
+        $entryStream.Write($bytes, 0, $bytes.Length)
+        $packagedFileManifest.Add([ordered]@{
+          path = $relative
+          bytes = [long]$bytes.Length
+          sha256 = Get-BytesHash $bytes
+        })
       } finally {
         $entryStream.Dispose()
       }
@@ -84,12 +108,13 @@ $artifactHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash
   [System.Text.UTF8Encoding]::new($false)
 )
 $releaseManifest = [ordered]@{
-  schema_version = 1
+  schema_version = 2
   plugin = "chronos"
   version = $Version
   artifact = $artifactName
   sha256 = $artifactHash
   packaged_files = $files.Count
+  files = @($packagedFileManifest)
   reproducible_timestamp = "1980-01-01T00:00:00Z"
   packaged_text_line_endings = "LF"
 }

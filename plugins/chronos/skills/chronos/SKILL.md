@@ -47,10 +47,11 @@ Codex rules directory. It returns aggregate rule structure and secret-shape
 counts, never rules, commands, assignments, paths, hashes, or values. It does not
 edit a rule.
 
-Use `machineHealth` for process, memory, handle, CPU, and disk pressure. The
-leading `CHRONOS` level remains an aggregate advisory across machine,
-filesystem-helper, and diagnostic-database conditions; do not present that
-aggregate as proof that the PC is failing when `machineHealth=HEALTHY`.
+Use `machineHealth` and the leading `CHRONOS` level for process, memory, handle,
+CPU, disk, and filesystem-helper operability. Read `resourceDiagnosticLevel`
+for the separate diagnostic-database condition and `overallDiagnosticLevel`
+for the most severe observed diagnostic domain. Do not present storage or rule
+hygiene as current machine failure when `machineHealth=HEALTHY`.
 
 Read `tokenCoverageWindowHours`, eligible and selected file counts,
 `tokenCoverageCapped`, truncated tails, and `tokenCoverageContinuity` before
@@ -179,8 +180,10 @@ before escalating; request escalation only after a real boundary is identified.
 
 Do not describe a high `tokenCachedReadPct` as a leak or as equivalent spend.
 Cache reads indicate reuse and are discounted, but they still contribute to
-token-throughput limits. Treat `tokenCacheWriteObserved=false` as "no writes
-reported," not proof that no writes occurred.
+token-throughput limits. Interpret `cacheWriteObservation=unsupported_schema`
+as unavailable telemetry. Only interpret `tokenCacheWriteObserved=false` as a
+measured zero when `cacheWriteObservation=observed`; neither proves that no
+upstream cache activity occurred.
 
 When the user requests durable quota tuning, recommend this conservative
 starting point but do not edit configuration without an explicit request:

@@ -21,7 +21,10 @@ $v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
 $reviewerHealthHome = Join-Path $testRoot "reviewer-health-home"
 $machine2Home = Join-Path $testRoot "machine2-home"
 $ruleMissHome = Join-Path $testRoot "rule-miss-home"
-$forkReplayHome = Join-Path $testRoot "fork-replay-home"
+  $forkReplayHome = Join-Path $testRoot "fork-replay-home"
+  $completeNoNewlineHome = Join-Path $testRoot "complete-no-newline-home"
+  $invalidDbHome = Join-Path $testRoot "invalid-db-home"
+  $unsupportedCacheHome = Join-Path $testRoot "unsupported-cache-home"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -34,7 +37,7 @@ function Assert-Match($value, $pattern, $message) {
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
-    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $unsupportedCacheHome `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -88,6 +91,13 @@ try {
     -File $chronosScript -Action inspect -CodexHome $missingHome -SampleSeconds 1
   if ($LASTEXITCODE -ne 0) { throw "Chronos missing-database inspection failed." }
   Assert-Match $missingOutput " logDb=UNAVAILABLE " "Missing database should be unavailable."
+
+  [System.IO.File]::WriteAllBytes((Join-Path $invalidDbHome "logs_2.sqlite"), [byte[]](1..128))
+  $invalidDbOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $invalidDbHome -SampleSeconds 1
+  Assert-Match $invalidDbOutput " logDb=WARNING " "A present but unreadable diagnostic database must not be reported healthy."
+  Assert-Match $invalidDbOutput " logDbReasons=query-unavailable " "Database query failure must be explicit."
+  Assert-Match $invalidDbOutput " logDbQueryOk=false " "Database query availability must be emitted."
   Assert-Match $missingOutput " logSeq=unknown " "Missing database should not invent a sequence."
 
   $markerTimestamp = (Get-Date).AddSeconds(-5).ToString("yyyy-MM-dd HH:mm:ss.fff")
@@ -196,6 +206,48 @@ try {
   Assert-Match $integrityOutput " tokenTailIncompleteFiles=1 " "A partially written final rollout record should be reported and ignored."
   Assert-Match $integrityOutput " tokenCoverageContinuity=partial " `
     "Malformed, duplicate, out-of-order, or incomplete records must mark coverage partial."
+
+  $completeNoNewlineDay = Join-Path (Join-Path (Join-Path $completeNoNewlineHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $completeNoNewlineDay = Join-Path $completeNoNewlineDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $completeNoNewlineDay -Force | Out-Null
+  [System.IO.File]::WriteAllText(
+    (Join-Path $completeNoNewlineDay "complete-final-record.jsonl"),
+    $outOfOrderIntegrityRecord,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $completeNoNewlineOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $completeNoNewlineHome -SampleSeconds 1
+  Assert-Match $completeNoNewlineOutput " tokenSamples=1 " "A complete final JSONL record without a newline must be retained."
+  Assert-Match $completeNoNewlineOutput " tokenTailIncompleteFiles=0 " "A valid final JSONL record must not be labeled incomplete."
+
+  $unsupportedCacheDay = Join-Path (Join-Path (Join-Path $unsupportedCacheHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $unsupportedCacheDay = Join-Path $unsupportedCacheDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $unsupportedCacheDay -Force | Out-Null
+  $unsupportedCacheRecord = @{
+    timestamp = [DateTimeOffset]::UtcNow.ToString('o')
+    type = 'event_msg'
+    payload = @{
+      type = 'token_count'
+      info = @{
+        total_token_usage = @{
+          input_tokens = 1000; cached_input_tokens = 500; output_tokens = 100
+          reasoning_output_tokens = 10; total_tokens = 1100
+        }
+        model_context_window = 100000
+      }
+    }
+  } | ConvertTo-Json -Compress -Depth 8
+  [System.IO.File]::WriteAllText(
+    (Join-Path $unsupportedCacheDay 'unsupported-cache.jsonl'),
+    $unsupportedCacheRecord + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $unsupportedCacheOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $unsupportedCacheHome -SampleSeconds 1
+  Assert-Match $unsupportedCacheOutput " tokenCacheWriteObserved=unknown " "Unsupported cache-write telemetry must not be reported as false."
+  Assert-Match $unsupportedCacheOutput " cacheWriteObservation=unsupported_schema " "Unsupported cache-write telemetry must be labeled."
 
   $sessionDay = Join-Path (Join-Path (Join-Path $tokenHealthHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -415,10 +467,16 @@ try {
   [System.IO.File]::WriteAllLines(
     (Join-Path $machine2Rules "default.rules"),
     @(
-      "prefix_rule(pattern=[`"powershell.exe`",`"$longLiteral`"], decision=`"allow`")",
+      "prefix_rule(",
+      "    pattern = [`"powershell.exe`", `"$longLiteral`"],",
+      "    decision = `"allow`",",
+      ")",
       "prefix_rule(pattern=[`"python`"], decision=`"allow`")",
       "prefix_rule(pattern=[`"npm.cmd`",`"run`",`"test`"], decision=`"allow`")",
-      "prefix_rule(pattern=[`"cmd`",`"API_KEY=synthetic_value_for_test_only`"], decision=`"allow`")"
+      "prefix_rule(",
+      "    pattern = [`"cmd`", `"API_KEY=synthetic_value_for_test_only`"],",
+      "    decision = `"allow`",",
+      ")"
     ),
     [System.Text.UTF8Encoding]::new($false)
   )

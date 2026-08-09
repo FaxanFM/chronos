@@ -8,12 +8,12 @@ It checks current resource and diagnostic-log health, explains signs of degradat
 
 ## What it does
 
-- Reports a clear `HEALTHY`, `WARNING`, or `CRITICAL` status.
+- Reports machine health separately from resource, quota, rule, and overall diagnostic levels.
 - Identifies resource accumulation associated with long-running Codex degradation.
 - Detects high-frequency Codex SQLite log churn and unreclaimed database space.
 - Warns when the Windows filesystem helper is degrading and advises a full PC
   restart when the helper becomes unusable.
-- Separates cached reads from observed GPT-5.6 cache writes and flags quota
+- Separates cached reads from cache writes only when the runtime exposes that field and flags quota
   amplification from large contexts, high reasoning, subagents, and repeated
   compaction.
 - Counts actual automatic-review turns from structured `turn_context` records,
@@ -26,12 +26,10 @@ It checks current resource and diagnostic-log health, explains signs of degradat
   without returning rule text or values, and measures full-history worker forks,
   effort, task age, and lineage concentration.
 - Recommends the safest next step for the current condition.
-- Routes exploration, documentation, tests, mechanical edits, simple code, and
-  focused verification to bounded Codex workers.
+- Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
 - Discovers worker models from the active runtime instead of assuming a model.
-- Enforces canonical workspace identity, one writer across linked worktrees,
-  fenced expiring leases, mutation attribution, exact scopes, result
-  fingerprints, attempt budgets, and final coordinator verification.
+- Coordinates canonical workspace identity, fenced expiring advisory leases,
+  attempt budgets, Git-visible read-mutation checks, and final coordinator verification.
 
 Chronos mitigates local symptoms; it does not modify the Codex application or
 its SQLite databases, terminate processes, or block active work.
@@ -64,10 +62,10 @@ Use Chronos Governor to delegate this bounded low-complexity task.
 ```
 
 Governor validates the worker models advertised by the active runtime and
-selects deterministically from that inventory. It sends focused assignments
-without the full parent conversation and keeps architecture, security-sensitive
-work, unverifiable writes, integration, publishing, and final acceptance with
-the coordinator.
+selects deterministically from that inventory. It sends focused read-only
+assignments with `fork_turns=none`. It is a coordination aid, not a sandbox or
+security boundary; all edits, integration, publishing, and final acceptance
+remain with the coordinator.
 
 See the public [Codex Token and Quota Findings](https://github.com/FaxanFM/chronos/blob/main/docs/TOKEN-QUOTA-FINDINGS.md)
 for the source-backed GPT-5.6 findings and conservative local settings.
@@ -83,17 +81,19 @@ The public [architecture](https://github.com/FaxanFM/chronos/blob/main/docs/ARCH
 [test coverage](https://github.com/FaxanFM/chronos/blob/main/docs/TEST-COVERAGE.md),
 [release operations](https://github.com/FaxanFM/chronos/blob/main/docs/OPERATIONS.md),
 and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/CALIBRATION-METHODOLOGY.md)
-describe the v0.6.1 engineering controls.
+describe the v0.7.0 engineering controls.
+The public [v0.7.0 audit response](https://github.com/FaxanFM/chronos/blob/main/docs/AUDIT-RESPONSE-2026-08-09.md)
+separates fixed, contained, and deferred findings.
 
-## Self-service agents
+## Planned self-service agents
 
-Chronos extends to Poe and Apify as independently callable self-service agents:
+Poe and Apify builds are planned as independently callable self-service agents:
 
 - Poe provides a guided session-health assessment.
 - Apify provides session analysis, sanitized incident reports, and Codex
   public-fix compatibility checks.
 
-Each agent is invoked and paid for directly through its platform. Chronos does
+When published, each agent will be invoked and paid for directly through its platform. Chronos does
 not require a managed engagement or contacting FaxanFM. Public runner links
 will be added here as each agent is published.
 
@@ -106,7 +106,7 @@ will be added here as each agent is published.
 - Never terminates a process or deletes user files.
 - Opens the known Codex diagnostic database read-only and never installs
   triggers, deletes rows, checkpoints, or vacuums it.
-- Reads only bounded 2 MiB tails of up to eight recently active rollout files for
+- Reads bounded 2 MiB tails of up to eight recently active rollout files selected by modification time for
   structured aggregate token, effort, automatic-review, compaction, subagent,
   rollout-duplication, and parser-integrity
   counts.
@@ -114,12 +114,14 @@ will be added here as each agent is published.
   aggregate rule-health and secret-shape counts; rule text, prefixes, hashes,
   assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
-  local paths.
+  absolute local paths. Governor verification may return repository-relative changed paths.
 - Creates no recurring task, service, telemetry, or persistent log.
-- When Governor is invoked, stores only local coordination metadata beneath the
+- When Governor is invoked, stores only untrusted local coordination metadata beneath the
   current user's Windows temporary application-data directory: opaque IDs, identity hashes, base
   commit, relative scopes, model labels, lease fencing, counters, status, and
   timestamps.
+- Governor shared-folder write delegation is disabled; read-only checks cover a
+  Git-visible projection and do not prove that no other filesystem effect occurred.
 - Never automatically merges, resets, cleans, deletes worktrees or branches, or
   accepts a worker result without coordinator verification.
 

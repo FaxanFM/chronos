@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.7.0
+
+- Disable shared-folder Governor write delegation and reject legacy write plans.
+  Governor read workers are now described as advisory coordination, not a
+  security boundary or verified read-only property.
+- Emit the current Multi-Agent V2 `fork_turns=none` contract, remove the V1
+  `fork_context` instruction, bind worker reuse to workspace and effort, enforce
+  one active lease per worker ID, persist lease policy, and prevent terminal
+  lifecycle rewrites.
+- Sanitize every Governor-owned Git invocation against fsmonitor, textconv,
+  external diff, hook, pager, trace, and environment execution surfaces; cap
+  workspace fingerprint input.
+- Parse bounded multiline permission rules, distinguish unreadable SQLite
+  queries from healthy data, discover old sessions resumed recently, retain
+  complete JSONL records without trailing newlines, deduplicate exact replayed
+  events, and label unavailable cache-write telemetry instead of reporting zero.
+- Separate machine health from resource and overall diagnostic levels, use an
+  interval-based review rate, include prefix structure in approval equivalence,
+  and distinguish a persistence write error from a proven persistence runaway.
+- Package only tracked plugin files, add per-file release hashes, pin Actions,
+  split unprivileged tests from publication, verify attestations before release
+  creation, and add security, ownership, and dependency-maintenance files.
+- Replace the manually asserted 100 percent security-coverage claim with an
+  honest deterministic-scenario report. Warning/critical thresholds, scoring
+  weights, and predictive claims remain frozen.
+
 ## v0.6.1
 
 - Add an explicit approval-state persistence-runaway diagnosis that requires a

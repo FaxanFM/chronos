@@ -1,4 +1,4 @@
 interface:
   display_name: "Chronos Governor"
-  short_description: "Delegate bounded low-complexity Codex work safely."
-  default_prompt: "Use Chronos Governor to route a bounded low-complexity task to one worker, enforce scope and attempt limits, and independently verify the result."
+  short_description: "Coordinate one bounded read-only Codex worker."
+  default_prompt: "Use Chronos Governor to route one bounded read-only exploration, review, or verification task and independently verify the result."
