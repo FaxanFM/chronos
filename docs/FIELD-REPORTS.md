@@ -45,7 +45,8 @@ successfully exercises the candidate release from a fresh task.
 - Regression: deterministic tests cover malformed JSON, non-map collections,
   an out-of-range revision, interrupted writes, and the unknown-error output
   contract. Existing state is preserved on every failure.
-- Validation status: automated locally; independent v0.7.3 canary pending.
+- Validation status: automated and installed-release checks pass locally;
+  independent v0.7.3 fresh-task canary pending.
 
 ## Heuristic / Tuning Issues
 
