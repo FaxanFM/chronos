@@ -7,11 +7,34 @@ $manifestPath = Join-Path $repoRoot "plugins\chronos\.codex-plugin\plugin.json"
 $releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
 $testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
+$manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+$marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
 
 try {
+  if ([string]$manifest.interface.displayName -ne 'Chronos for Codex' -or
+      [string]$manifest.interface.displayName.Length -gt 30) {
+    throw "Directory display name must be specific and at most 30 characters."
+  }
+  if ([string]$manifest.interface.shortDescription.Length -gt 30) {
+    throw "Directory short description must be at most 30 characters."
+  }
+  if ($manifest.interface.PSObject.Properties['screenshots']) {
+    throw "Skills-only packages must not declare interface screenshots."
+  }
+  foreach ($excluded in @('apps', 'mcpServers')) {
+    if ($manifest.PSObject.Properties[$excluded]) {
+      throw "Skills-only packages must not declare $excluded."
+    }
+  }
+  $marketplacePlugin = @($marketplace.plugins | Where-Object { $_.name -eq $manifest.name })
+  if ($marketplacePlugin.Count -ne 1 -or
+      [string]$marketplacePlugin[0].category -ne [string]$manifest.interface.category -or
+      [string]$marketplace.interface.displayName -ne [string]$manifest.interface.displayName) {
+    throw "Marketplace discovery metadata must match the plugin manifest."
+  }
   $releaseWorkflow = Get-Content -Raw -LiteralPath $releaseWorkflowPath
   $testWorkflow = Get-Content -Raw -LiteralPath $testWorkflowPath
   foreach ($required in @(
@@ -89,6 +112,9 @@ try {
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {
       throw "Release contains repository-only files."
+    }
+    if ($names -contains 'assets/chronos-proof-card.png') {
+      throw "Skills-only package must not include the GitHub proof screenshot."
     }
   } finally {
     $archive.Dispose()

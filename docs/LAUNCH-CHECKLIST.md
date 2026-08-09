@@ -18,9 +18,9 @@
 - [x] Run Windows Server 2022 and current Windows matrices.
 - [x] Parse every PowerShell source and JSON manifest in ordinary CI.
 - [x] Require deterministic Governor, inspector, and release tests.
-- [x] Publish signed v0.7.1 commit and annotated tag.
-- [x] Verify checksum, attestation, immutable release, and packaged version.
-- [x] Install v0.7.1 locally and exercise inspect plus Governor status.
+- [ ] Publish signed v0.7.2 directory-compliance commit and annotated tag.
+- [ ] Verify checksum, attestation, immutable release, and packaged version.
+- [ ] Install v0.7.2 locally and exercise inspect plus Governor status.
 - [ ] Receive one successful exercise report from a second installation machine.
 
 ## Discovery
@@ -30,10 +30,13 @@
 - [x] Add a synthetic, sanitized 9:16 proof card and social preview.
 - [x] Add release, CI, license, and no-telemetry badges.
 - [x] Add a privacy-checked public bug-report form.
-- [x] Prepare Plugin Directory listing copy, assets, prompts, and review evidence.
+- [x] Prepare Plugin Directory listing copy, logo, prompts, reviewer cases, and review evidence.
+- [x] Remove UI screenshot metadata from the skills-only submission package.
 - [x] Update GitHub About description, website, and discovery topics.
 - [x] Upload the generated 1280x640 GitHub social preview.
-- [ ] Submit through the authenticated OpenAI Plugin Directory publisher interface.
+- [ ] Verify publisher identity and Apps Management write access in OpenAI Platform.
+- [ ] Upload through the authenticated OpenAI Platform plugin submission portal.
+- [ ] Submit the completed draft for OpenAI review.
 - [ ] Add the approved Plugin Directory URL to the README.
 
 ## Adoption without telemetry

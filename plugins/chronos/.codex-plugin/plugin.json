@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Detect Codex degradation, approval loops, quota amplification, rule risks, rollout duplication, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
     "name": "FaxanFM",
@@ -12,23 +12,22 @@
   "keywords": ["codex", "openai", "windows", "diagnostics", "powershell", "ai-agents", "sqlite", "approval-workflows", "resource-health", "productivity"],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Chronos",
-    "shortDescription": "Inspect Codex health and coordinate bounded workers.",
-    "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health, then coordinate bounded read-only Codex workers using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
+    "displayName": "Chronos for Codex",
+    "shortDescription": "Diagnose Codex on Windows",
+    "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health, then coordinate bounded Codex read tasks using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
     "developerName": "FaxanFM",
-    "category": "Productivity",
+    "category": "Developer Tools",
     "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Approval and rule diagnostics", "Fork and lineage diagnostics", "Bounded worker coordination", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
       "Use Chronos to inspect current Codex resource health.",
-      "Use Chronos to recommend the safest response to current Codex lag.",
-      "Use Chronos to explain token pressure or coordinate one bounded read-only worker."
+      "Use Chronos to explain current token and approval pressure.",
+      "Use Chronos Governor to plan one bounded repository read task."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",
-    "logo": "./assets/chronos-mark.png",
-    "screenshots": ["./assets/chronos-proof-card.png"]
+    "logo": "./assets/chronos-mark.png"
   }
 }

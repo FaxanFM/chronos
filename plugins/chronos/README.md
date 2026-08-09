@@ -1,11 +1,11 @@
 <p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
 
-# Chronos - Codex diagnostics and read-worker coordination
+# Chronos for Codex - diagnostics and read-task coordination
 
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
 churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics and coordinates bounded read-only workers without
+from workflow diagnostics and coordinates bounded read tasks without
 creating an autonomous agent loop.
 
 ## What it does

@@ -1,4 +1,4 @@
-# Chronos - Codex diagnostics and read-worker coordination
+# Chronos for Codex - diagnostics and read-task coordination
 
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
@@ -8,7 +8,7 @@
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
 churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics and coordinates bounded read-only workers without
+from workflow diagnostics and coordinates bounded read tasks without
 creating an autonomous agent loop.
 
 ```powershell

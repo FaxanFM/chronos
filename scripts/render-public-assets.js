@@ -14,7 +14,6 @@ const { chromium } = require('playwright');
     await page.goto(source, { waitUntil: 'load' });
     const proofCard = path.resolve(__dirname, '../assets/chronos-proof-card.png');
     await page.screenshot({ path: proofCard });
-    fs.copyFileSync(proofCard, path.resolve(__dirname, '../plugins/chronos/assets/chronos-proof-card.png'));
 
     await page.setViewportSize({ width: 1280, height: 640 });
     await page.goto(`${source}?social=1`, { waitUntil: 'load' });

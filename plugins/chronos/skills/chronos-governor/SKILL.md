@@ -1,6 +1,6 @@
 ---
 name: chronos-governor
-description: Coordinate bounded read-only delegation of low-complexity repository exploration, review, and verification to Codex native workers while limiting concurrency, context, attempts, health impact, and token use. Shared-folder write delegation is disabled.
+description: Coordinate bounded read tasks for low-complexity repository exploration, review, and verification with Codex native workers while limiting concurrency, context, attempts, health impact, and token use. Shared-folder write delegation is disabled.
 ---
 
 # Chronos Governor
@@ -19,7 +19,7 @@ effect occurred. Rely on the active Codex sandbox for actual permissions.
 
 Defaults:
 
-- At most two active read workers.
+- At most two active read-task workers.
 - Shared-folder write workers disabled.
 - At most three attempts per task and one correction.
 - Delegation depth one by coordinator policy.

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.2
+
+- Prepare the skills-only package for OpenAI Plugin Directory review under the
+  specific public name `Chronos for Codex` and the Developer Tools category.
+- Remove the manifest screenshot field because Chronos has no plugin UI; the
+  synthetic proof card remains a clearly labeled GitHub discovery asset.
+- Describe Governor as advisory coordination of bounded read tasks rather than
+  implying that it enforces worker filesystem permissions.
+- Correct the privacy policy to describe bounded all-partition inventory for
+  older tasks resumed within the current six-hour observation window.
+- Add the official publisher prerequisites and the required five positive and
+  three negative reviewer cases to the submission packet.
+
+No runtime diagnostic, Governor, threshold, scoring, telemetry, or background
+behavior changed in this release.
+
 ## v0.7.1
 
 - Replace working-tree `git diff` fingerprints with bounded raw file reads and
