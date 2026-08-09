@@ -44,5 +44,6 @@
 - [x] Keep usage local, on demand, and telemetry-free.
 - [x] Provide a sanitized sample people can share without exposing local data.
 - [x] Make public issue reporting opt-in and privacy-gated.
+- [x] Add an opt-in sanitized-result form, share link, and reusable project badge.
 - [ ] Publish a concise launch post linked to the release and proof card.
 - [ ] Review GitHub Traffic after 7 and 14 days; do not add analytics to Chronos.

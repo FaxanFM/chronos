@@ -23,6 +23,23 @@ Open a new Codex task, then ask: `Use Chronos to inspect current Codex health.`
 The image is a synthetic, sanitized example. It contains no machine, account,
 task, repository, or session identifiers.
 
+## Share safely
+
+Chronos has no install or usage telemetry. Public signals are always opt-in:
+
+- [Star Chronos for Codex](https://github.com/FaxanFM/chronos)
+- [Share the telemetry-free release on X](https://twitter.com/intent/tweet?text=Chronos%20for%20Codex%20diagnoses%20Windows%20slowdown%2C%20approval%20loops%2C%20quota%2Fcontext%20pressure%2C%20SQLite%20churn%2C%20and%20coordinates%20bounded%20read%20tasks.%20Local-only%2C%20on-demand%2C%20no%20telemetry.%20https%3A%2F%2Fgithub.com%2FFaxanFM%2Fchronos)
+- [Share a sanitized result](https://github.com/FaxanFM/chronos/issues/new?template=sanitized-result.yml)
+
+Projects that use Chronos can link back with this optional badge:
+
+```markdown
+[![Chronos for Codex](https://img.shields.io/badge/Codex-Chronos_for_Codex-D64045)](https://github.com/FaxanFM/chronos)
+```
+
+Never publish raw diagnostic files, Governor state, rollout data, SQLite files,
+paths, identifiers, prompts, commands, credentials, or private source.
+
 ## What it does
 
 - Reports machine health separately from resource, quota, rule, and overall diagnostic levels.
