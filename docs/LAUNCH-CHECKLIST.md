@@ -18,9 +18,9 @@
 - [x] Run Windows Server 2022 and current Windows matrices.
 - [x] Parse every PowerShell source and JSON manifest in ordinary CI.
 - [x] Require deterministic Governor, inspector, and release tests.
-- [ ] Publish signed v0.7.1 commit and annotated tag.
-- [ ] Verify checksum, attestation, immutable release, and packaged version.
-- [ ] Install v0.7.1 locally and exercise inspect plus Governor status.
+- [x] Publish signed v0.7.1 commit and annotated tag.
+- [x] Verify checksum, attestation, immutable release, and packaged version.
+- [x] Install v0.7.1 locally and exercise inspect plus Governor status.
 - [ ] Receive one successful exercise report from a second installation machine.
 
 ## Discovery
