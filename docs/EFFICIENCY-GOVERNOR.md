@@ -1,6 +1,6 @@
 # Efficiency Governor
 
-Chronos 0.7.0 provides bounded, local observations for Codex approval review,
+Chronos 0.7.1 provides bounded, local observations for Codex approval review,
 permission-rule quality, worker context, and rollout amplification. It is an
 observer and advisor, not an approval-policy manager.
 
@@ -131,4 +131,4 @@ escalations, full-history worker delegation, and root-only negative recursion.
 Governor rejects planned/effective model drift with `model_plan_mismatch` while
 preserving an exact-model lease. Existing thresholds, scoring weights, quota
 heuristics, predictive claims, and calibration-sensitive behavior remain
-unchanged in 0.7.0.
+unchanged in 0.7.1.

@@ -1,0 +1,58 @@
+name: Chronos bug report
+description: Report a reproducible Chronos diagnosis, install, or coordination defect.
+title: "[Bug]: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share compact aggregate output only. Never attach Governor state, rollout files, SQLite files, source, commands, credentials, usernames, absolute paths, or task IDs.
+  - type: input
+    id: version
+    attributes:
+      label: Chronos version
+      placeholder: 0.7.1
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what Chronos reported.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use synthetic names and omit proprietary workspace details.
+    validations:
+      required: true
+  - type: textarea
+    id: compact
+    attributes:
+      label: Sanitized compact output
+      description: Paste only aggregate CHRONOS or CHRONOS GOVERNOR output after reviewing it.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed paths, IDs, prompts, commands, source, secrets, and private workspace details.
+          required: true
+        - label: I reproduced this on the version named above.
+          required: true

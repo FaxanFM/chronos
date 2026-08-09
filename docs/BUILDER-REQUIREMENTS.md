@@ -1,11 +1,11 @@
 # Consolidated Builder Requirements
 
 This ledger maps the consolidated Machine 1 and Machine 2 builder handoffs to
-shipped behavior through 0.7.0.
+shipped behavior through 0.7.1.
 "Unavailable" is an implemented result state when the bounded local schema does
 not expose enough evidence. It is not converted to zero or inferred from text.
 
-| Area | 0.7.0 disposition |
+| Area | 0.7.1 disposition |
 | --- | --- |
 | Reviewer discovery and exact turn counting | Implemented from exact `turn_context` model records; bookkeeping is excluded. |
 | Reviewer identity and parent lineage | Sanitized counts implemented; raw session and parent IDs are intentionally not returned. |

@@ -11,6 +11,34 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Initialize-ChronosReadRoot {
+  param([string]$Path)
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if (-not $item -or -not $item.PSIsContainer -or
+      ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $null }
+  ([System.IO.Path]::GetFullPath($item.FullName).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar)
+}
+
+$script:ChronosReadRoot = Initialize-ChronosReadRoot $CodexHome
+
+function Test-ChronosReadPath {
+  param([string]$Path)
+  if (-not $script:ChronosReadRoot -or [string]::IsNullOrWhiteSpace($Path)) { return $false }
+  try { $fullPath = [System.IO.Path]::GetFullPath($Path) } catch { return $false }
+  if (-not ($fullPath + $(if ((Get-Item -LiteralPath $fullPath -Force -ErrorAction SilentlyContinue).PSIsContainer) {
+          [System.IO.Path]::DirectorySeparatorChar
+        } else { "" })).StartsWith($script:ChronosReadRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $false
+  }
+  $cursor = Get-Item -LiteralPath $fullPath -Force -ErrorAction SilentlyContinue
+  if (-not $cursor) { $cursor = Get-Item -LiteralPath (Split-Path -Parent $fullPath) -Force -ErrorAction SilentlyContinue }
+  while ($cursor -and ($cursor.FullName.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar) -ne $script:ChronosReadRoot) {
+    if ($cursor.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+    $cursor = if ($cursor -is [System.IO.DirectoryInfo]) { $cursor.Parent } else { $cursor.Directory }
+  }
+  $null -ne $cursor
+}
+
 function Initialize-ChronosSqlite {
   if ("ChronosSqlite" -as [type]) { return $true }
 
@@ -115,8 +143,8 @@ function Get-LogDbSample {
   $databasePath = Join-Path $CodexHome "logs_2.sqlite"
   $walPath = "$databasePath-wal"
   $capturedAt = Get-Date
-  $databaseFile = Get-Item -LiteralPath $databasePath -ErrorAction SilentlyContinue
-  $walFile = Get-Item -LiteralPath $walPath -ErrorAction SilentlyContinue
+  $databaseFile = if (Test-ChronosReadPath $databasePath) { Get-Item -LiteralPath $databasePath -ErrorAction SilentlyContinue } else { $null }
+  $walFile = if (Test-ChronosReadPath $walPath) { Get-Item -LiteralPath $walPath -ErrorAction SilentlyContinue } else { $null }
 
   $sample = [ordered]@{
     Present = $null -ne $databaseFile
@@ -199,6 +227,13 @@ function Get-LogDbMetrics($before, $after) {
   [pscustomobject]@{
     Present = $after.Present
     QueryOk = $after.QueryOk
+    Availability = if ($after.PageMetricsOk -and $after.SequenceOk -and $after.LevelRowsOk) {
+      "full"
+    } elseif ($after.QueryOk) {
+      "partial"
+    } else {
+      "unavailable"
+    }
     PageMetricsOk = $after.PageMetricsOk
     SequenceOk = $after.SequenceOk
     LevelRowsOk = $after.LevelRowsOk
@@ -227,7 +262,7 @@ function Get-FilesystemHelperHealth {
   $logs = @(@($CodexHome, $sandboxHome) | ForEach-Object {
     Get-ChildItem -LiteralPath $_ -Filter "sandbox*.log" -File -ErrorAction SilentlyContinue
   } | Where-Object {
-      $_.LastWriteTimeUtc -ge $cutoff
+      (Test-ChronosReadPath $_.FullName) -and $_.LastWriteTimeUtc -ge $cutoff
     } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 2)
 
   if (-not $logs.Count) {
@@ -312,6 +347,7 @@ function Get-BoundedFileTail {
   )
 
   $stream = $null
+  if (-not (Test-ChronosReadPath $Path)) { return "" }
   try {
     $stream = [System.IO.FileStream]::new(
       $Path,
@@ -349,6 +385,7 @@ function Get-BoundedFileTail {
 function Get-BoundedFileHead {
   param([string]$Path, [int]$MaxBytes = 65536)
   $stream = $null
+  if (-not (Test-ChronosReadPath $Path)) { return "" }
   try {
     $stream = [System.IO.FileStream]::new(
       $Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
@@ -376,28 +413,49 @@ function Get-RecentSessionFiles {
   $windowEnd = (Get-Date).ToUniversalTime()
   $cutoff = $windowEnd.AddHours(-6)
   $sessionsRoot = Join-Path $CodexHome "sessions"
-  if (-not (Test-Path -LiteralPath $sessionsRoot -PathType Container)) {
+  if (-not (Test-Path -LiteralPath $sessionsRoot -PathType Container) -or
+      -not (Test-ChronosReadPath $sessionsRoot)) {
     return [pscustomobject]@{
       Files = @(); EligibleCount = 0; SelectedCount = 0; Capped = $false
+      InventoryTimedOut = $false
       WindowHours = 6; WindowStartUtc = $cutoff.ToString('o'); WindowEndUtc = $windowEnd.ToString('o')
     }
   }
 
-  $inventoryLimit = 20000
-  $files = @(Get-ChildItem -LiteralPath $sessionsRoot -Filter "*.jsonl" -File -Recurse `
-      -ErrorAction SilentlyContinue | Select-Object -First ($inventoryLimit + 1))
-  $inventoryCapped = $files.Count -gt $inventoryLimit
-  if ($inventoryCapped) { $files = @($files | Select-Object -First $inventoryLimit) }
-
-  $eligible = @($files | Where-Object {
-      $_.LastWriteTimeUtc -ge $cutoff
-    } | Sort-Object LastWriteTimeUtc -Descending)
-  $selected = @($eligible | Select-Object -First 8)
+  $eligibleCount = 0
+  $inventoryTimedOut = $false
+  $inventoryDeadline = [DateTimeOffset]::UtcNow.AddSeconds(3)
+  $newest = [System.Collections.Generic.List[object]]::new()
+  $directories = [System.Collections.Generic.Stack[string]]::new()
+  $directories.Push($sessionsRoot)
+  while ($directories.Count -gt 0) {
+    if ([DateTimeOffset]::UtcNow -ge $inventoryDeadline) { $inventoryTimedOut = $true; break }
+    $directory = $directories.Pop()
+    foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction SilentlyContinue)) {
+      if ([DateTimeOffset]::UtcNow -ge $inventoryDeadline) { $inventoryTimedOut = $true; break }
+      if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+      if ($entry.PSIsContainer) {
+        if (Test-ChronosReadPath $entry.FullName) { $directories.Push($entry.FullName) }
+        continue
+      }
+      if ($entry.Extension -ne ".jsonl" -or -not (Test-ChronosReadPath $entry.FullName) -or
+          $entry.LastWriteTimeUtc -lt $cutoff) { continue }
+      $eligibleCount++
+      $newest.Add($entry)
+      if ($newest.Count -gt 8) {
+        $oldest = @($newest | Sort-Object LastWriteTimeUtc, FullName | Select-Object -First 1)[0]
+        $null = $newest.Remove($oldest)
+      }
+    }
+    if ($inventoryTimedOut) { break }
+  }
+  $selected = @($newest | Sort-Object LastWriteTimeUtc -Descending)
   [pscustomobject]@{
     Files = $selected
-    EligibleCount = $eligible.Count
+    EligibleCount = $eligibleCount
     SelectedCount = $selected.Count
-    Capped = $inventoryCapped -or $eligible.Count -gt $selected.Count
+    Capped = $inventoryTimedOut -or $eligibleCount -gt $selected.Count
+    InventoryTimedOut = $inventoryTimedOut
     WindowHours = 6
     WindowStartUtc = $cutoff.ToString('o')
     WindowEndUtc = $windowEnd.ToString('o')
@@ -499,44 +557,86 @@ function Get-BoundedPrefixRuleBlocks {
     return [pscustomobject]@{ Blocks = @(); Complete = $false }
   }
   $blocks = [System.Collections.Generic.List[string]]::new()
-  $search = 0
-  while ($search -lt $text.Length -and $blocks.Count -lt $MaxRules) {
-    $match = [regex]::Match($text, '\bprefix_rule\s*\(', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, [TimeSpan]::FromSeconds(1))
-    if ($search -gt 0) {
-      $match = [regex]::Match($text.Substring($search), '\bprefix_rule\s*\(', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, [TimeSpan]::FromSeconds(1))
-      if ($match.Success) {
-        $match = [pscustomobject]@{ Success = $true; Index = $match.Index + $search; Length = $match.Length }
-      }
+  $index = 0
+  while ($index -lt $text.Length) {
+    if ($blocks.Count -ge $MaxRules) {
+      return [pscustomobject]@{ Blocks = @($blocks); Complete = $false }
     }
-    if (-not $match.Success) { break }
-    $open = $text.IndexOf('(', [int]$match.Index)
+    $character = $text[$index]
+    if ($character -eq '#') {
+      $newline = $text.IndexOf("`n", $index)
+      $index = if ($newline -lt 0) { $text.Length } else { $newline + 1 }
+      continue
+    }
+    if ($character -eq '"' -or $character -eq "'") {
+      $quote = $character
+      $triple = $index + 2 -lt $text.Length -and
+        $text[$index + 1] -eq $quote -and $text[$index + 2] -eq $quote
+      $index += $(if ($triple) { 3 } else { 1 })
+      $escaped = $false
+      while ($index -lt $text.Length) {
+        if ($quote -eq '"' -and $escaped) { $escaped = $false; $index++; continue }
+        if ($quote -eq '"' -and $text[$index] -eq '\') { $escaped = $true; $index++; continue }
+        if ($triple -and $index + 2 -lt $text.Length -and
+          $text[$index] -eq $quote -and $text[$index + 1] -eq $quote -and $text[$index + 2] -eq $quote) {
+          $index += 3
+          break
+        }
+        if (-not $triple -and $text[$index] -eq $quote) { $index++; break }
+        $index++
+      }
+      continue
+    }
+    $name = "prefix_rule"
+    $nameLength = $name.Length
+    $nameMatches = $index + $nameLength -le $text.Length -and
+      [string]::Compare($text, $index, $name, 0, $nameLength, $true, [cultureinfo]::InvariantCulture) -eq 0
+    $leftBoundary = $index -eq 0 -or -not [char]::IsLetterOrDigit($text[$index - 1]) -and $text[$index - 1] -ne '_'
+    $rightIndex = $index + $nameLength
+    $rightBoundary = $rightIndex -ge $text.Length -or -not [char]::IsLetterOrDigit($text[$rightIndex]) -and $text[$rightIndex] -ne '_'
+    if (-not ($nameMatches -and $leftBoundary -and $rightBoundary)) { $index++; continue }
+    $open = $rightIndex
+    while ($open -lt $text.Length -and [char]::IsWhiteSpace($text[$open])) { $open++ }
+    if ($open -ge $text.Length -or $text[$open] -ne '(') { $index = $rightIndex; continue }
     $depth = 0
     $inString = $false
     $quote = [char]0
+    $triple = $false
     $escaped = $false
     $comment = $false
     $closed = $false
     $limit = [math]::Min($text.Length - 1, $open + $MaxRuleChars - 1)
-    for ($index = $open; $index -le $limit; $index++) {
-      $character = $text[$index]
+    for ($cursor = $open; $cursor -le $limit; $cursor++) {
+      $character = $text[$cursor]
       if ($comment) {
         if ($character -eq "`n") { $comment = $false }
         continue
       }
       if ($inString) {
         if ($escaped) { $escaped = $false; continue }
-        if ($character -eq '\') { $escaped = $true; continue }
-        if ($character -eq $quote) { $inString = $false }
+        if ($quote -eq '"' -and $character -eq '\') { $escaped = $true; continue }
+        if ($triple -and $cursor + 2 -lt $text.Length -and
+          $text[$cursor] -eq $quote -and $text[$cursor + 1] -eq $quote -and $text[$cursor + 2] -eq $quote) {
+          $inString = $false
+          $cursor += 2
+        } elseif (-not $triple -and $character -eq $quote) { $inString = $false }
         continue
       }
       if ($character -eq '#') { $comment = $true; continue }
-      if ($character -eq '"' -or $character -eq "'") { $inString = $true; $quote = $character; continue }
+      if ($character -eq '"' -or $character -eq "'") {
+        $inString = $true
+        $quote = $character
+        $triple = $cursor + 2 -lt $text.Length -and
+          $text[$cursor + 1] -eq $quote -and $text[$cursor + 2] -eq $quote
+        if ($triple) { $cursor += 2 }
+        continue
+      }
       if ($character -eq '(') { $depth++; continue }
       if ($character -eq ')') {
         $depth--
         if ($depth -eq 0) {
-          $blocks.Add($text.Substring([int]$match.Index, $index - [int]$match.Index + 1))
-          $search = $index + 1
+          $blocks.Add($text.Substring($index, $cursor - $index + 1))
+          $index = $cursor + 1
           $closed = $true
           break
         }
@@ -544,7 +644,7 @@ function Get-BoundedPrefixRuleBlocks {
     }
     if (-not $closed) { return [pscustomobject]@{ Blocks = @($blocks); Complete = $false } }
   }
-  [pscustomobject]@{ Blocks = @($blocks); Complete = ($blocks.Count -lt $MaxRules) }
+  [pscustomobject]@{ Blocks = @($blocks); Complete = $true }
 }
 
 function Get-RuleHealth {
@@ -562,15 +662,17 @@ function Get-RuleHealth {
     FilesEligible = 0
     FilesSelected = 0
     CoverageCapped = $false
+    InventoryTimedOut = $false
     ParseFailures = 0
   }
   $rulesRoot = Join-Path $CodexHome "rules"
-  if (-not (Test-Path -LiteralPath $rulesRoot -PathType Container)) {
+  if (-not (Test-Path -LiteralPath $rulesRoot -PathType Container) -or
+      -not (Test-ChronosReadPath $rulesRoot)) {
     $result.Observation = "not_found"
     return [pscustomobject]$result
   }
   $eligibleFiles = @(Get-ChildItem -LiteralPath $rulesRoot -File -ErrorAction SilentlyContinue | Where-Object {
-      $_.Extension -in @(".rules", ".toml")
+      $_.Extension -in @(".rules", ".toml") -and (Test-ChronosReadPath $_.FullName)
     } | Sort-Object FullName)
   $result.FilesEligible = $eligibleFiles.Count
   $files = @($eligibleFiles | Select-Object -First 32)
@@ -581,8 +683,10 @@ function Get-RuleHealth {
     return [pscustomobject]$result
   }
   $lengthTotal = 0L
+  $remainingRules = 2048
   foreach ($file in $files) {
-    $parsedRules = Get-BoundedPrefixRuleBlocks $file.FullName
+    if ($remainingRules -le 0) { $result.CoverageCapped = $true; break }
+    $parsedRules = Get-BoundedPrefixRuleBlocks $file.FullName -MaxRules $remainingRules
     if (-not $parsedRules.Complete) { $result.ParseFailures++; $result.CoverageCapped = $true }
     foreach ($block in @($parsedRules.Blocks)) {
       $trimmed = $block.Trim()
@@ -607,12 +711,13 @@ function Get-RuleHealth {
         $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
       if ($secretShape) { $result.CredentialShaped++ }
     }
+    $remainingRules -= @($parsedRules.Blocks).Count
   }
   $result.Observation = if ($result.CoverageCapped) { "observed_partial" } else { "observed" }
   if ($result.Count -gt 0) { $result.AverageLength = [math]::Round($lengthTotal / [double]$result.Count, 1) }
   $result.Status = if ($result.CredentialShaped -gt 0) { "CRITICAL" } elseif (
     $result.Monolithic -gt 0 -or $result.BroadInterpreter -gt 0
-  ) { "WARNING" } else { "HEALTHY" }
+  ) { "WARNING" } elseif ($result.CoverageCapped) { "WARNING" } else { "HEALTHY" }
   [pscustomobject]$result
 }
 
@@ -623,7 +728,9 @@ function Get-CodexConfigurationHealth {
     PrimaryReasoningDefault = "unavailable"
   }
   $path = Join-Path $CodexHome "config.toml"
-  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]$result }
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or -not (Test-ChronosReadPath $path)) {
+    return [pscustomobject]$result
+  }
   foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
     if ($line -match '^\s*approvals_reviewer\s*=\s*["'']([a-zA-Z0-9_.-]{1,64})["'']') {
       $result.ConfiguredReviewer = $Matches[1].ToLowerInvariant()
@@ -782,6 +889,8 @@ function Get-QuotaHealth {
     CacheWriteM = $null
     CacheWriteObserved = $null
     CacheWriteObservation = "unsupported_schema"
+    CacheWriteAvailableFiles = 0
+    CacheWriteSelectedFiles = 0
     ReasoningPercent = $null
     MaxContextPercent = $null
     HighEffortSessions = 0
@@ -877,12 +986,19 @@ function Get-QuotaHealth {
     RolloutForkFilesObserved = 0
     RolloutNearSizeClusterFiles = 0
     RolloutMaxTaskAgeDays = $null
+    RolloutAgeObservation = "unavailable"
+    HeadTruncatedFiles = 0
+    HeadMetadataUnavailableFiles = 0
     RolloutTop1ReviewShare = $null
     RolloutTop3ReviewShare = $null
     SpawnForkAll = 0
     SpawnForkAllDefaulted = 0
     SpawnForkNone = 0
     SpawnForkBounded = 0
+    SpawnForkUnknown = 0
+    SpawnSchemaV1 = 0
+    SpawnSchemaV2 = 0
+    SpawnSchemaUnknown = 0
     SpawnHighEffort = 0
     SpawnMaxEffort = 0
     SpawnInheritedTurnsObserved = 0
@@ -942,6 +1058,7 @@ function Get-QuotaHealth {
   $health.FilesEligible = $sessionSelection.EligibleCount
   $health.FilesSelected = $sessionSelection.SelectedCount
   $health.CoverageCapped = $sessionSelection.Capped
+  $health.InventoryTimedOut = $sessionSelection.InventoryTimedOut
   $multiAgentV2Seen = $false
   $crossFileRecords = @{}
   $crossFileCompactions = @{}
@@ -1046,17 +1163,24 @@ function Get-QuotaHealth {
     $fileTurnCount = 0
     $currentTurnIsReviewer = $false
     $fileFirstRecordTimestamp = [DateTimeOffset]::MaxValue
+    $fileMultiAgentSchema = "unknown"
     if ([long]$file.Length -gt 2097152L) {
+      $health.HeadTruncatedFiles++
+      $headMetadataFound = $false
       $headText = Get-BoundedFileHead -Path $file.FullName
       foreach ($headLine in @($headText -split "`r?`n" | Select-Object -First 256)) {
         if ([string]::IsNullOrWhiteSpace($headLine)) { continue }
         try { $headRecord = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if ($headRecord.type -ne "session_meta") { continue }
+        $headMetadataFound = $true
         $sessionIdentifier = Get-SafeCategory $headRecord.payload @("thread_id", "session_id", "id")
         if ($sessionIdentifier) { $fileSessionKey = Get-TextFingerprint $sessionIdentifier }
         $versionProperty = if ($headRecord.payload) { $headRecord.payload.PSObject.Properties["multi_agent_version"] } else { $null }
         if ($versionProperty -and [string]$versionProperty.Value -match '^\d+$' -and [int]$versionProperty.Value -ge 2) {
           $multiAgentV2Seen = $true
+          $fileMultiAgentSchema = "v2"
+        } elseif ($versionProperty -and [string]$versionProperty.Value -eq "1") {
+          $fileMultiAgentSchema = "v1"
         }
         $sourceProperty = if ($headRecord.payload) { $headRecord.payload.PSObject.Properties["source"] } else { $null }
         if ($sourceProperty -and $sourceProperty.Value -is [pscustomobject] -and $sourceProperty.Value.PSObject.Properties["subagent"]) {
@@ -1078,6 +1202,7 @@ function Get-QuotaHealth {
         }
         break
       }
+      if (-not $headMetadataFound) { $health.HeadMetadataUnavailableFiles++ }
     }
     $lines = @($tail -split "`r?`n")
     if (-not $tail.EndsWith("`n", [System.StringComparison]::Ordinal)) {
@@ -1123,13 +1248,13 @@ function Get-QuotaHealth {
       }
 
       $recordTimestamp = Get-RecordTimestamp $record
+      if ($seenRecords.ContainsKey($recordHash)) {
+        $health.DuplicateRecords++
+        continue
+      }
+      $seenRecords[$recordHash] = $true
       if ($recordTimestamp) {
         if ($recordTimestamp -lt $fileFirstRecordTimestamp) { $fileFirstRecordTimestamp = $recordTimestamp }
-        if ($seenRecords.ContainsKey($recordHash)) {
-          $health.DuplicateRecords++
-          continue
-        }
-        $seenRecords[$recordHash] = $true
         if ($previousTimestamp -ne [DateTimeOffset]::MinValue -and $recordTimestamp -lt $previousTimestamp) {
           $health.OutOfOrderRecords++
         }
@@ -1149,6 +1274,9 @@ function Get-QuotaHealth {
         $versionProperty = if ($record.payload) { $record.payload.PSObject.Properties["multi_agent_version"] } else { $null }
         if ($versionProperty -and [string]$versionProperty.Value -match '^\d+$' -and [int]$versionProperty.Value -ge 2) {
           $multiAgentV2Seen = $true
+          $fileMultiAgentSchema = "v2"
+        } elseif ($versionProperty -and [string]$versionProperty.Value -eq "1") {
+          $fileMultiAgentSchema = "v1"
         }
         $sourceProperty = if ($record.payload) { $record.payload.PSObject.Properties["source"] } else { $null }
         if ($sourceProperty -and $sourceProperty.Value -is [pscustomobject] -and $sourceProperty.Value.PSObject.Properties["subagent"]) {
@@ -1248,16 +1376,22 @@ function Get-QuotaHealth {
             $approvalClass.CorrelationFingerprint
           } else { $approvalClass.Signature }
           if ($approvalStateKey) {
-            if ($approvalStates.ContainsKey($approvalStateKey)) {
-              $priorApproval = $approvalStates[$approvalStateKey]
+            $priorApproval = if ($approvalStates.ContainsKey($approvalStateKey)) {
+              $approvalStates[$approvalStateKey]
+            } elseif ($approvalClass.Signature -and $approvalStates.ContainsKey($approvalClass.Signature)) {
+              $approvalStates[$approvalClass.Signature]
+            } else { $null }
+            if ($priorApproval) {
               if ($priorApproval.decision -eq "allowed" -and $approvalClass.State -eq "pending" -and -not $priorApproval.resolved) {
                 $health.ApprovalPersistenceRetries++
               }
             }
-            $approvalStates[$approvalStateKey] = @{
-              decision = if ($approvalStates.ContainsKey($approvalStateKey)) { $approvalStates[$approvalStateKey].decision } else { "unknown" }
+            $approvalState = @{
+              decision = if ($priorApproval) { $priorApproval.decision } else { "unknown" }
               resolved = $false
             }
+            $approvalStates[$approvalStateKey] = $approvalState
+            if ($approvalClass.Signature) { $approvalStates[$approvalClass.Signature] = $approvalState }
           }
         }
         $approvalDecision = Get-ApprovalDecisionRecord $record
@@ -1342,12 +1476,20 @@ function Get-QuotaHealth {
         if ($functionName -eq "spawn_agent") {
           $health.SpawnCalls++
           $fileSpawns++
+          if ($fileMultiAgentSchema -eq "v2") { $health.SpawnSchemaV2++ }
+          elseif ($fileMultiAgentSchema -eq "v1") { $health.SpawnSchemaV1++ }
+          else { $health.SpawnSchemaUnknown++ }
           if ($fileParentLinkSeen) { $health.ChildAgentSpawns++ } else { $health.RootAgentSpawns++ }
           $forkProperty = if ($arguments) { $arguments.PSObject.Properties["fork_turns"] } else { $null }
           $forkValue = if ($forkProperty -and $null -ne $forkProperty.Value) {
             ([string]$forkProperty.Value).Trim().ToLowerInvariant()
-          } else { "all" }
-          if (-not $forkProperty) { $health.SpawnForkAllDefaulted++ }
+          } else { "unknown" }
+          if (-not $forkProperty -and $fileMultiAgentSchema -eq "v1") {
+            $forkValue = "all"
+            $health.SpawnForkAllDefaulted++
+          } elseif (-not $forkProperty) {
+            $health.SpawnForkUnknown++
+          }
           if ($forkValue -eq "all") {
             $health.SpawnForkAll++
             $health.SpawnInheritedTurnsObserved += $fileTurnCount
@@ -1396,6 +1538,7 @@ function Get-QuotaHealth {
 
     if ($lastSnapshot) {
       $health.Files++
+      $health.CacheWriteSelectedFiles++
       $aggregateSnapshot = $lastSnapshot
       if ($fileInheritedSnapshot -and $lastSnapshot.TotalTokens -ge $fileInheritedSnapshot.TotalTokens) {
         $aggregateSnapshot = [pscustomobject]@{
@@ -1412,6 +1555,7 @@ function Get-QuotaHealth {
       $cachedInputTokens += [long]$aggregateSnapshot.CachedInputTokens
       if ($aggregateSnapshot.CacheWriteAvailable) {
         $cacheWriteAvailableFiles++
+        $health.CacheWriteAvailableFiles++
         $cacheWriteTokens += [long]$aggregateSnapshot.CacheWriteTokens
       }
       $outputTokens += [long]$aggregateSnapshot.OutputTokens
@@ -1534,6 +1678,9 @@ function Get-QuotaHealth {
     $health.RolloutMaxTaskAgeDays = [math]::Round(
       [double](@($fileStats | Measure-Object AgeDays -Maximum).Maximum), 1
     )
+    $health.RolloutAgeObservation = if ($health.HeadMetadataUnavailableFiles -gt 0) {
+      "partial_head_metadata"
+    } else { "observed" }
     $lineageReviews = @{}
     foreach ($stat in $fileStats) {
       $root = $stat.SessionKey
@@ -1719,7 +1866,11 @@ function Get-QuotaHealth {
   if ($cacheWriteAvailableFiles -gt 0) {
     $health.CacheWriteM = [math]::Round($cacheWriteTokens / 1000000.0, 1)
     $health.CacheWriteObserved = $cacheWriteTokens -gt 0
-    $health.CacheWriteObservation = "observed"
+    $health.CacheWriteObservation = if ($cacheWriteAvailableFiles -eq $health.CacheWriteSelectedFiles) {
+      "observed"
+    } else {
+      "observed_partial_schema"
+    }
   }
   $health.ReasoningPercent = if ($outputTokens -gt 0) {
     [math]::Round(100.0 * $reasoningTokens / $outputTokens, 1)
@@ -1870,7 +2021,7 @@ function Get-LogDbLevel($metrics) {
     ($null -ne $metrics.InsertRate -and $metrics.InsertRate -ge 500)
   ) { return "CRITICAL" }
 
-  if (-not $metrics.QueryOk) { return "WARNING" }
+  if ($metrics.Availability -ne "full") { return "WARNING" }
 
   if (
     $metrics.DatabaseGiB -ge 0.5 -or $metrics.ReclaimableGiB -ge 0.25 -or
@@ -1885,7 +2036,8 @@ function Get-LogDbLevel($metrics) {
 function Get-LogDbReasons($metrics, [string]$Level) {
   if (-not $metrics.Present) { return "unavailable" }
   $reasons = [System.Collections.Generic.List[string]]::new()
-  if (-not $metrics.QueryOk) { $reasons.Add("query-unavailable") }
+  if ($metrics.Availability -eq "partial") { $reasons.Add("query-partial") }
+  elseif ($metrics.Availability -eq "unavailable") { $reasons.Add("query-unavailable") }
   if ($Level -eq "CRITICAL") {
     if ($metrics.DatabaseGiB -ge 4) { $reasons.Add("database-size-4gib") }
     if ($metrics.ReclaimableGiB -ge 2) { $reasons.Add("reclaimable-2gib") }
@@ -2018,14 +2170,21 @@ if ($Action -eq "inspect") {
     $quotaHealth.Advice)
   $efficiencyFields = [ordered]@{
     headlineScope = 'machine_health'
+    processSampleSeconds = $SampleSeconds
+    processOwnershipObservation = 'executable_name_only_unverified'
+    filesystemHelperObservation = 'known_markers_15m'
     resourceDiagnosticLevel = $resourceLevel
     overallDiagnosticLevel = $overallLevel
+    logDbAvailability = $logMetrics.Availability
     logDbQueryOk = $logMetrics.QueryOk
     logDbPageMetricsOk = $logMetrics.PageMetricsOk
     logDbSequenceOk = $logMetrics.SequenceOk
     logDbLevelRowsOk = $logMetrics.LevelRowsOk
     cacheWriteObservation = $quotaHealth.CacheWriteObservation
+    cacheWriteAvailableFiles = $quotaHealth.CacheWriteAvailableFiles
+    cacheWriteSelectedFiles = $quotaHealth.CacheWriteSelectedFiles
     rolloutRateSemantics = 'file_lifetime_average_not_measured_delta'
+    rolloutInventoryTimedOut = $quotaHealth.InventoryTimedOut
     reviewerConcurrencySemantics = 'file_activity_span_estimate'
     metricSource = $quotaHealth.ApprovalMetricSource
     dashboardEquivalence = $quotaHealth.DashboardEquivalence
@@ -2081,12 +2240,19 @@ if ($Action -eq "inspect") {
     ruleSecretDiagnosis = $quotaHealth.RuleSecretDiagnosis
     ruleBroadInterpreterDiagnosis = $quotaHealth.RuleBroadInterpreterDiagnosis
     rolloutMaxTaskAgeDays = $quotaHealth.RolloutMaxTaskAgeDays
+    rolloutAgeObservation = $quotaHealth.RolloutAgeObservation
+    rolloutHeadTruncatedFiles = $quotaHealth.HeadTruncatedFiles
+    rolloutHeadMetadataUnavailableFiles = $quotaHealth.HeadMetadataUnavailableFiles
     rolloutTop1ReviewShare = $quotaHealth.RolloutTop1ReviewShare
     rolloutTop3ReviewShare = $quotaHealth.RolloutTop3ReviewShare
     spawnForkAll = $quotaHealth.SpawnForkAll
     spawnForkAllDefaulted = $quotaHealth.SpawnForkAllDefaulted
     spawnForkNone = $quotaHealth.SpawnForkNone
     spawnForkBounded = $quotaHealth.SpawnForkBounded
+    spawnForkUnknown = $quotaHealth.SpawnForkUnknown
+    spawnSchemaV1 = $quotaHealth.SpawnSchemaV1
+    spawnSchemaV2 = $quotaHealth.SpawnSchemaV2
+    spawnSchemaUnknown = $quotaHealth.SpawnSchemaUnknown
     spawnHighEffort = $quotaHealth.SpawnHighEffort
     spawnMaxEffort = $quotaHealth.SpawnMaxEffort
     spawnInheritedTurnsObserved = $quotaHealth.SpawnInheritedTurnsObserved

@@ -1,10 +1,12 @@
 <p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
 
-# Chronos
+# Chronos - Codex diagnostics and read-worker coordination
 
-Chronos is a lean, on-demand Codex plugin for Windows sessions that become slow after hours or days of parallel work. Its optional Governor delegates bounded low-complexity repository work without turning Chronos into an autonomous agent loop.
-
-It checks current resource and diagnostic-log health, explains signs of degradation, and offers conservative recovery steps without continuous monitoring.
+Detect runaway Codex auto-review, approval loops, quota and context
+amplification, broken permission rules, rollout duplication, diagnostic SQLite
+churn, and Windows process degradation. Chronos keeps machine health separate
+from workflow diagnostics and coordinates bounded read-only workers without
+creating an autonomous agent loop.
 
 ## What it does
 
@@ -36,7 +38,7 @@ its SQLite databases, terminate processes, or block active work.
 
 ## Install in Codex
 
-Until Chronos is listed in the Plugins Directory, install it from its public marketplace:
+Install it from its public marketplace:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
@@ -81,7 +83,7 @@ The public [architecture](https://github.com/FaxanFM/chronos/blob/main/docs/ARCH
 [test coverage](https://github.com/FaxanFM/chronos/blob/main/docs/TEST-COVERAGE.md),
 [release operations](https://github.com/FaxanFM/chronos/blob/main/docs/OPERATIONS.md),
 and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/CALIBRATION-METHODOLOGY.md)
-describe the v0.7.0 engineering controls.
+describe the v0.7.1 engineering controls.
 The public [v0.7.0 audit response](https://github.com/FaxanFM/chronos/blob/main/docs/AUDIT-RESPONSE-2026-08-09.md)
 separates fixed, contained, and deferred findings.
 

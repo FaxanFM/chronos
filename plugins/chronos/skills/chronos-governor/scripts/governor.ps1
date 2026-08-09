@@ -64,6 +64,9 @@ function Invoke-SanitizedGit {
   param([string[]]$Arguments, [bool]$SuppressError)
   $names = @(
     'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+    'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM',
+    'GIT_ATTR_NOSYSTEM', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
     'GIT_EXTERNAL_DIFF', 'GIT_DIFF_OPTS', 'GIT_PAGER', 'GIT_TRACE',
     'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_OPTIONAL_LOCKS'
   )
@@ -71,6 +74,15 @@ function Invoke-SanitizedGit {
   foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
   try {
     $env:GIT_CONFIG_COUNT = '0'
+    $env:GIT_CONFIG_GLOBAL = $null
+    $env:GIT_CONFIG_SYSTEM = $null
+    $env:GIT_CONFIG_NOSYSTEM = $null
+    $env:GIT_ATTR_NOSYSTEM = '1'
+    $env:GIT_DIR = $null
+    $env:GIT_WORK_TREE = $null
+    $env:GIT_INDEX_FILE = $null
+    $env:GIT_OBJECT_DIRECTORY = $null
+    $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $null
     $env:GIT_EXTERNAL_DIFF = $null
     $env:GIT_DIFF_OPTS = $null
     $env:GIT_PAGER = 'cat'
@@ -95,6 +107,102 @@ function Invoke-SanitizedGit {
     foreach ($name in $names) {
       [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
     }
+  }
+}
+
+function Invoke-SanitizedGitBytes {
+  param(
+    [string[]]$Arguments,
+    [int]$MaxBytes = 8388608,
+    [int]$TimeoutMilliseconds = 5000
+  )
+  $gitArguments = @(
+    '-c', 'core.fsmonitor=false',
+    '-c', 'core.hooksPath=NUL',
+    '-c', 'diff.external=',
+    '-c', 'interactive.diffFilter=',
+    '-c', 'pager.diff=false'
+  ) + $Arguments
+  if (@($gitArguments | Where-Object { $_ -match '[\s"\x00-\x1f]' }).Count -gt 0) {
+    Throw-GovernorError "git_argument_unsupported"
+  }
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = 'git'
+  $startInfo.WorkingDirectory = $script:RepositoryRoot
+  $startInfo.Arguments = $gitArguments -join ' '
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $names = @(
+      'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+      'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM',
+      'GIT_ATTR_NOSYSTEM', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+      'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+      'GIT_EXTERNAL_DIFF', 'GIT_DIFF_OPTS', 'GIT_PAGER', 'GIT_TRACE',
+      'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_OPTIONAL_LOCKS'
+    )
+  $saved = @{}
+  foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+  $env:GIT_CONFIG_COUNT = '0'
+  $env:GIT_CONFIG_GLOBAL = $null
+  $env:GIT_CONFIG_SYSTEM = $null
+  $env:GIT_CONFIG_NOSYSTEM = $null
+  $env:GIT_ATTR_NOSYSTEM = '1'
+  $env:GIT_DIR = $null
+  $env:GIT_WORK_TREE = $null
+  $env:GIT_INDEX_FILE = $null
+  $env:GIT_OBJECT_DIRECTORY = $null
+  $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $null
+  $env:GIT_EXTERNAL_DIFF = $null
+  $env:GIT_DIFF_OPTS = $null
+  $env:GIT_PAGER = 'cat'
+  $env:GIT_TRACE = $null
+  $env:GIT_TRACE2 = $null
+  $env:GIT_TRACE2_EVENT = $null
+  $env:GIT_OPTIONAL_LOCKS = '0'
+
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  $memory = [System.IO.MemoryStream]::new()
+  $timer = [System.Diagnostics.Stopwatch]::StartNew()
+  try {
+    if (-not $process.Start()) { Throw-GovernorError "git_command_failed" }
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $buffer = New-Object byte[] 8192
+    while ($true) {
+      $remaining = $TimeoutMilliseconds - [int]$timer.ElapsedMilliseconds
+      if ($remaining -le 0) {
+        try { $process.Kill() } catch {}
+        Throw-GovernorError "workspace_fingerprint_timeout"
+      }
+      $readTask = $process.StandardOutput.BaseStream.ReadAsync($buffer, 0, $buffer.Length)
+      if (-not $readTask.Wait($remaining)) {
+        try { $process.Kill() } catch {}
+        Throw-GovernorError "workspace_fingerprint_timeout"
+      }
+      $count = $readTask.Result
+      if ($count -eq 0) { break }
+      if ($memory.Length + $count -gt $MaxBytes) {
+        try { $process.Kill() } catch {}
+        Throw-GovernorError "workspace_fingerprint_limit_exceeded"
+      }
+      $memory.Write($buffer, 0, $count)
+    }
+    $remaining = $TimeoutMilliseconds - [int]$timer.ElapsedMilliseconds
+    if ($remaining -le 0 -or -not $process.WaitForExit($remaining)) {
+      try { $process.Kill() } catch {}
+      Throw-GovernorError "workspace_fingerprint_timeout"
+    }
+    if ($process.ExitCode -ne 0) { Throw-GovernorError "git_command_failed" }
+    $memory.ToArray()
+  } finally {
+    foreach ($name in $names) {
+      [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+    }
+    $timer.Stop()
+    $memory.Dispose()
+    $process.Dispose()
   }
 }
 
@@ -440,45 +548,121 @@ function Get-HeadState {
   @{ mode = 'detached'; reference_hash = Get-TextHash ('detached:' + $commit); commit = $commit }
 }
 
-function Get-TaskChanges {
-  param([string]$BaseCommit)
-  $trackedText = Invoke-Git @('diff', '--no-ext-diff', '--no-textconv', '--name-only', '--diff-filter=ACDMRTUXB', $BaseCommit, '--')
-  $untrackedText = Invoke-Git @('ls-files', '--others', '--exclude-standard')
-  $paths = @()
-  if ($trackedText) { $paths += @($trackedText -split "`r?`n") }
-  if ($untrackedText) { $paths += @($untrackedText -split "`r?`n") }
-  @($paths | Where-Object { $_ } | ForEach-Object { Normalize-Scope $_ } | Sort-Object -Unique)
+function Add-FingerprintText {
+  param(
+    [System.Security.Cryptography.HashAlgorithm]$Hasher,
+    [string]$Value
+  )
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value + "`n")
+  [void]$Hasher.TransformBlock($bytes, 0, $bytes.Length, $bytes, 0)
+}
+
+function Get-BoundedRawFileDigest {
+  param(
+    [string]$Path,
+    [System.Diagnostics.Stopwatch]$Timer,
+    [ref]$TotalBytes,
+    [int64]$MaxFileBytes,
+    [int64]$MaxTotalBytes,
+    [int]$TimeoutMilliseconds
+  )
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+  if ($item.Length -gt $MaxFileBytes -or $TotalBytes.Value + $item.Length -gt $MaxTotalBytes) {
+    Throw-GovernorError "workspace_fingerprint_limit_exceeded"
+  }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $stream = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+  try {
+    $buffer = New-Object byte[] 65536
+    $observed = [int64]0
+    while (($count = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+      if ($Timer.ElapsedMilliseconds -gt $TimeoutMilliseconds) {
+        Throw-GovernorError "workspace_fingerprint_timeout"
+      }
+      $observed += $count
+      if ($observed -gt $MaxFileBytes -or $TotalBytes.Value + $observed -gt $MaxTotalBytes) {
+        Throw-GovernorError "workspace_fingerprint_limit_exceeded"
+      }
+      [void]$sha.TransformBlock($buffer, 0, $count, $buffer, 0)
+    }
+    [void]$sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+    $TotalBytes.Value += $observed
+    @{
+      bytes = $observed
+      hash = ([System.BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
+      attributes = [int64]$item.Attributes
+    }
+  } finally {
+    $stream.Dispose()
+    $sha.Dispose()
+  }
 }
 
 function Get-WorkspaceFingerprint {
   param([string]$BaseCommit)
-  $head = Get-HeadState
-  $status = Invoke-Git @('status', '--porcelain=v1', '--untracked-files=all')
-  $diff = Invoke-Git @('diff', '--no-ext-diff', '--no-textconv', '--full-index', $BaseCommit, '--')
-  if ($status.Length -gt 8388608 -or $diff.Length -gt 8388608) {
-    Throw-GovernorError "workspace_fingerprint_limit_exceeded"
-  }
-  $untracked = Invoke-Git @('ls-files', '--others', '--exclude-standard')
-  $untrackedParts = @()
-  if ($untracked) {
-    foreach ($relative in @($untracked -split "`r?`n" | Where-Object { $_ } | Sort-Object -Unique)) {
-      $normalized = Normalize-Scope $relative
-      $full = Join-Path $script:RepositoryRoot $normalized
-      if (Test-ReparsePath $normalized) {
-        $untrackedParts += $normalized + ':reparse'
-      } elseif (Test-Path -LiteralPath $full -PathType Leaf) {
-        $untrackedParts += $normalized + ':' + (Get-FileHashValue $full)
-      } else {
-        $untrackedParts += $normalized + ':non_file'
-      }
+  $maxFiles = 20000
+  $maxTotalBytes = [int64](128MB)
+  $maxFileBytes = [int64](16MB)
+  $timeoutMilliseconds = 10000
+  $timer = [System.Diagnostics.Stopwatch]::StartNew()
+  try {
+    $head = Get-HeadState
+    $indexBytes = Invoke-SanitizedGitBytes @('ls-files', '--stage', '-z') 8388608 5000
+    $pathBytes = Invoke-SanitizedGitBytes @('ls-files', '--cached', '--others', '--exclude-standard', '-z') 8388608 5000
+    $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    try {
+      $pathText = $utf8.GetString($pathBytes)
+    } catch {
+      Throw-GovernorError "workspace_fingerprint_path_encoding"
     }
+    $paths = @($pathText.Split([char]0) | Where-Object { $_ } | Sort-Object -Unique)
+    if ($paths.Count -gt $maxFiles) { Throw-GovernorError "workspace_fingerprint_limit_exceeded" }
+
+    $indexSha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $indexDigest = ([System.BitConverter]::ToString($indexSha.ComputeHash($indexBytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+      $indexSha.Dispose()
+    }
+    $workspaceSha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      Add-FingerprintText $workspaceSha ('format=raw-manifest-v1')
+      Add-FingerprintText $workspaceSha ('base=' + $BaseCommit)
+      Add-FingerprintText $workspaceSha ('head_mode=' + $head.mode)
+      Add-FingerprintText $workspaceSha ('head_reference=' + $head.reference_hash)
+      Add-FingerprintText $workspaceSha ('head_commit=' + $head.commit)
+      Add-FingerprintText $workspaceSha ('index_bytes=' + $indexBytes.Length)
+      Add-FingerprintText $workspaceSha ('index_sha256=' + $indexDigest)
+      $totalBytes = [int64]0
+      foreach ($relative in $paths) {
+        if ($timer.ElapsedMilliseconds -gt $timeoutMilliseconds) {
+          Throw-GovernorError "workspace_fingerprint_timeout"
+        }
+        $normalized = Normalize-Scope $relative
+        if (Test-ReparsePath $normalized) { Throw-GovernorError "workspace_fingerprint_reparse_path" }
+        $full = [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $normalized))
+        if (Test-Path -LiteralPath $full -PathType Leaf) {
+          $digest = Get-BoundedRawFileDigest $full $timer ([ref]$totalBytes) $maxFileBytes $maxTotalBytes $timeoutMilliseconds
+          Add-FingerprintText $workspaceSha ($normalized + "`0file`0" + $digest.attributes + "`0" + $digest.bytes + "`0" + $digest.hash)
+        } elseif (Test-Path -LiteralPath $full) {
+          Throw-GovernorError "workspace_fingerprint_non_file"
+        } else {
+          Add-FingerprintText $workspaceSha ($normalized + "`0missing")
+        }
+      }
+      [void]$workspaceSha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+      ([System.BitConverter]::ToString($workspaceSha.Hash)).Replace('-', '').ToLowerInvariant()
+    } finally {
+      $workspaceSha.Dispose()
+    }
+  } finally {
+    $timer.Stop()
   }
-  Get-TextHash ($head.mode + "`n" + $head.reference_hash + "`n" + $head.commit + "`n" + $status + "`n" + $diff + "`n" + ($untrackedParts -join "`n"))
 }
 
 function New-State {
   @{
-    version = 3
+    version = 4
     state_revision = [int64]0
     workers = @{}
     tasks = @{}
@@ -510,10 +694,33 @@ function Read-State {
     if ($null -eq $state.state_revision) { $state.state_revision = [int64]0 }
     if ($null -eq $state.plans) { $state.plans = @{} }
   }
-  if ($state.version -ne 3 -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases -or $null -eq $state.plans) {
+  if ($state.version -notin @(3, 4) -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases -or $null -eq $state.plans) {
     Throw-GovernorError "state_version_unsupported"
   }
   if ($null -eq $state.state_revision) { Throw-GovernorError "state_version_unsupported" }
+  foreach ($plan in @($state.plans.Values)) {
+    if ($plan.access_mode -eq 'write' -and $plan.status -eq 'issued') {
+      $plan.status = 'quarantined_legacy_write'
+      $plan.quarantined_at = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+  }
+  foreach ($lease in @($state.leases.Values)) {
+    if (
+      $lease.access_mode -eq 'write' -and
+      $lease.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')
+    ) {
+      $lease.legacy_status = [string]$lease.status
+      $lease.status = 'blocked_legacy_write'
+      $lease.quarantined_at = [DateTimeOffset]::UtcNow.ToString('o')
+      if ($state.tasks.ContainsKey([string]$lease.task_id)) {
+        $state.tasks[[string]$lease.task_id].status = 'blocked_legacy_write'
+      }
+      if ($state.workers.ContainsKey([string]$lease.worker_id)) {
+        $state.workers[[string]$lease.worker_id].status = 'blocked_legacy_write'
+      }
+    }
+  }
+  $state.version = 4
   $state
 }
 
@@ -656,7 +863,15 @@ function Release-StateLock {
 
 function Get-ActiveLeases {
   param([hashtable]$State)
-  @($State.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified') })
+  @($State.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified', 'blocked_legacy_write') })
+}
+
+function Get-BlockedLegacyWriteLeases {
+  param([hashtable]$State)
+  @($State.leases.Values | Where-Object {
+      $_.access_mode -eq 'write' -and
+      $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified', 'blocked_legacy_write')
+    })
 }
 
 function Test-LeaseExpired {
@@ -678,11 +893,14 @@ try {
   if (-not (Test-Path -LiteralPath $resolvedRepository -PathType Container)) {
     Throw-GovernorError "repository_unavailable"
   }
-  $rawRoot = (& git -c core.fsmonitor=false -c core.hooksPath=NUL -C $resolvedRepository rev-parse --show-toplevel 2>$null).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
+  $script:RepositoryRoot = Resolve-CanonicalPath $resolvedRepository
+  $rootResult = Try-Invoke-Git @('rev-parse', '--show-toplevel')
+  $rawRoot = $rootResult.output
+  if (-not $rootResult.ok -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
   $script:RepositoryRoot = Resolve-CanonicalPath $rawRoot
-  $rawCommonDir = (& git -c core.fsmonitor=false -c core.hooksPath=NUL -C $script:RepositoryRoot rev-parse --path-format=absolute --git-common-dir 2>$null).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $rawCommonDir) { Throw-GovernorError "git_common_dir_unavailable" }
+  $commonResult = Try-Invoke-Git @('rev-parse', '--path-format=absolute', '--git-common-dir')
+  $rawCommonDir = $commonResult.output
+  if (-not $commonResult.ok -or -not $rawCommonDir) { Throw-GovernorError "git_common_dir_unavailable" }
   $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir
   $repositoryId = Get-TextHash $script:GitCommonDir.ToLowerInvariant()
   $workspaceId = Get-TextHash ($script:RepositoryRoot.ToLowerInvariant() + "`n" + $script:GitCommonDir.ToLowerInvariant())
@@ -719,6 +937,7 @@ try {
       workspace_id = $workspaceId
       active_workers = $active.Count
       active_writers = @($active | Where-Object { $_.access_mode -eq 'write' }).Count
+      blocked_legacy_write_leases = @(Get-BlockedLegacyWriteLeases $state).Count
       expired_leases = @($active | Where-Object { Test-LeaseExpired $_ }).Count
       idle_workers = @($state.workers.Values | Where-Object { $_.status -eq 'idle' }).Count
       stale_leases = $stale.Count
@@ -753,13 +972,17 @@ try {
       $planLock = Acquire-StateLock
       $state = Read-State
       $active = @(Get-ActiveLeases $state)
+      $blockedLegacyWrites = @(Get-BlockedLegacyWriteLeases $state)
       $nowOffset = [DateTimeOffset]::UtcNow
       foreach ($planKey in @($state.plans.Keys)) {
         $existingPlan = $state.plans[$planKey]
         $expired = try { [DateTimeOffset]::Parse([string]$existingPlan.expires_at) -le $nowOffset } catch { $true }
         if ($existingPlan.status -ne 'issued' -or $expired) { $state.plans.Remove($planKey) }
       }
-      if ($TaskClass -eq 'risky') {
+      $pendingPlanCount = @($state.plans.Values | Where-Object { $_.status -eq 'issued' }).Count
+      if ($blockedLegacyWrites.Count -gt 0) {
+        $decision = 'coordinator'; $reason = 'legacy_write_lease_disabled'
+      } elseif ($TaskClass -eq 'risky') {
         $decision = 'coordinator'; $reason = 'risk_requires_coordinator'
       } elseif ($AccessMode -eq 'write') {
         $decision = 'coordinator'; $reason = 'shared_folder_write_delegation_disabled'
@@ -769,7 +992,7 @@ try {
         $decision = 'coordinator'; $reason = 'task_plan_already_issued'
       } elseif ($state.leases.ContainsKey($task) -and $state.leases[$task].status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) {
         $decision = 'coordinator'; $reason = 'task_already_leased'
-      } elseif ($active.Count -ge $MaxConcurrentWorkers) {
+      } elseif (($active.Count + $pendingPlanCount) -ge $MaxConcurrentWorkers) {
         $decision = 'coordinator'; $reason = 'concurrency_budget_reached'
       } elseif ($AccessMode -eq 'write' -and @($active | Where-Object { $_.access_mode -eq 'write' }).Count -gt 0) {
         $decision = 'coordinator'; $reason = 'single_writer_lease_active'
@@ -883,6 +1106,9 @@ try {
       if (-not $PlanToken) { Throw-GovernorError "plan_token_required" }
       if (-not $state.plans.ContainsKey($task)) { Throw-GovernorError "plan_not_found" }
       $plan = $state.plans[$task]
+      if ($plan.status -eq 'quarantined_legacy_write' -or $plan.access_mode -eq 'write') {
+        Throw-GovernorError "legacy_write_lease_disabled"
+      }
       if ($plan.status -ne 'issued') { Throw-GovernorError "plan_already_consumed" }
       try {
         if ([DateTimeOffset]::Parse([string]$plan.expires_at) -le $nowOffset) { Throw-GovernorError "plan_expired" }
@@ -1041,6 +1267,32 @@ try {
 
     if (-not $state.leases.ContainsKey($task)) { Throw-GovernorError "lease_not_found" }
     $lease = $state.leases[$task]
+    if ($lease.access_mode -eq 'write') {
+      if ($Action -notin @('release', 'retire')) { Throw-GovernorError "legacy_write_lease_disabled" }
+      if (-not $CoordinatorAccepted) { Throw-GovernorError "coordinator_acceptance_required" }
+      if ($lease.status -notin @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified', 'blocked_legacy_write')) {
+        Throw-GovernorError "invalid_lifecycle_transition"
+      }
+      $terminalStatus = if ($Action -eq 'release') { 'released' } else { 'failed' }
+      $workerStatus = if ($Action -eq 'release') { 'idle' } else { 'retired' }
+      $lease.status = $terminalStatus
+      $lease.updated_at = $now
+      if ($state.tasks.ContainsKey($task)) {
+        $state.tasks[$task].status = $terminalStatus
+        $state.tasks[$task].updated_at = $now
+      }
+      if ($state.workers.ContainsKey([string]$lease.worker_id)) {
+        $state.workers[[string]$lease.worker_id].status = $workerStatus
+        $state.workers[[string]$lease.worker_id].updated_at = $now
+      }
+      Write-State $state
+      Write-GovernorOutput @{
+        ok = $true; action = $Action; task_id = $task; worker_id = $lease.worker_id
+        status = $terminalStatus; legacy_write_lease_quarantined = $true
+        fingerprint_executed = $false; automatic_merge = $false; automatic_cleanup = $false
+      }
+      exit 0
+    }
     Assert-LeaseCredentials $lease -AllowExpiredRelease:($Action -eq 'release')
     if ($lease.repository_id -ne $repositoryId -or $lease.workspace_id -ne $workspaceId) {
       Throw-GovernorError "workspace_identity_mismatch"
@@ -1063,10 +1315,6 @@ try {
         $plannedModel = [string]$state.workers[$lease.worker_id].requested_model
         if ($normalizedEffectiveModel -ne $plannedModel) { Throw-GovernorError "model_plan_mismatch" }
         $EffectiveModel = $normalizedEffectiveModel
-      }
-      if ($lease.access_mode -eq 'write') {
-        if (-not $MutationAttributionVerified -or -not $MutationAttributionId) { Throw-GovernorError "mutation_attribution_unverified" }
-        if ((Get-TextHash $MutationAttributionId) -ne $lease.mutation_attribution_hash) { Throw-GovernorError "mutation_attribution_mismatch" }
       }
       $resultFingerprint = Get-WorkspaceFingerprint ([string]$lease.base_commit)
       $lease.result_fingerprint = $resultFingerprint
@@ -1103,19 +1351,9 @@ try {
       $baseCommit = [string]$lease.base_commit
       $ancestor = Try-Invoke-Git @('merge-base', '--is-ancestor', $baseCommit, 'HEAD')
       if (-not $ancestor.ok) { Throw-GovernorError "base_commit_mismatch" }
+      if ($lease.access_mode -ne 'read') { Throw-GovernorError "legacy_write_lease_disabled" }
       $changed = @()
-      if ($lease.access_mode -eq 'read') {
-        if ($currentFingerprint -ne $lease.baseline_fingerprint) { Throw-GovernorError "read_worker_modified_workspace" }
-      } else {
-        $changed = @(Get-TaskChanges $baseCommit)
-        if ($changed.Count -eq 0) { Throw-GovernorError "no_changes_detected" }
-        $outOfScope = @($changed | Where-Object { -not (Test-PathInScope -Path $_ -AllowedScopes @($lease.scopes)) })
-        $globalLocks = @($changed | Where-Object { Test-GlobalLockPath -Path $_ })
-        $reparseChanges = @($changed | Where-Object { Test-ReparsePath -Path $_ })
-        if ($outOfScope.Count -gt 0) { Throw-GovernorError "out_of_scope_changes" }
-        if ($globalLocks.Count -gt 0) { Throw-GovernorError "global_lock_change" }
-        if ($reparseChanges.Count -gt 0) { Throw-GovernorError "reparse_path_change" }
-      }
+      if ($currentFingerprint -ne $lease.baseline_fingerprint) { Throw-GovernorError "read_worker_modified_workspace" }
       if (-not $VerificationPassed) { Throw-GovernorError "verification_evidence_required" }
       $lease.status = 'verified'
       $lease.changed_file_count = $changed.Count
@@ -1134,7 +1372,7 @@ try {
         changed_file_count = $changed.Count
         scope_valid = $true
         workspace_identity_valid = $true
-        mutation_attribution_valid = [bool]$lease.mutation_attribution_verified
+        mutation_attribution_valid = $false
         result_fingerprint_valid = $true
         base_commit_valid = $true
         verification_passed = $true
@@ -1187,7 +1425,10 @@ try {
     }
 
     if ($Action -eq 'release') {
-      if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification')) { Throw-GovernorError "invalid_lifecycle_transition" }
+      if ($lease.status -eq 'verified' -and (-not $CoordinatorAccepted -or -not (Test-LeaseExpired $lease))) {
+        Throw-GovernorError "invalid_lifecycle_transition"
+      }
+      if ($lease.status -notin @('working', 'needs_correction', 'awaiting_verification', 'verified')) { Throw-GovernorError "invalid_lifecycle_transition" }
       $lease.status = 'released'
       $lease.updated_at = $now
       $state.tasks[$task].status = 'released'

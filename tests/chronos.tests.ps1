@@ -24,7 +24,11 @@ $ruleMissHome = Join-Path $testRoot "rule-miss-home"
   $forkReplayHome = Join-Path $testRoot "fork-replay-home"
   $completeNoNewlineHome = Join-Path $testRoot "complete-no-newline-home"
   $invalidDbHome = Join-Path $testRoot "invalid-db-home"
+  $partialDbHome = Join-Path $testRoot "partial-db-home"
   $unsupportedCacheHome = Join-Path $testRoot "unsupported-cache-home"
+  $partialCacheHome = Join-Path $testRoot "partial-cache-home"
+  $reparseHome = Join-Path $testRoot "reparse-home"
+  $reparseExternal = Join-Path $testRoot "reparse-external"
 $databasePath = Join-Path $fixtureHome "logs_2.sqlite"
 $writer = $null
 
@@ -37,7 +41,7 @@ function Assert-Match($value, $pattern, $message) {
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
-    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $unsupportedCacheHome `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $partialDbHome, $unsupportedCacheHome, $partialCacheHome, $reparseHome, $reparseExternal `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -98,7 +102,29 @@ try {
   Assert-Match $invalidDbOutput " logDb=WARNING " "A present but unreadable diagnostic database must not be reported healthy."
   Assert-Match $invalidDbOutput " logDbReasons=query-unavailable " "Database query failure must be explicit."
   Assert-Match $invalidDbOutput " logDbQueryOk=false " "Database query availability must be emitted."
+
+  & $PythonPath $fixtureScript partial (Join-Path $partialDbHome "logs_2.sqlite")
+  if ($LASTEXITCODE -ne 0) { throw "Failed to create partial SQLite fixture." }
+  $partialDbOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $partialDbHome -SampleSeconds 1
+  Assert-Match $partialDbOutput " logDb=WARNING " `
+    "Partial diagnostic coverage must not be reported healthy."
+  Assert-Match $partialDbOutput " logDbAvailability=partial " `
+    "Partial diagnostic coverage must be explicit."
+  Assert-Match $partialDbOutput " logDbReasons=query-partial " `
+    "Partial diagnostic coverage must explain the warning."
   Assert-Match $missingOutput " logSeq=unknown " "Missing database should not invent a sequence."
+
+  [System.IO.File]::WriteAllText(
+    (Join-Path $reparseExternal "escaped.jsonl"),
+    '{"timestamp":"2026-08-09T12:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":100000,"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":1010},"last_token_usage":{"total_tokens":10}}}}' + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $null = New-Item -ItemType Junction -Path (Join-Path $reparseHome "sessions") -Target $reparseExternal
+  $reparseOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $reparseHome -SampleSeconds 1
+  Assert-Match $reparseOutput " tokenFiles=0 " `
+    "Session readers must reject a reparse point that escapes the canonical Codex root."
 
   $markerTimestamp = (Get-Date).AddSeconds(-5).ToString("yyyy-MM-dd HH:mm:ss.fff")
   Set-Content -LiteralPath (Join-Path $helperWarningHome "sandbox.log") -Value `
@@ -221,6 +247,18 @@ try {
   Assert-Match $completeNoNewlineOutput " tokenSamples=1 " "A complete final JSONL record without a newline must be retained."
   Assert-Match $completeNoNewlineOutput " tokenTailIncompleteFiles=0 " "A valid final JSONL record must not be labeled incomplete."
 
+  $untimestampedDuplicatePath = Join-Path $completeNoNewlineDay "untimestamped-duplicate.jsonl"
+  $untimestampedDuplicate = '{"type":"event_msg","payload":{"type":"context_compacted"}}'
+  [System.IO.File]::WriteAllText(
+    $untimestampedDuplicatePath,
+    $untimestampedDuplicate + "`n" + $untimestampedDuplicate + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $untimestampedDuplicateOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $completeNoNewlineHome -SampleSeconds 1
+  Assert-Match $untimestampedDuplicateOutput " tokenDuplicateRecords=1 " `
+    "Exact untimestamped records must be counted once and deduplicated."
+
   $unsupportedCacheDay = Join-Path (Join-Path (Join-Path $unsupportedCacheHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
   $unsupportedCacheDay = Join-Path $unsupportedCacheDay (Get-Date -Format "dd")
@@ -248,6 +286,30 @@ try {
     -File $chronosScript -Action inspect -CodexHome $unsupportedCacheHome -SampleSeconds 1
   Assert-Match $unsupportedCacheOutput " tokenCacheWriteObserved=unknown " "Unsupported cache-write telemetry must not be reported as false."
   Assert-Match $unsupportedCacheOutput " cacheWriteObservation=unsupported_schema " "Unsupported cache-write telemetry must be labeled."
+
+  $partialCacheDay = Join-Path (Join-Path (Join-Path $partialCacheHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $partialCacheDay = Join-Path $partialCacheDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $partialCacheDay -Force | Out-Null
+  [System.IO.File]::WriteAllText(
+    (Join-Path $partialCacheDay 'unsupported-cache.jsonl'),
+    $unsupportedCacheRecord + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $supportedCacheRecord = ($unsupportedCacheRecord | ConvertFrom-Json)
+  $supportedCacheRecord.payload.info.total_token_usage | Add-Member `
+    -NotePropertyName cache_write_input_tokens -NotePropertyValue 250
+  [System.IO.File]::WriteAllText(
+    (Join-Path $partialCacheDay 'supported-cache.jsonl'),
+    ($supportedCacheRecord | ConvertTo-Json -Compress -Depth 8) + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $partialCacheOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $partialCacheHome -SampleSeconds 1
+  Assert-Match $partialCacheOutput " cacheWriteObservation=observed_partial_schema " `
+    "Mixed cache-write schemas must disclose partial coverage."
+  Assert-Match $partialCacheOutput " cacheWriteAvailableFiles=1 cacheWriteSelectedFiles=2 " `
+    "Cache-write schema coverage counts must be explicit."
 
   $sessionDay = Join-Path (Join-Path (Join-Path $tokenHealthHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -330,17 +392,20 @@ try {
   Assert-Match $tokenOutput " tokenHighEffortSessions=1 " `
     "High-effort session was not counted."
   Assert-Match $tokenOutput " tokenSpawnCalls=1 " "Subagent spawn was not counted."
-  Assert-Match $tokenOutput " tokenCompactions=2 " "Compactions were not counted."
+  Assert-Match $tokenOutput " tokenCompactions=1 " `
+    "Exact untimestamped compaction duplicates must be counted once."
   Assert-Match $tokenOutput " tokenCoverageWindowHours=6 " "Token coverage window was not explicit."
   Assert-Match $tokenOutput " tokenFilesEligible=1 tokenFilesSelected=1 tokenCoverageCapped=false " `
     "Token file selection coverage was not explicit."
-  Assert-Match $tokenOutput " tokenCoverageContinuity=complete " `
-    "Complete fixture coverage should be reported as complete."
+  Assert-Match $tokenOutput " tokenCoverageContinuity=partial " `
+    "A deduplicated rollout fixture must disclose partial continuity."
   Assert-Match $tokenOutput " tokenSpawnObservation=observed tokenCompactionObservation=observed " `
     "Observed worker and compaction events should be qualified."
+  Assert-Match $tokenOutput " spawnForkUnknown=1 spawnSchemaV1=0 spawnSchemaV2=0 spawnSchemaUnknown=1 " `
+    "An unversioned spawn with no fork field must not imply full-context inheritance."
   Assert-Match $tokenOutput " tokenQuotaContributors=.*(cache-write-volume|input-50m)" `
     "High quota risk should expose contributing measurements."
-  Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,avoid-repeat-compaction,cache-write-risk(\r?\n|$)" `
+  Assert-Match $tokenOutput " tokenAdvice=lower-effort,fresh-task,bound-subagents,cache-write-risk(\r?\n|$)" `
     "Token advice did not reflect the aggregate risk signals."
   if (($tokenOutput -join "`n") -match "private fixture arguments") {
     throw "Chronos output exposed tool arguments."
@@ -480,18 +545,23 @@ try {
     ),
     [System.Text.UTF8Encoding]::new($false)
   )
+  [System.IO.File]::WriteAllText(
+    (Join-Path $machine2Rules "quoted-examples.toml"),
+    "# prefix_rule(pattern=[`"ignored-comment`"], decision=`"allow`")`nnotes = `"`"`"prefix_rule(pattern=[`"ignored-string`"], decision=`"allow`")`"`"`"`n",
+    [System.Text.UTF8Encoding]::new($false)
+  )
   [System.IO.File]::WriteAllLines(
     (Join-Path $machine2Home "config.toml"),
     @('approvals_reviewer="guardian_subagent"', 'model_reasoning_effort="xhigh"'),
     [System.Text.UTF8Encoding]::new($false)
   )
+  $machine2Start = [DateTimeOffset]::UtcNow.AddDays(-28)
   $machine2SessionDay = Join-Path (Join-Path (Join-Path $machine2Home "sessions") `
-    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
-  $machine2SessionDay = Join-Path $machine2SessionDay (Get-Date -Format "dd")
+    $machine2Start.ToString("yyyy")) $machine2Start.ToString("MM")
+  $machine2SessionDay = Join-Path $machine2SessionDay $machine2Start.ToString("dd")
   New-Item -ItemType Directory -Path $machine2SessionDay -Force | Out-Null
   $machine2Path = Join-Path $machine2SessionDay "rollout-machine2-regression.jsonl"
   $machine2Records = [System.Collections.Generic.List[string]]::new()
-  $machine2Start = [DateTimeOffset]::UtcNow.AddDays(-28)
   $machine2Records.Add((@{
     timestamp = $machine2Start.ToString("o")
     type = "session_meta"
@@ -533,7 +603,7 @@ try {
       type = "event_msg"
       payload = @{
         type = "exec_approval_request"
-        approval_id = "approval-machine2"
+        approval_id = "approval-machine2-retry-$index"
         approval_state = "pending"
         operation_class = "repository-read"
         access_mode = "read"
@@ -571,17 +641,21 @@ try {
   Assert-Match $machine2Output " approvalDecisionsObserved=1 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalAllowPct=100 " `
     "Allowed decisions and allow rate were not accounted separately."
   Assert-Match $machine2Output " approvalPersistenceRetries=581 approvalPersistenceFailures=1 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
-    "The 590-turn persistence regression was not classified as a persistence runaway."
+    "Structurally equivalent retries with regenerated IDs must be classified as a persistence runaway."
   Assert-Match $machine2Output " reviewerToolCalls=3 reviewerEscalationsObserved=2 reviewerEscalationUniquePrefixes=1 reviewerEscalationRepeatedPrefixes=1 reviewerEscalationLargestPrefix=2 " `
     "Reviewer-originated escalation traffic was not classified independently."
   Assert-Match $machine2Output " ruleCount=4 ruleMonolithic=1 ruleReusableNarrow=2 ruleBroadInterpreter=1 ruleCredentialShaped=1 " `
     "Rule health did not classify brittle, narrow, broad, and credential-shaped rules."
   Assert-Match $machine2Output " ruleStatus=CRITICAL ruleValuesReturned=false " `
     "Credential-shaped rule output must be critical and must never return values."
+  Assert-Match $machine2Output " ruleFilesEligible=2 ruleFilesSelected=2 ruleCoverageCapped=false ruleParseFailures=0 " `
+    "Comments and triple-quoted examples must not create false rule blocks or partial coverage."
   Assert-Match $machine2Output " ruleBrittlenessDiagnosis=rule_brittleness_warning ruleSecretDiagnosis=rule_secret_exposure ruleBroadInterpreterDiagnosis=broad_interpreter_rule " `
     "Named rule defect classes were not emitted."
-  Assert-Match $machine2Output " spawnForkAll=1 spawnForkAllDefaulted=0 spawnForkNone=0 spawnForkBounded=0 spawnHighEffort=1 spawnMaxEffort=1 " `
+  Assert-Match $machine2Output " spawnForkAll=1 spawnForkAllDefaulted=0 spawnForkNone=0 spawnForkBounded=0 .*spawnHighEffort=1 spawnMaxEffort=1 " `
     "Full-history and high-effort worker amplification was not measured."
+  Assert-Match $machine2Output " spawnForkUnknown=0 spawnSchemaV1=0 spawnSchemaV2=1 spawnSchemaUnknown=0 " `
+    "A versioned V2 spawn must be classified by its advertised schema."
   Assert-Match $machine2Output " spawnContextAmplification=observed rootAgentSpawns=1 childAgentSpawns=0 nestedAgentObservation=not_observed " `
     "Root-only spawning must not be misreported as recursive child-agent fan-out."
   Assert-Match $machine2Output " configuredReviewer=guardian_subagent effectiveReviewer=auto_review managedReviewer=unavailable reviewerConfigurationComparison=different_labels_mapping_possible primaryReasoningDefault=xhigh" `
@@ -747,6 +821,8 @@ try {
     "A bounded tail must disclose partial continuity."
   Assert-Match $largeTailOutput " quotaConfidence=low " `
     "A truncated token sample must not support high quota confidence."
+  Assert-Match $largeTailOutput " rolloutAgeObservation=partial_head_metadata rolloutHeadTruncatedFiles=1 rolloutHeadMetadataUnavailableFiles=1 " `
+    "A bounded head without session metadata must disclose partial task-age coverage."
 
   $v2SessionDay = Join-Path (Join-Path (Join-Path $v2CoverageHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -860,6 +936,10 @@ try {
   if ($writer -and -not $writer.HasExited) {
     Stop-Process -Id $writer.Id -Force -ErrorAction SilentlyContinue
     $writer.WaitForExit()
+  }
+  $reparseSessions = Join-Path $reparseHome "sessions"
+  if (Test-Path -LiteralPath $reparseSessions) {
+    [System.IO.Directory]::Delete($reparseSessions)
   }
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
   $resolvedTest = [System.IO.Path]::GetFullPath($testRoot)

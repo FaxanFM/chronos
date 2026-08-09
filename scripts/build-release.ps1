@@ -36,7 +36,16 @@ $files = @($trackedPaths | Where-Object { $_ -and $_ -notmatch '/\.gitignore$' }
   $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
 })
 if ($files.Count -eq 0) { throw "Plugin package has no files." }
+$maximumFiles = 256
+$maximumFileBytes = 8MB
+$maximumPackageBytes = 32MB
+if ($files.Count -gt $maximumFiles) { throw "Plugin package exceeds the $maximumFiles-file limit." }
+$sourceBytes = [long](@($files | Measure-Object Length -Sum).Sum)
+if ($sourceBytes -gt $maximumPackageBytes) { throw "Plugin source exceeds the 32 MiB package limit." }
 foreach ($file in $files) {
+  if ([long]$file.Length -gt $maximumFileBytes) {
+    throw "Release source file exceeds the 8 MiB limit: $($file.FullName)"
+  }
   $current = $file
   while ($current -and $current.FullName.StartsWith($pluginRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
     if ($current.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
@@ -67,6 +76,7 @@ function Get-BytesHash {
 }
 
 $packagedFileManifest = [System.Collections.Generic.List[object]]::new()
+$packagedBytesTotal = 0L
 $stream = [System.IO.File]::Open($artifactPath, 'CreateNew', 'ReadWrite', 'None')
 try {
   $archive = [System.IO.Compression.ZipArchive]::new(
@@ -84,6 +94,10 @@ try {
       $entryStream = $entry.Open()
       try {
         $bytes = Get-PackagedBytes $file
+        $packagedBytesTotal += [long]$bytes.Length
+        if ($packagedBytesTotal -gt $maximumPackageBytes) {
+          throw "Normalized plugin package exceeds the 32 MiB package limit."
+        }
         $entryStream.Write($bytes, 0, $bytes.Length)
         $packagedFileManifest.Add([ordered]@{
           path = $relative
@@ -114,6 +128,12 @@ $releaseManifest = [ordered]@{
   artifact = $artifactName
   sha256 = $artifactHash
   packaged_files = $files.Count
+  packaged_bytes = $packagedBytesTotal
+  package_limits = [ordered]@{
+    files = $maximumFiles
+    file_bytes = $maximumFileBytes
+    package_bytes = $maximumPackageBytes
+  }
   files = @($packagedFileManifest)
   reproducible_timestamp = "1980-01-01T00:00:00Z"
   packaged_text_line_endings = "LF"

@@ -7,8 +7,9 @@ Chronos has two independent, on-demand skills.
 `chronos.ps1` takes one bounded snapshot of candidate Codex Windows processes,
 filesystem-helper events, disk availability, and the known diagnostic SQLite
 database. SQLite access is read-only. Rollout access is limited to 2 MiB tails
-from at most eight files selected by recent modification time across the
-bounded session inventory, including old sessions resumed recently.
+from at most eight files selected by recent modification time from the session
+date partitions overlapping the six-hour window, including old sessions
+resumed recently.
 
 The rollout parser retains only numeric token aggregates, effort labels,
 structured automatic-review counts, compaction counts, spawn counts, bounded
@@ -47,7 +48,7 @@ separate concepts. Chronos never modifies approval state, policies, reviewer
 configuration, runtime model catalogs, or sandbox permissions.
 
 The Rule Governor reads bounded supported files in the known Codex rules directory.
-It uses a balanced, string-aware parser for multiline `prefix_rule` blocks,
+It uses a bounded lexical parser for multiline `prefix_rule` blocks,
 calculates aggregate length and structure statistics, and detects
 credential-shaped patterns in memory. It never returns rule contents, prefix
 hashes, commands, assignments, or credential values and never edits rules.
@@ -78,8 +79,10 @@ reverting files.
 
 Governor temp state is worker-reachable and unauthenticated. Atomic replacement
 and owner locks coordinate concurrent processes but do not establish state
-integrity. Git invocations disable configured fsmonitor, textconv, external
-diffs, hooks, pagers, and relevant environment overrides.
+integrity. Workspace fingerprints use bounded raw file reads and Git metadata
+primitives; they never invoke working-tree conversion, `git diff`, textconv,
+clean filters, external diffs, hooks, or pagers. Relevant Git override
+environment variables are cleared around each invocation.
 
 When the runtime exposes an effective worker model, binding and result reporting
 must match the model persisted by `plan`. A difference fails with
@@ -96,6 +99,6 @@ cleans worktrees.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.7.0 deliberately changes parser observability without changing any
+of failure. v0.7.1 deliberately changes parser observability without changing any
 warning threshold, critical threshold, scoring weight, predictive claim, or
 heuristic interpretation. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

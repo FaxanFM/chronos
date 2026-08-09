@@ -6,13 +6,15 @@ security-coverage percentage, and the project does not describe it as one.
 
 ## Governor
 
-`tests/governor.tests.ps1` currently runs 32 deterministic validations. They
+`tests/governor.tests.ps1` currently runs 36 deterministic validations. They
 cover runtime inventory selection, model binding, canonical worker IDs,
 single-use plan tokens, V2 `fork_turns=none`, categorical write containment,
 one active lease per worker, fencing, renewal, read-mutation detection,
 terminal lifecycle transitions, expiry, detached `HEAD`, linked worktrees,
 equivalent paths, stale and live locks, malformed and interrupted state,
-unwritable state, privacy, legacy migration, and custom-state rejection.
+unwritable state, privacy, legacy migration and write-lease quarantine,
+clean-filter non-execution, pending-plan capacity, expired verified release,
+and custom-state rejection.
 
 These tests validate modeled behavior. They do not turn Governor into a
 security boundary. Write delegation remains disabled.
@@ -20,12 +22,14 @@ security boundary. Write delegation remains disabled.
 ## Inspector
 
 `tests/chronos.tests.ps1` covers read-only SQLite access, active WAL detection,
-unreadable and missing databases, helper failure and recovery, false-positive
+partial, unreadable, and missing databases, helper failure and recovery, false-positive
 markers, 64-bit counter boundaries, malformed and out-of-order rollout data,
-valid final JSONL records without newlines, exact duplicates, inherited token
+valid final JSONL records without newlines, timestamped and untimestamped exact duplicates, inherited token
 deltas, modification-time discovery for old resumed sessions, absent
-cache-write schema, automatic-review counting, low-confidence rate labeling,
-approval persistence sequences, and bounded multiline permission rules.
+and partial cache-write schemas, automatic-review counting, explicit spawn
+schema, low-confidence rate labeling, approval persistence across regenerated
+IDs, escaped reparse paths, partial head metadata, and bounded lexical
+permission-rule parsing.
 
 The tests require explicit coverage and availability fields. Local token and
 approval aggregates remain unsupported as account billing evidence.
@@ -34,8 +38,8 @@ approval aggregates remain unsupported as account billing evidence.
 
 `tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
 tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
-per-file manifest hashes and sizes, required plugin files, repository-file
-exclusion, and a matching artifact checksum.
+per-file manifest hashes and sizes, pre-materialization package limits, required
+plugin files, repository-file exclusion, and a matching artifact checksum.
 
 Tagged CI runs inspector, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the

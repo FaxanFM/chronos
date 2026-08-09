@@ -9,9 +9,31 @@ permissions:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Parse PowerShell sources
+        shell: powershell
+        run: |
+          $failures = @()
+          foreach ($file in @(Get-ChildItem -Recurse -Filter *.ps1 -File)) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $failures += @($errors | ForEach-Object { "$($file.FullName): $($_.Message)" }) }
+          }
+          if ($failures.Count) { throw ($failures -join "`n") }
+      - name: Parse JSON manifests
+        shell: powershell
+        run: |
+          Get-Content -Raw .agents/plugins/marketplace.json | ConvertFrom-Json | Out-Null
+          Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json | Out-Null
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python

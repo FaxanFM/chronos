@@ -71,6 +71,16 @@ def verify_fixture(path: Path) -> None:
         connection.close()
 
 
+def create_partial_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def write_fixture(path: Path, duration: float) -> None:
     connection = sqlite3.connect(path, timeout=2)
     try:
@@ -94,13 +104,15 @@ def write_fixture(path: Path, duration: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("create", "verify", "write"))
+    parser.add_argument("action", choices=("create", "partial", "verify", "write"))
     parser.add_argument("path", type=Path)
     parser.add_argument("--duration", type=float, default=4.0)
     args = parser.parse_args()
 
     if args.action == "create":
         create_fixture(args.path)
+    elif args.action == "partial":
+        create_partial_fixture(args.path)
     elif args.action == "verify":
         verify_fixture(args.path)
     else:

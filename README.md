@@ -1,10 +1,27 @@
-<p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
+# Chronos - Codex diagnostics and read-worker coordination
 
-# Chronos
+[![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
+[![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/FaxanFM/chronos)](LICENSE)
+![No telemetry](https://img.shields.io/badge/telemetry-none-4ed7a0)
 
-Chronos is a lean, on-demand Codex plugin for Windows sessions that become slow after hours or days of parallel work. Its optional Governor delegates bounded low-complexity repository work without turning Chronos into an autonomous agent loop.
+Detect runaway Codex auto-review, approval loops, quota and context
+amplification, broken permission rules, rollout duplication, diagnostic SQLite
+churn, and Windows process degradation. Chronos keeps machine health separate
+from workflow diagnostics and coordinates bounded read-only workers without
+creating an autonomous agent loop.
 
-It checks current resource and diagnostic-log health, explains signs of degradation, and offers conservative recovery steps without continuous monitoring.
+```powershell
+codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin add chronos@chronos
+```
+
+Open a new Codex task, then ask: `Use Chronos to inspect current Codex health.`
+
+<p align="center"><img src="assets/chronos-proof-card.png" width="500" alt="Sanitized example Chronos output separating healthy machine resources from runaway automatic review and approval persistence"></p>
+
+The image is a synthetic, sanitized example. It contains no machine, account,
+task, repository, or session identifiers.
 
 ## What it does
 
@@ -36,7 +53,7 @@ its SQLite databases, terminate processes, or block active work.
 
 ## Install in Codex
 
-Until Chronos is listed in the Plugins Directory, ask Codex to:
+Ask Codex to:
 
 > **Analyze and install [FaxanFM/chronos](https://github.com/FaxanFM/chronos), then use Chronos Governor for appropriate low-complexity repository tasks.**
 
@@ -48,6 +65,11 @@ codex.cmd plugin add chronos@chronos
 ```
 
 Open a new Codex task after installation.
+
+Official OpenAI Plugin Directory listing is pending. The public marketplace
+commands above install the same public plugin without waiting for directory
+review. See the [directory submission packet](docs/PLUGIN-DIRECTORY-SUBMISSION.md)
+for current status and reviewer instructions.
 
 ## Use
 
@@ -82,10 +104,12 @@ See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.7.0 safety
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.7.1 safety
 and release model.
 See [v0.7.0 Audit Response](docs/AUDIT-RESPONSE-2026-08-09.md) for the sanitized
 fixed, contained, and deferred finding disposition.
+See [v0.7.1 Delta Audit Response](docs/V0.7.1-DELTA-AUDIT-RESPONSE.md) for the
+follow-up security, parser, release, and discovery fixes.
 
 ## Planned self-service agents
 

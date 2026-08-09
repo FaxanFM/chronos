@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.7.1
+
+- Replace working-tree `git diff` fingerprints with bounded raw file reads and
+  safe Git metadata primitives so configured clean, textconv, and external-diff
+  processes cannot execute during Governor verification.
+- Migrate Governor state to version 4 and quarantine every active version-3
+  write plan or lease. Legacy write lifecycle actions cannot fingerprint,
+  integrate, or merge; only an explicit coordinator release or retirement is
+  allowed.
+- Make partial SQLite, cache-write, rule-parser, rollout-head, spawn-schema, and
+  process-ownership coverage explicit instead of treating incomplete evidence
+  as fully healthy or supported.
+- Detect structurally equivalent approval persistence retries across regenerated
+  correlation IDs and deduplicate exact untimestamped rollout records.
+- Enforce canonical-root containment for every inspector file reader, reject
+  escaped reparse paths, and discover recently modified sessions across all
+  date partitions within a bounded traversal budget without order truncation.
+- Reserve concurrency for issued delegation plans and allow coordinator cleanup
+  of expired verified read leases.
+- Pin ordinary CI actions, test two Windows runner labels, parse PowerShell and
+  JSON in pull requests, and enforce package file and byte limits before release
+  content is materialized.
+- Replace the legacy GitHub positioning, put install commands in the first
+  README viewport, add sanitized 9:16 proof and social-preview assets, add a
+  privacy-gated issue form, and prepare the OpenAI Plugin Directory submission
+  packet.
+
+No warning threshold, critical threshold, scoring weight, predictive claim, or
+calibration-sensitive heuristic changed in this release.
+
 ## v0.7.0
 
 - Disable shared-folder Governor write delegation and reject legacy write plans.

@@ -1,7 +1,7 @@
 # Calibration Methodology
 
 This document defines evidence required for a future calibration release. It
-does not enable collection, telemetry, or threshold changes in v0.7.0.
+does not enable collection, telemetry, or threshold changes in v0.7.1.
 
 ## Freeze
 

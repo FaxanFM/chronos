@@ -10,9 +10,10 @@ Chronos does not collect, transmit, sell, or share personal data. It does not us
 
 When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It also opens the known Codex diagnostic SQLite database in read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. Results remain in the active Codex task unless the user chooses to share them.
 
-For token and quota diagnostics, Chronos inventories at most 20,000 session
-files, selects up to eight modified in the previous six hours, and reads at
-most 2 MiB from each selected tail. It retains in memory only structured
+For token and quota diagnostics, Chronos enumerates only the session date
+partitions overlapping the previous six hours, retains the eight newest
+eligible files by modification time, and reads at most 2 MiB from each selected
+tail. It retains in memory only structured
 aggregate token counts, model and reasoning-effort labels, context-window size,
 automatic-review counts, categorical approval fields, and counts or byte totals
 for compactions, `spawn_agent` calls, lineage links, and exact cross-rollout
@@ -27,8 +28,9 @@ output, usernames, or absolute paths.
 
 Chronos also reads at most 2 MiB from each of up to 32 supported `.rules` or
 `.toml` files in the known local Codex rules directory when an inspection is
-requested. Reparse files are rejected. A bounded balanced parser identifies up
-to 2,048 multiline rules and reports incomplete coverage. Chronos counts rule
+requested. Reparse files are rejected. A bounded lexical parser identifies up
+to 2,048 multiline rules across all selected files, ignores comments and quoted
+examples, and reports incomplete coverage. Chronos counts rule
 length, literal length, narrow-prefix structure, broad interpreter structure,
 and credential-shaped patterns in memory. It never returns rule text, rule
 hashes, command literals, environment assignments, or credential-shaped

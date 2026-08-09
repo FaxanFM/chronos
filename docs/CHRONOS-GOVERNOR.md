@@ -4,7 +4,7 @@ Chronos Governor coordinates small read-only Codex worker tasks. It is a local
 workflow aid, not an authorization service, security sandbox, or proof of
 filesystem isolation.
 
-## v0.7.0 Safety Decision
+## v0.7.1 Safety Decision
 
 Shared-folder write delegation is disabled. A write `plan` returns:
 

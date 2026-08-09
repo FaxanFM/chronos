@@ -5,6 +5,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $builder = Join-Path $repoRoot "scripts\build-release.ps1"
 $manifestPath = Join-Path $repoRoot "plugins\chronos\.codex-plugin\plugin.json"
 $releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
+$testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $first = Join-Path $testRoot "first"
@@ -12,6 +13,18 @@ $second = Join-Path $testRoot "second"
 
 try {
   $releaseWorkflow = Get-Content -Raw -LiteralPath $releaseWorkflowPath
+  $testWorkflow = Get-Content -Raw -LiteralPath $testWorkflowPath
+  foreach ($required in @(
+    'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
+    'os: [windows-2022, windows-latest]',
+    'timeout-minutes: 25',
+    'Parse PowerShell sources',
+    'Parse JSON manifests'
+  )) {
+    if (-not $testWorkflow.Contains($required)) {
+      throw "Ordinary CI is missing release-quality validation: $required"
+    }
+  }
   foreach ($required in @(
     'Require verified commit and annotated tag',
     'tagObject.verification.verified',
@@ -87,6 +100,10 @@ try {
   if ($releaseManifest.schema_version -ne 2 -or @($releaseManifest.files).Count -ne $releaseManifest.packaged_files) {
     throw "Release manifest must contain a versioned per-file inventory."
   }
+  if (
+    [long]$releaseManifest.packaged_bytes -gt [long]$releaseManifest.package_limits.package_bytes -or
+    [int]$releaseManifest.packaged_files -gt [int]$releaseManifest.package_limits.files
+  ) { throw "Release manifest violates its package limits." }
   $archive = [System.IO.Compression.ZipFile]::OpenRead($firstArtifact)
   try {
     foreach ($fileRecord in @($releaseManifest.files)) {

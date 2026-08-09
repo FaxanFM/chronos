@@ -146,6 +146,23 @@ function Invoke-LeaseAction {
   Invoke-Governor ($arguments + $Extra) $Lease.Repo
 }
 
+function Close-TestReadPlan {
+  param([string]$Task, $PlanResult, [string]$Repo = $fixtureRepo)
+  $plan = Get-GovernorData $PlanResult
+  if ($plan.decision -ne 'delegate') { return }
+  $worker = "/root/close-$Task"
+  $leaseResult = Invoke-Governor @(
+    '-Action', 'lease', '-TaskId', $Task, '-WorkerId', $worker,
+    '-PlanToken', $plan.plan_token
+  ) $Repo
+  Assert-Success $leaseResult "Could not consume test plan $Task."
+  $lease = Get-GovernorData $leaseResult
+  Assert-Success (Invoke-Governor @(
+    '-Action', 'release', '-TaskId', $Task, '-WorkerId', $worker,
+    '-LeaseId', $lease.lease_id, '-FencingToken', $lease.fencing_token
+  ) $Repo) "Could not release test plan $Task."
+}
+
 function New-FixtureRepository {
   param([string]$Path)
   New-Item -ItemType Directory -Path (Join-Path $Path 'src'), (Join-Path $Path 'docs') -Force | Out-Null
@@ -179,6 +196,37 @@ try {
   Register-SafetyControl 'canonical-worker-id'
   Register-SafetyControl 'plan-token'
 
+  $filterRepo = Join-Path $testRoot 'filter-repo'
+  New-FixtureRepository $filterRepo
+  $filterProbe = Join-Path $filterRepo 'src\probe.filterprobe'
+  $filterScript = Join-Path $testRoot 'filter-driver.ps1'
+  $filterMarker = Join-Path $testRoot 'filter-executed.marker'
+  Set-Content -LiteralPath $filterProbe -Value 'initial filter probe'
+  & git -C $filterRepo add src/probe.filterprobe
+  & git -C $filterRepo commit -qm 'Add filter probe'
+  Set-Content -LiteralPath (Join-Path $filterRepo '.gitattributes') -Value '*.filterprobe filter=chronos-audit'
+  @'
+param([string]$Marker)
+$input | ForEach-Object { $_ }
+[System.IO.File]::WriteAllText($Marker, 'executed')
+'@ | Set-Content -LiteralPath $filterScript
+  $filterScriptForGit = $filterScript.Replace('\', '/')
+  $filterMarkerForGit = $filterMarker.Replace('\', '/')
+  $filterCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' + $filterScriptForGit + ' -Marker ' + $filterMarkerForGit
+  & git -C $filterRepo config filter.chronos-audit.clean $filterCommand
+  & git -C $filterRepo hash-object --path=src/probe.filterprobe --filters src/probe.filterprobe | Out-Null
+  if (-not (Test-Path -LiteralPath $filterMarker -PathType Leaf)) {
+    throw 'Clean-filter fixture did not execute during its positive control.'
+  }
+  Remove-Item -LiteralPath $filterMarker -Force
+  Add-Content -LiteralPath $filterProbe -Value 'working tree change'
+  $filterLease = New-TestLease 'clean-filter-safe' '/root/filter-reader' 'read' @('src/probe.filterprobe') 'review' $filterRepo
+  if (Test-Path -LiteralPath $filterMarker) {
+    throw 'Governor fingerprinting executed a configured Git clean filter.'
+  }
+  Assert-Success (Invoke-LeaseAction $filterLease 'release') 'Clean-filter probe lease release failed.'
+  Register-SafetyControl 'git-clean-filter-not-executed'
+
   $flattenedPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'flattened-scopes', '-TaskClass', 'docs',
     '-AccessMode', 'read', '-Scope', 'README.md,docs/**'
@@ -211,6 +259,7 @@ try {
   Assert-Equal $readPlanData.model_selection_reason 'runtime_cost_rank' 'Ranked selection should expose its reason.'
   Assert-Equal $readPlanData.reasoning_effort 'medium' 'Simple code should use medium effort.'
   Register-SafetyControl 'runtime-model-inventory'
+  Close-TestReadPlan 'model-order' $readPlan
 
   $unrankedPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-unranked', '-TaskClass', 'docs',
@@ -221,6 +270,7 @@ try {
   $unrankedData = Get-GovernorData $unrankedPlan
   Assert-Equal $unrankedData.requested_model 'runtime-first' 'Unranked models must preserve runtime inventory order.'
   Assert-Equal $unrankedData.model_selection_reason 'runtime_inventory_order_unranked' 'Unranked fallback reason should be explicit.'
+  Close-TestReadPlan 'model-unranked' $unrankedPlan
 
   $mixedRankPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-mixed-rank', '-TaskClass', 'docs',
@@ -230,6 +280,7 @@ try {
   Assert-Success $mixedRankPlan 'Mixed rank runtime model planning failed.'
   Assert-Equal (Get-GovernorData $mixedRankPlan).requested_model 'runtime-first' `
     'Partial ranking metadata must not silently outrank an unranked compatible model.'
+  Close-TestReadPlan 'model-mixed-rank' $mixedRankPlan
 
   $requestedPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-requested', '-TaskClass', 'docs',
@@ -238,6 +289,7 @@ try {
   Assert-Success $requestedPlan 'Advertised model validation failed.'
   Assert-Equal (Get-GovernorData $requestedPlan).requested_model 'gpt-5.6-luna' 'An advertised requested model should be honored.'
   Register-SafetyControl 'requested-model-validation'
+  Close-TestReadPlan 'model-requested' $requestedPlan
 
   $modelContractPlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-contract', '-TaskClass', 'docs',
@@ -264,6 +316,17 @@ try {
     'model_plan_mismatch' 'A later conflicting effective-model report must fail explicitly.'
   Assert-Success (Invoke-LeaseAction $modelContractLease 'release') 'Model-contract lease release failed.'
   Register-SafetyControl 'model-plan-contract'
+
+  $capacityPlanA = New-TestPlan 'capacity-plan-a' 'read' @('src/**') 'explore'
+  $capacityPlanB = New-TestPlan 'capacity-plan-b' 'read' @('docs/**') 'review'
+  Assert-Equal (Get-GovernorData $capacityPlanA).decision 'delegate' 'First pending plan should reserve capacity.'
+  Assert-Equal (Get-GovernorData $capacityPlanB).decision 'delegate' 'Second pending plan should reserve capacity.'
+  $capacityPlanC = New-TestPlan 'capacity-plan-c' 'read' @('README.md') 'docs'
+  Assert-Equal (Get-GovernorData $capacityPlanC).reason 'concurrency_budget_reached' `
+    'Issued plans must reserve the concurrency budget before workers bind.'
+  Close-TestReadPlan 'capacity-plan-a' $capacityPlanA
+  Close-TestReadPlan 'capacity-plan-b' $capacityPlanB
+  Register-SafetyControl 'pending-plan-capacity'
 
   $missingModel = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'model-missing', '-TaskClass', 'docs',
@@ -345,6 +408,16 @@ try {
   $expiredRelease = Invoke-Governor @('-Action', 'release', '-TaskId', 'expired', '-CoordinatorAccepted')
   Assert-Success $expiredRelease 'Coordinator should be able to release an expired abandoned lease.'
   Register-SafetyControl 'lease-expiry'
+
+  $expiredVerified = New-TestLease 'expired-verified' 'reader-expired-verified' 'read' @('src/**') 'verification'
+  Assert-Success (Invoke-LeaseAction $expiredVerified 'result') 'Verified-expiry result transition failed.'
+  Assert-Success (Invoke-LeaseAction $expiredVerified 'verify' @('-VerificationPassed')) 'Verified-expiry verification failed.'
+  $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+  $state.leases.'expired-verified'.expires_at = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+  $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $statePath -Encoding UTF8
+  $verifiedRelease = Invoke-Governor @('-Action', 'release', '-TaskId', 'expired-verified', '-CoordinatorAccepted')
+  Assert-Success $verifiedRelease 'Coordinator should be able to abandon an expired verified lease.'
+  Register-SafetyControl 'expired-verified-release'
 
   $detachedCommit = (& git -C $fixtureRepo rev-parse HEAD).Trim()
   & git -C $fixtureRepo checkout --detach -q $detachedCommit
@@ -511,7 +584,7 @@ try {
   Assert-Success $legacyPlan 'Inactive legacy state migration failed.'
   Assert-Equal (Get-GovernorData $legacyPlan).decision 'delegate' 'Inactive legacy state should migrate before delegation.'
   $migratedStatePath = Get-StatePath $legacyRepo
-  Assert-Equal (Get-Content -Raw -LiteralPath $migratedStatePath | ConvertFrom-Json).version 3 'Migrated state must use version 3.'
+  Assert-Equal (Get-Content -Raw -LiteralPath $migratedStatePath | ConvertFrom-Json).version 4 'Migrated state must use version 4.'
   Register-SafetyControl 'legacy-state-migration'
 
   $activeLegacyRepo = Join-Path $testRoot 'active-legacy-state-repo'
@@ -529,6 +602,58 @@ try {
   Assert-Failure $activeLegacyPlan 'state_migration_active_leases' 'Active legacy leases must fail closed during migration.'
   Register-SafetyControl 'legacy-active-failsafe'
 
+  $version3Repo = Join-Path $testRoot 'version3-write-repo'
+  New-FixtureRepository $version3Repo
+  $version3Status = Get-GovernorData (Invoke-Governor @('-Action', 'status') $version3Repo)
+  $version3StatePath = Get-StatePath $version3Repo
+  New-Item -ItemType Directory -Path (Split-Path -Parent $version3StatePath) -Force | Out-Null
+  $legacyTask = 'version3-write'
+  $legacyWorker = '/root/version3-writer'
+  @{
+    version = 3
+    state_revision = 9
+    workers = @{
+      $legacyWorker = @{
+        worker_id = $legacyWorker; repository_id = $version3Status.repository_id
+        workspace_id = $version3Status.workspace_id; access_mode = 'write'; status = 'leased'
+      }
+    }
+    tasks = @{
+      $legacyTask = @{
+        task_id = $legacyTask; repository_id = $version3Status.repository_id
+        workspace_id = $version3Status.workspace_id; access_mode = 'write'; status = 'working'
+      }
+    }
+    leases = @{
+      $legacyTask = @{
+        task_id = $legacyTask; worker_id = $legacyWorker; lease_id = 'legacy-lease'
+        fencing_token = 'legacy-fence'; repository_id = $version3Status.repository_id
+        workspace_id = $version3Status.workspace_id; access_mode = 'write'; status = 'working'
+        expires_at = [DateTimeOffset]::UtcNow.AddMinutes(30).ToString('o')
+      }
+    }
+    plans = @{}
+  } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $version3StatePath -Encoding UTF8
+  $quarantinedStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status') $version3Repo)
+  Assert-Equal $quarantinedStatus.state_version 4 'Version-3 state must migrate to version 4.'
+  Assert-Equal $quarantinedStatus.blocked_legacy_write_leases 1 'Active version-3 writes must be quarantined.'
+  foreach ($blockedAction in @('renew', 'result', 'verify', 'correct', 'accept')) {
+    $blockedResult = Invoke-Governor @(
+      '-Action', $blockedAction, '-TaskId', $legacyTask, '-WorkerId', $legacyWorker,
+      '-LeaseId', 'legacy-lease', '-FencingToken', 'legacy-fence'
+    ) $version3Repo
+    Assert-Failure $blockedResult 'legacy_write_lease_disabled' "Legacy write action $blockedAction must fail closed."
+  }
+  $blockedReadPlan = New-TestPlan 'blocked-by-legacy-write' 'read' @('src/**') 'explore' $version3Repo
+  Assert-Success $blockedReadPlan 'Planning around a quarantined write should return a safe decision.'
+  Assert-Equal (Get-GovernorData $blockedReadPlan).reason 'legacy_write_lease_disabled' 'Quarantined writes must block new delegation.'
+  $legacyRelease = Invoke-Governor @('-Action', 'release', '-TaskId', $legacyTask, '-CoordinatorAccepted') $version3Repo
+  Assert-Success $legacyRelease 'Coordinator-approved legacy write quarantine release failed.'
+  Assert-Equal (Get-GovernorData $legacyRelease).fingerprint_executed $false 'Legacy write disposal must not fingerprint the repository.'
+  Assert-Equal (Get-GovernorData (Invoke-Governor @('-Action', 'status') $version3Repo)).blocked_legacy_write_leases 0 `
+    'Legacy write quarantine should clear after explicit release.'
+  Register-SafetyControl 'version3-write-quarantine'
+
   $customState = Join-Path $testRoot 'custom-state.json'
   Set-Content -LiteralPath $customState -Value '{private-test}'
   $customStateResult = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
@@ -542,6 +667,9 @@ try {
   $scriptText = Get-Content -Raw -LiteralPath $governorScript
   if ($scriptText -match '\bStop-Process\b|git\s+(reset|clean|worktree\s+remove)') {
     throw 'Governor script contains a destructive repository or process operation.'
+  }
+  if ($scriptText -match "Invoke-Git\s+@\('diff'|git\s+diff") {
+    throw 'Governor fingerprinting must not invoke working-tree git diff.'
   }
 
   Write-Output ("Chronos Governor deterministic validations passed. Scenarios: {0}. This checklist is not a security-coverage percentage." -f `

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chronos sanitized diagnostic example</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; min-height: 100%; background: #080a0d; color: #f6f7f8; }
+    body { font-family: Inter, "Segoe UI", Arial, sans-serif; letter-spacing: 0; }
+    main { min-height: 100vh; padding: 76px 72px 66px; display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; gap: 28px; border-bottom: 2px solid #262c34; padding-bottom: 36px; }
+    .mark { width: 112px; height: 112px; object-fit: contain; }
+    h1 { font-size: 74px; line-height: .92; margin: 0 0 10px; font-weight: 800; }
+    .tagline { color: #aeb7c2; font-size: 27px; line-height: 1.25; }
+    .sample { margin: 42px 0 30px; color: #ffd166; font-size: 24px; font-weight: 700; text-transform: uppercase; }
+    .headline { font-size: 58px; line-height: 1.05; margin: 0 0 36px; max-width: 900px; }
+    .metrics { border-top: 2px solid #262c34; }
+    .metric { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 24px; padding: 27px 0; border-bottom: 2px solid #262c34; }
+    .label { color: #aeb7c2; font-size: 25px; margin-bottom: 8px; }
+    .detail { color: #f6f7f8; font-family: Consolas, monospace; font-size: 25px; }
+    .value { font-family: Consolas, monospace; font-size: 42px; font-weight: 800; text-align: right; }
+    .bad { color: #ff5b61; }
+    .warn { color: #ffd166; }
+    .good { color: #4ed7a0; }
+    .explain { font-size: 31px; line-height: 1.32; margin: 38px 0 0; color: #dce1e7; }
+    .install { margin-top: auto; padding-top: 46px; }
+    .install h2 { margin: 0 0 18px; font-size: 30px; }
+    pre { margin: 0; padding: 24px; border: 2px solid #38414c; border-radius: 6px; color: #dce1e7; font: 22px/1.5 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    footer { display: flex; justify-content: space-between; gap: 24px; margin-top: 28px; color: #aeb7c2; font-size: 22px; }
+    body.social main { padding: 46px 58px; }
+    body.social header { padding-bottom: 24px; }
+    body.social .mark { width: 84px; height: 84px; }
+    body.social h1 { font-size: 58px; }
+    body.social .tagline { font-size: 22px; }
+    body.social .sample { margin: 24px 0 18px; font-size: 18px; }
+    body.social .headline { font-size: 38px; margin-bottom: 20px; }
+    body.social .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0 38px; }
+    body.social .metric { padding: 13px 0; }
+    body.social .label, body.social .detail { font-size: 17px; }
+    body.social .value { font-size: 27px; }
+    body.social .explain, body.social .install, body.social footer { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img class="mark" src="chronos-mark.png" alt="Chronos">
+      <div>
+        <h1>Chronos</h1>
+        <div class="tagline">Codex diagnostics and read-worker coordination for Windows</div>
+      </div>
+    </header>
+    <div class="sample">Sanitized example output</div>
+    <h2 class="headline">See the difference between a healthy PC and a runaway Codex workflow.</h2>
+    <section class="metrics">
+      <div class="metric"><div><div class="label">Machine health</div><div class="detail">CPU, memory, disk, helpers</div></div><div class="value good">HEALTHY</div></div>
+      <div class="metric"><div><div class="label">Automatic review</div><div class="detail">590 turns / low-confidence window</div></div><div class="value bad">RUNAWAY</div></div>
+      <div class="metric"><div><div class="label">Approval persistence</div><div class="detail">581 equivalent retries after ALLOW</div></div><div class="value bad">FAILED</div></div>
+      <div class="metric"><div><div class="label">Quota pressure</div><div class="detail">context + review amplification</div></div><div class="value warn">HIGH</div></div>
+      <div class="metric"><div><div class="label">Diagnostic SQLite</div><div class="detail">1.48 GiB / 0.29 GiB reclaimable</div></div><div class="value warn">WARNING</div></div>
+    </section>
+    <p class="explain">Chronos keeps these conditions separate, explains the evidence window, and recommends proportionate recovery. It does not stop tasks, alter Codex, or infer SSD damage from a database counter.</p>
+    <section class="install">
+      <h2>Install from the public Codex marketplace</h2>
+      <pre>codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin add chronos@chronos</pre>
+    </section>
+    <footer><span>github.com/FaxanFM/chronos</span><span>On demand · Local only · No telemetry</span></footer>
+  </main>
+  <script>if (new URLSearchParams(location.search).has('social')) document.body.classList.add('social');</script>
+</body>
+</html>
