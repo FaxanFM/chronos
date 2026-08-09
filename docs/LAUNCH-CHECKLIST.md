@@ -45,6 +45,6 @@
 - [x] Provide a sanitized sample people can share without exposing local data.
 - [x] Make public issue reporting opt-in and privacy-gated.
 - [x] Add an opt-in sanitized-result form, share link, and reusable project badge.
-- [x] Record a privacy-safe GitHub discovery baseline with interpretation limits.
+- [x] Record a privacy-safe [GitHub discovery baseline](DISCOVERY-METRICS.md) with interpretation limits.
 - [ ] Publish a concise launch post linked to the release and proof card.
 - [ ] Review GitHub Traffic after 7 and 14 days; do not add analytics to Chronos.
