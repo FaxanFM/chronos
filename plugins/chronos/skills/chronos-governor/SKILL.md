@@ -164,6 +164,10 @@ paths. It creates no telemetry and sends no state remotely.
 - `shared_folder_write_delegation_disabled`: perform the edit as coordinator.
 - `model_inventory_unavailable`: refresh the active tool inventory.
 - `state_store_unwritable`: no worker was authorized; continue locally.
+- `state_store_unreadable` or `state_read_failed`: continue locally and report
+  the compact result; do not delete or edit state.
+- `state_invalid_json` or `state_schema_invalid`: preserve the state and report
+  the compact result; do not overwrite it to force recovery.
 - `state_lock_unavailable`: wait briefly or continue locally; do not delete it.
 - `worker_already_leased`: finish or release the worker's active lease.
 - `plan_token_mismatch`, `plan_expired`, or `plan_already_consumed`: plan again.
@@ -172,6 +176,9 @@ paths. It creates no telemetry and sends no state remotely.
 - `read_worker_modified_workspace`: preserve and inspect the changes; do not
   attribute them automatically.
 - `invalid_lifecycle_transition`: preserve the terminal record.
+- `internal_error`: continue locally and report only the compact result. The
+  privacy-safe `failure_stage` and `exception_type` identify the failing code
+  boundary without including paths, exception text, or state content.
 
 ## Honest Limits
 

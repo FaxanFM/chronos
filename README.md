@@ -81,7 +81,11 @@ codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
 ```
 
-Open a new Codex task after installation.
+Open a new Codex task after installation or upgrade. Codex tasks can retain the
+versioned plugin skill locator captured when they started. An older open task
+may therefore advertise a cache path removed by the upgrade even though the new
+version is installed correctly. Do not copy or link new plugin files into an
+old version directory; use a fresh task and verify the installed version.
 
 Official OpenAI Plugin Directory listing is pending. The public marketplace
 commands above install the same public plugin without waiting for directory

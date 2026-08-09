@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.3
+
+- Reject parseable Governor state whose collections are not maps or whose
+  revision is outside the non-negative signed 64-bit range, preventing schema
+  drift and numeric overflow from collapsing into an opaque failure.
+- Distinguish unreadable state, failed state reads, invalid JSON, and invalid
+  state schemas while preserving the original file and failing closed.
+- Add privacy-safe `failure_stage`, `exception_type`, and recovery metadata to
+  otherwise unknown Governor errors without returning exception text, paths,
+  state content, or identifiers.
+- Document the upstream Codex behavior where an open task retains its old
+  versioned skill locator after a plugin upgrade. Require a fresh task and
+  prohibit copies or links that would run newer code under an older version.
+- Add a sanitized public field-report ledger and deterministic regression cases
+  for supported-version state corruption and revision overflow.
+
+The independent canary's original v0.7.2 exception remains unclaimed until it
+returns the hardened diagnostic result. No warning threshold, critical
+threshold, scoring weight, predictive claim, telemetry, or background behavior
+changed in this release.
+
 ## v0.7.2
 
 - Prepare the skills-only package for OpenAI Plugin Directory review under the

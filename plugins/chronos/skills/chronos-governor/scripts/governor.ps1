@@ -671,6 +671,39 @@ function New-State {
   }
 }
 
+function ConvertTo-StateInt64 {
+  param($Value)
+  if ($null -eq $Value) { Throw-GovernorError "state_schema_invalid" }
+  $text = [Convert]::ToString($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+  $parsed = [int64]0
+  if (
+    -not [int64]::TryParse(
+      $text,
+      [System.Globalization.NumberStyles]::Integer,
+      [System.Globalization.CultureInfo]::InvariantCulture,
+      [ref]$parsed
+    ) -or $parsed -lt 0
+  ) {
+    Throw-GovernorError "state_schema_invalid"
+  }
+  $parsed
+}
+
+function Assert-StateMap {
+  param([hashtable]$State, [string]$Name)
+  if (-not $State.ContainsKey($Name) -or $State[$Name] -isnot [System.Collections.IDictionary]) {
+    Throw-GovernorError "state_schema_invalid"
+  }
+  foreach ($entry in $State[$Name].GetEnumerator()) {
+    if (
+      [string]::IsNullOrWhiteSpace([string]$entry.Key) -or
+      $entry.Value -isnot [System.Collections.IDictionary]
+    ) {
+      Throw-GovernorError "state_schema_invalid"
+    }
+  }
+}
+
 function Read-State {
   $sourcePath = $script:ResolvedStatePath
   $legacySource = $false
@@ -682,10 +715,29 @@ function Read-State {
     return New-State
   }
   try {
-    $parsed = Get-Content -Raw -LiteralPath $sourcePath | ConvertFrom-Json -ErrorAction Stop
-    $state = ConvertTo-Hashtable $parsed
+    $json = Get-Content -Raw -LiteralPath $sourcePath -ErrorAction Stop
+  } catch [System.UnauthorizedAccessException] {
+    Throw-GovernorError "state_store_unreadable"
+  } catch [System.Security.SecurityException] {
+    Throw-GovernorError "state_store_unreadable"
+  } catch [System.IO.IOException] {
+    Throw-GovernorError "state_read_failed"
+  }
+  try {
+    $state = ConvertTo-Hashtable ($json | ConvertFrom-Json -ErrorAction Stop)
   } catch {
     Throw-GovernorError "state_invalid_json"
+  }
+  if ($state -isnot [System.Collections.IDictionary]) {
+    Throw-GovernorError "state_schema_invalid"
+  }
+  $stateVersion = ConvertTo-StateInt64 $state.version
+  if ($stateVersion -notin @(1, 2, 3, 4)) {
+    Throw-GovernorError "state_version_unsupported"
+  }
+  $state.version = [int]$stateVersion
+  foreach ($requiredMap in @('workers', 'tasks', 'leases')) {
+    Assert-StateMap $state $requiredMap
   }
   if ($state.version -in @(1, 2)) {
     $legacyActive = @($state.leases.Values | Where-Object { $_.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction') })
@@ -694,10 +746,8 @@ function Read-State {
     if ($null -eq $state.state_revision) { $state.state_revision = [int64]0 }
     if ($null -eq $state.plans) { $state.plans = @{} }
   }
-  if ($state.version -notin @(3, 4) -or $null -eq $state.workers -or $null -eq $state.tasks -or $null -eq $state.leases -or $null -eq $state.plans) {
-    Throw-GovernorError "state_version_unsupported"
-  }
-  if ($null -eq $state.state_revision) { Throw-GovernorError "state_version_unsupported" }
+  Assert-StateMap $state 'plans'
+  $state.state_revision = ConvertTo-StateInt64 $state.state_revision
   foreach ($plan in @($state.plans.Values)) {
     if ($plan.access_mode -eq 'write' -and $plan.status -eq 'issued') {
       $plan.status = 'quarantined_legacy_write'
@@ -888,12 +938,14 @@ function Assert-LeaseCredentials {
   if (Test-LeaseExpired $Lease) { Throw-GovernorError "lease_expired" }
 }
 
+$script:FailureStage = 'repository_path'
 try {
   $resolvedRepository = [System.IO.Path]::GetFullPath($Repository)
   if (-not (Test-Path -LiteralPath $resolvedRepository -PathType Container)) {
     Throw-GovernorError "repository_unavailable"
   }
   $script:RepositoryRoot = Resolve-CanonicalPath $resolvedRepository
+  $script:FailureStage = 'repository_identity'
   $rootResult = Try-Invoke-Git @('rev-parse', '--show-toplevel')
   $rawRoot = $rootResult.output
   if (-not $rootResult.ok -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
@@ -904,6 +956,7 @@ try {
   $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir
   $repositoryId = Get-TextHash $script:GitCommonDir.ToLowerInvariant()
   $workspaceId = Get-TextHash ($script:RepositoryRoot.ToLowerInvariant() + "`n" + $script:GitCommonDir.ToLowerInvariant())
+  $script:FailureStage = 'state_path'
   $stateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'Chronos\Governor'
   $expectedStatePath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $stateRoot $repositoryId) 'governor-state.json'))
   $script:LegacyStatePath = [System.IO.Path]::GetFullPath((Join-Path $script:GitCommonDir 'chronos/governor-state.json'))
@@ -922,9 +975,12 @@ try {
   if ($LeaseMinutes -lt 1 -or $LeaseMinutes -gt 240) { Throw-GovernorError "invalid_lease_limit" }
   if ($StaleMinutes -lt 15 -or $StaleMinutes -gt 1440) { Throw-GovernorError "invalid_stale_limit" }
   if ($LockStaleSeconds -lt 1 -or $LockStaleSeconds -gt 600) { Throw-GovernorError "invalid_lock_stale_limit" }
+  $script:FailureStage = 'action_' + $Action
 
   if ($Action -eq 'status') {
+    $script:FailureStage = 'state_read'
     $state = Read-State
+    $script:FailureStage = 'status_summary'
     $active = @(Get-ActiveLeases $state)
     $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-$StaleMinutes)
     $stale = @($active | Where-Object {
@@ -955,6 +1011,7 @@ try {
   }
 
   if ($Action -eq 'plan') {
+    $script:FailureStage = 'plan'
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
     $scopes = @(Get-NormalizedScopes)
     $role = if ($TaskClass -in @('review', 'verification', 'explore')) { 'analysis_worker' } else { 'implementation_worker' }
@@ -1444,6 +1501,12 @@ try {
   }
 } catch {
   $code = if ($_.Exception.Message -match '^[a-z0-9_]+$') { $_.Exception.Message } else { 'internal_error' }
-  Write-GovernorOutput @{ ok = $false; action = $Action; error = $code }
+  $failure = @{ ok = $false; action = $Action; error = $code }
+  if ($code -eq 'internal_error') {
+    $failure.failure_stage = $script:FailureStage
+    $failure.exception_type = $_.Exception.GetType().Name
+    $failure.recovery = 'continue_as_coordinator_and_report'
+  }
+  Write-GovernorOutput $failure
   exit 1
 }

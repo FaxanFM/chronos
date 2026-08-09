@@ -551,6 +551,39 @@ $input | ForEach-Object { $_ }
   Assert-Failure $invalidState 'state_invalid_json' 'Malformed state should fail closed.'
   Assert-Equal (Get-Content -Raw -LiteralPath $statePath) "{not-json`r`n" 'Malformed state must not be overwritten.'
   Register-SafetyControl 'malformed-state'
+
+  @{
+    version = 4
+    state_revision = 1
+    workers = @()
+    tasks = @{}
+    leases = @{}
+    plans = @{}
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $statePath
+  $invalidShape = Invoke-Governor @('-Action', 'status')
+  Assert-Failure $invalidShape 'state_schema_invalid' 'Parseable state with a non-map collection must fail explicitly.'
+  Register-SafetyControl 'state-schema-shape'
+
+  @{
+    version = 4
+    state_revision = '9223372036854775808'
+    workers = @{}
+    tasks = @{}
+    leases = @{}
+    plans = @{}
+  } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $statePath
+  $revisionOverflow = Invoke-Governor @('-Action', 'status')
+  Assert-Failure $revisionOverflow 'state_schema_invalid' 'Out-of-range state revision must not become an opaque integer overflow.'
+  Register-SafetyControl 'state-revision-boundary'
+
+  $scriptText = Get-Content -Raw -LiteralPath $governorScript
+  foreach ($diagnosticField in @('failure_stage', 'exception_type', 'continue_as_coordinator_and_report')) {
+    if (-not $scriptText.Contains($diagnosticField)) {
+      throw "Unknown Governor failures must retain privacy-safe diagnostic field: $diagnosticField"
+    }
+  }
+  Register-SafetyControl 'privacy-safe-unknown-error-contract'
+
   Copy-Item -LiteralPath $stateBackup -Destination $statePath -Force
   Set-Content -LiteralPath ($statePath + '.tmp-interrupted') -Value '{partial'
   $interruptedStatus = Invoke-Governor @('-Action', 'status')
@@ -664,7 +697,6 @@ $input | ForEach-Object { $_ }
   Assert-Equal (Get-Content -Raw -LiteralPath $customState) "{private-test}`r`n" 'Rejected custom state must remain untouched.'
   Register-SafetyControl 'custom-state-disabled'
 
-  $scriptText = Get-Content -Raw -LiteralPath $governorScript
   if ($scriptText -match '\bStop-Process\b|git\s+(reset|clean|worktree\s+remove)') {
     throw 'Governor script contains a destructive repository or process operation.'
   }

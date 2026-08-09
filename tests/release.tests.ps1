@@ -6,6 +6,10 @@ $builder = Join-Path $repoRoot "scripts\build-release.ps1"
 $manifestPath = Join-Path $repoRoot "plugins\chronos\.codex-plugin\plugin.json"
 $releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
 $testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
+$readmePath = Join-Path $repoRoot "README.md"
+$operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
+$supportPath = Join-Path $repoRoot "SUPPORT.md"
+$fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
@@ -23,6 +27,22 @@ try {
   }
   if ($manifest.interface.PSObject.Properties['screenshots']) {
     throw "Skills-only packages must not declare interface screenshots."
+  }
+  $upgradeBoundary = @(
+    Get-Content -Raw -LiteralPath $readmePath
+    Get-Content -Raw -LiteralPath $operationsPath
+    Get-Content -Raw -LiteralPath $supportPath
+  ) -join "`n"
+  foreach ($required in @('fresh task', 'versioned plugin skill locator', 'Do not copy', 'stale task catalog state')) {
+    if (-not $upgradeBoundary.Contains($required)) {
+      throw "Public upgrade guidance is missing the stale task-locator boundary: $required"
+    }
+  }
+  $fieldReports = Get-Content -Raw -LiteralPath $fieldReportsPath
+  foreach ($forbidden in @('DESKTOP-', 'C:\Users\', 'source_thread_id', 'session_id')) {
+    if ($fieldReports.Contains($forbidden)) {
+      throw "Sanitized field-report ledger contains an identifying marker: $forbidden"
+    }
   }
   foreach ($excluded in @('apps', 'mcpServers')) {
     if ($manifest.PSObject.Properties[$excluded]) {

@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: Chronos version
-      placeholder: 0.7.2
+      placeholder: 0.7.3
     validations:
       required: true
   - type: input
@@ -39,6 +39,18 @@ body:
     attributes:
       label: Minimal reproduction
       description: Use synthetic names and omit proprietary workspace details.
+    validations:
+      required: true
+  - type: dropdown
+    id: task_freshness
+    attributes:
+      label: Task state after installation or upgrade
+      description: Open tasks can retain an older versioned plugin locator.
+      options:
+        - Fresh task opened after installation or upgrade
+        - Existing task retained across installation or upgrade
+        - No installation or upgrade occurred during this task
+        - Unknown
     validations:
       required: true
   - type: textarea
