@@ -26,7 +26,7 @@
 - [x] Verify v0.7.3 checksum, attestation, immutable release, and packaged version.
 - [x] Install v0.7.3 locally and exercise inspect plus Governor status.
 - [x] Receive one successful v0.7.3 exercise report from a second installation machine.
-- [ ] Publish, verify, and install signed v0.7.6 engineering package.
+- [x] Publish, verify, and install signed v0.7.6 engineering package.
 - [ ] Receive one successful v0.7.6 exercise report from a second installation machine.
 
 ## Discovery

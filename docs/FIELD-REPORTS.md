@@ -96,3 +96,18 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   or local log collection.
 - Report the active installed manifest version, plan cancellation, expired-plan
   capacity, threshold contributors, and privacy-safe rule candidate categories.
+
+## v0.7.6 Release Verification
+
+- Signed release commit and annotated tag verified with the configured ED25519
+  signer; GitHub reports the commit signature as valid.
+- Immutable GitHub release contains the ZIP, checksum, and per-file release
+  manifest. The ZIP SHA-256 is
+  `e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
+- Two GitHub artifact attestations are published and every release/test workflow
+  completed successfully.
+- Local plugin replacement retained only cache version v0.7.6. Installed
+  Governor `status` reported its manifest version, three idle workers, no active
+  workers, no pending or expired plans, and disabled write delegation.
+- External v0.7.6 canary validation remains pending and is tracked separately
+  from the completed v0.7.3 independent validation.
