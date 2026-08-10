@@ -214,16 +214,19 @@ after publication.
 
 ## Portal Record
 
-Publisher organization: `Dravara`
+Publisher organization: `Dravara, LLC`
 
-Verified developer identity: pending `Dravara, LLC` business verification
+Verified developer identity: `Business - DRAVARA, LLC` (approved in OpenAI
+Platform and selected in the plugin upload dialog)
 
-Apps Management write access: confirmed by successful skills-only draft creation
+Apps Management write access: confirmed by access to the skills-only plugin
+upload workflow
 
 Submission URL: https://platform.openai.com/plugins
 
 Submitted at: pending
 
-Review status: draft creation paused before upload for business verification
+Review status: package upload pending; the verified release ZIP has not yet been
+uploaded or submitted for review
 
 OpenAI reviewer notes: none
