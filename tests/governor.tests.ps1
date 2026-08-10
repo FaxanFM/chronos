@@ -181,6 +181,8 @@ try {
   $mainBranch = (& git -C $fixtureRepo branch --show-current).Trim()
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
+  $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
+  Assert-Equal $versionStatus.plugin_version '0.7.4' 'Governor must report the active packaged plugin version.'
   $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
   if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Governor runtime state must not be stored beneath Git metadata.'
@@ -195,6 +197,44 @@ try {
   Register-SafetyControl 'git-metadata-readonly'
   Register-SafetyControl 'canonical-worker-id'
   Register-SafetyControl 'plan-token'
+
+  $cancelPlanResult = New-TestPlan 'cancel-before-lease' 'read' @('README.md') 'review'
+  Assert-Success $cancelPlanResult 'Cancelable plan creation failed.'
+  $cancelPlan = Get-GovernorData $cancelPlanResult
+  $statusWithPlan = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
+  Assert-Equal $statusWithPlan.pending_plans 1 'An unexpired issued plan must reserve pending capacity.'
+  $cancelResult = Invoke-Governor @(
+    '-Action', 'cancel-plan', '-TaskId', 'cancel-before-lease', '-PlanToken', $cancelPlan.plan_token
+  )
+  Assert-Success $cancelResult 'Token-authenticated plan cancellation failed.'
+  $cancelData = Get-GovernorData $cancelResult
+  Assert-Equal $cancelData.status 'canceled' 'Canceled plan must enter a terminal canceled state.'
+  Assert-Equal $cancelData.capacity_released $true 'Canceled plan must explicitly release pending capacity.'
+  Assert-Equal (Get-GovernorData (Invoke-Governor @('-Action', 'status'))).pending_plans 0 `
+    'Canceled plans must not remain pending.'
+  Assert-Failure (Invoke-Governor @(
+      '-Action', 'lease', '-TaskId', 'cancel-before-lease', '-WorkerId', '/root/canceled-plan',
+      '-PlanToken', $cancelPlan.plan_token
+    )) 'plan_already_consumed' 'A canceled plan token must never authorize a lease.'
+  Register-SafetyControl 'cancel-plan-terminal'
+
+  $expiredPlanResult = New-TestPlan 'expired-before-lease' 'read' @('README.md') 'review'
+  Assert-Success $expiredPlanResult 'Expiring plan creation failed.'
+  $expiredPlan = Get-GovernorData $expiredPlanResult
+  $expiredState = Get-Content -Raw -LiteralPath $fixtureStatePath | ConvertFrom-Json
+  $expiredState.plans.'expired-before-lease'.expires_at = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+  [System.IO.File]::WriteAllText(
+    $fixtureStatePath,
+    ($expiredState | ConvertTo-Json -Compress -Depth 20),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $expiredStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
+  Assert-Equal $expiredStatus.pending_plans 0 'Expired plans must not reserve pending capacity.'
+  Assert-Equal $expiredStatus.expired_plans 1 'Status must report expired issued plans separately.'
+  Assert-Success (Invoke-Governor @(
+      '-Action', 'cancel-plan', '-TaskId', 'expired-before-lease', '-PlanToken', $expiredPlan.plan_token
+    )) 'An expired plan must remain explicitly cancelable with its opaque token.'
+  Register-SafetyControl 'expired-plan-accounting'
 
   $filterRepo = Join-Path $testRoot 'filter-repo'
   New-FixtureRepository $filterRepo

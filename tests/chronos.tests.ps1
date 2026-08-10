@@ -15,6 +15,7 @@ $helperCriticalHome = Join-Path $testRoot "helper-critical-home"
 $helperFalsePositiveHome = Join-Path $testRoot "helper-false-positive-home"
 $tokenHealthHome = Join-Path $testRoot "token-health-home"
 $tokenIntegrityHome = Join-Path $testRoot "token-integrity-home"
+$tokenIntervalHome = Join-Path $testRoot "token-interval-home"
 $largeTailHome = Join-Path $testRoot "large-tail-home"
 $aggregateOverflowHome = Join-Path $testRoot "aggregate-overflow-home"
 $v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
@@ -40,7 +41,7 @@ function Assert-Match($value, $pattern, $message) {
 
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
-    $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, `
+    $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, $tokenIntervalHome, `
     $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $partialDbHome, $unsupportedCacheHome, $partialCacheHome, $reparseHome, $reparseExternal `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
@@ -411,6 +412,48 @@ try {
     throw "Chronos output exposed tool arguments."
   }
 
+  $intervalSessionDay = Join-Path (Join-Path (Join-Path $tokenIntervalHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $intervalSessionDay = Join-Path $intervalSessionDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $intervalSessionDay -Force | Out-Null
+  $intervalStart = [DateTimeOffset]::UtcNow.AddMinutes(-5)
+  $intervalRecords = foreach ($definition in @(
+      @{ seconds = 0; input = 1000000L; cached = 500000L; output = 10000L; reasoning = 2000L; write = 100000L },
+      @{ seconds = 60; input = 3000000L; cached = 1500000L; output = 30000L; reasoning = 6000L; write = 300000L }
+    )) {
+    @{
+      timestamp = $intervalStart.AddSeconds($definition.seconds).ToString("o")
+      type = "event_msg"
+      payload = @{
+        type = "token_count"
+        info = @{
+          model_context_window = 100000
+          total_token_usage = @{
+            input_tokens = $definition.input
+            cached_input_tokens = $definition.cached
+            cache_write_input_tokens = $definition.write
+            output_tokens = $definition.output
+            reasoning_output_tokens = $definition.reasoning
+            total_tokens = $definition.input + $definition.output
+          }
+          last_token_usage = @{ total_tokens = 1000 }
+        }
+      }
+    } | ConvertTo-Json -Compress -Depth 8
+  }
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $intervalSessionDay "rollout-token-interval.jsonl"),
+    $intervalRecords,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $intervalOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $tokenIntervalHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos token interval inspection failed." }
+  Assert-Match $intervalOutput " tokenIntervalInputM=2([.,]0)? .*tokenIntervalCachedInputM=1([.,]0)? .*tokenIntervalOutputM=0([.,]02)? .*tokenIntervalReasoningM=0([.,]004)? .*tokenIntervalCacheWriteM=0([.,]2)? .*tokenIntervalFiles=1 " `
+    "Comparable timestamped snapshots must produce marginal interval deltas."
+  Assert-Match $intervalOutput " tokenIntervalObservation=observed " `
+    "Complete token coverage must distinguish an observed interval from the cumulative snapshot."
+
   $reviewerSessionDay = Join-Path (Join-Path (Join-Path $reviewerHealthHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
   $reviewerSessionDay = Join-Path $reviewerSessionDay (Get-Date -Format "dd")
@@ -628,10 +671,25 @@ try {
       payload = @{
         type = "function_call"
         name = "shell_command"
-        arguments = (@{ sandbox_permissions = "require_escalated"; prefix_rule = @("rg", "synthetic-pattern") } | ConvertTo-Json -Compress)
+        call_id = "machine2-escalation-$index"
+        arguments = (@{
+          sandbox_permissions = "require_escalated"
+          prefix_rule = @("rg", "synthetic-pattern")
+          command = "private current-schema command must never be returned"
+          justification = "private current-schema justification must never be returned"
+        } | ConvertTo-Json -Compress)
       }
     } | ConvertTo-Json -Compress -Depth 8))
   }
+  $machine2Records.Add((@{
+    timestamp = $machine2Start.AddSeconds(1184).AddMilliseconds(500).ToString("o")
+    type = "response_item"
+    payload = @{
+      type = "function_call_output"
+      call_id = "machine2-escalation-1"
+      output = "private tool output and secret sk-not-returned-123456789"
+    }
+  } | ConvertTo-Json -Compress -Depth 8))
   [System.IO.File]::WriteAllLines($machine2Path, $machine2Records, [System.Text.UTF8Encoding]::new($false))
   $machine2Output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action inspect -CodexHome $machine2Home -SampleSeconds 1
@@ -642,12 +700,16 @@ try {
     "Allowed decisions and allow rate were not accounted separately."
   Assert-Match $machine2Output " approvalPersistenceRetries=581 approvalPersistenceFailures=1 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
     "Structurally equivalent retries with regenerated IDs must be classified as a persistence runaway."
+  Assert-Match $machine2Output " approvalRequestSchemas=event_msg,function_call_escalation approvalResolvedRequests=1 approvalUnresolvedRequests=583 approvalResolutionObservation=observed_partial_outcomes approvalLatencySamples=1 approvalMedianLatencyMs=500 approvalP95LatencyMs=500 " `
+    "Current function-call escalation requests must expose bounded resolution and latency aggregates."
   Assert-Match $machine2Output " reviewerToolCalls=3 reviewerEscalationsObserved=2 reviewerEscalationUniquePrefixes=1 reviewerEscalationRepeatedPrefixes=1 reviewerEscalationLargestPrefix=2 " `
     "Reviewer-originated escalation traffic was not classified independently."
   Assert-Match $machine2Output " ruleCount=4 ruleMonolithic=1 ruleReusableNarrow=2 ruleBroadInterpreter=1 ruleCredentialShaped=1 " `
     "Rule health did not classify brittle, narrow, broad, and credential-shaped rules."
   Assert-Match $machine2Output " ruleStatus=CRITICAL ruleValuesReturned=false " `
     "Credential-shaped rule output must be critical and must never return values."
+  Assert-Match $machine2Output " ruleSecretCandidateOrdinals=4 ruleSecretCandidateClasses=4:placeholder-like ruleSecretConfidence=low " `
+    "Rule diagnostics must provide privacy-safe ordinal, category, and confidence without secret text."
   Assert-Match $machine2Output " ruleFilesEligible=2 ruleFilesSelected=2 ruleCoverageCapped=false ruleParseFailures=0 " `
     "Comments and triple-quoted examples must not create false rule blocks or partial coverage."
   Assert-Match $machine2Output " ruleBrittlenessDiagnosis=rule_brittleness_warning ruleSecretDiagnosis=rule_secret_exposure ruleBroadInterpreterDiagnosis=broad_interpreter_rule " `
@@ -660,7 +722,7 @@ try {
     "Root-only spawning must not be misreported as recursive child-agent fan-out."
   Assert-Match $machine2Output " configuredReviewer=guardian_subagent effectiveReviewer=auto_review managedReviewer=unavailable reviewerConfigurationComparison=different_labels_mapping_possible primaryReasoningDefault=xhigh" `
     "Configured and effective reviewer labels should be surfaced without asserting incompatibility."
-  if (($machine2Output -join "`n") -match "synthetic_value_for_test_only|API_KEY|synthetic-pattern|approval-machine2|root-machine-2") {
+  if (($machine2Output -join "`n") -match "synthetic_value_for_test_only|API_KEY|synthetic-pattern|approval-machine2|root-machine-2|private current-schema|sk-not-returned") {
     throw "Chronos output exposed a credential, prefix, approval identifier, or session identifier."
   }
 
@@ -821,6 +883,10 @@ try {
     "A bounded tail must disclose partial continuity."
   Assert-Match $largeTailOutput " quotaConfidence=low " `
     "A truncated token sample must not support high quota confidence."
+  Assert-Match $largeTailOutput " rolloutGrowthObservation=suppressed_partial_coverage rolloutProjected24hMiB=unknown " `
+    "Partial rollout coverage must suppress the 24-hour projection."
+  Assert-Match $largeTailOutput " rolloutProjectionComparable=false " `
+    "A truncated rollout projection must be explicitly incomparable."
   Assert-Match $largeTailOutput " rolloutAgeObservation=partial_head_metadata rolloutHeadTruncatedFiles=1 rolloutHeadMetadataUnavailableFiles=1 " `
     "A bounded head without session metadata must disclose partial task-age coverage."
 

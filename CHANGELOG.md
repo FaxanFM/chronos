@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.4
+
+- Recognize current structured `function_call` escalation requests without
+  returning commands, justifications, tool output, IDs, prefixes, or hashes.
+  Correlate terminal tool results to bounded resolved/unresolved and latency
+  aggregates without inferring allow or deny decisions.
+- Add marginal token deltas between comparable timestamped tail snapshots while
+  retaining the existing cumulative input only as the frozen heuristic basis.
+- Suppress file-growth and 24-hour projections whenever rollout coverage is
+  partial, capped, truncated, malformed, duplicated, unreadable, or out of order.
+- Expose unchanged machine-threshold contributors and state explicitly that UI
+  responsiveness is not measured. Add privacy-safe rule ordinals, shape classes,
+  and remediation confidence without returning rule text or values.
+- Add token-authenticated `cancel-plan`, separate expired from pending plans,
+  report the active manifest version at runtime, and document the atomic
+  single-write lease transition.
+- Record successful v0.7.3 Governor status validation from a fresh task on an
+  independent Windows installation.
+
+No warning threshold, critical threshold, scoring weight, predictive claim,
+telemetry, background behavior, or write-delegation policy changed.
+
 ## v0.7.3
 
 - Reject parseable Governor state whose collections are not maps or whose

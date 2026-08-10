@@ -30,7 +30,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.7.3
+git verify-tag v0.7.4
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -51,16 +51,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.7.3.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.7.3.zip -R FaxanFM/chronos
-gh release verify v0.7.3 -R FaxanFM/chronos
-gh release verify-asset v0.7.3 .\chronos-v0.7.3.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.7.4.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.7.4.zip -R FaxanFM/chronos
+gh release verify v0.7.4 -R FaxanFM/chronos
+gh release verify-asset v0.7.4 .\chronos-v0.7.4.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.7.3.sha256`. These controls prove
+Compare the first command with `chronos-v0.7.4.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -84,7 +84,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.7.3 retains disabled shared-folder write delegation. Inactive Governor
+v0.7.4 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the

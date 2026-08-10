@@ -45,13 +45,46 @@ successfully exercises the candidate release from a fresh task.
 - Regression: deterministic tests cover malformed JSON, non-map collections,
   an out-of-range revision, interrupted writes, and the unknown-error output
   contract. Existing state is preserved on every failure.
-- Validation status: automated and installed-release checks pass locally;
-  independent v0.7.3 fresh-task canary pending.
+- Validation status: v0.7.3 Governor `status` succeeded from a fresh task on an
+  independent Windows installation against a valid nested repository. It
+  correctly reported three idle workers, no active workers, no pending plans,
+  and disabled write delegation. v0.7.3 is field-validated for this path.
+
+### Current approval schema was reported as unsupported
+
+- Affected versions: v0.7.0 through v0.7.3.
+- Reproduction scope: observed in independent field output and reproduced by a
+  deterministic local fixture using the current structured rollout shape.
+- Evidence: escalated `response_item/function_call` records were present while
+  `approvalRequestObservation=unsupported_schema` and request counts were zero.
+- Root cause: the inspector recognized legacy `event_msg` approval requests but
+  did not register structured function calls whose categorical permission was
+  `require_escalated`.
+- v0.7.4 correction: count only the structured categorical request shape,
+  correlate bounded terminal results by an ephemeral call-ID hash, and return
+  schema, resolved/unresolved, and latency aggregates. Never return arguments,
+  output, IDs, prefixes, or hashes; never infer a decision from tool completion.
+- Regression: current-schema requests, one resolved result, one unresolved
+  result, latency, repetition, and secret-bearing private fields are exercised.
+
+### Partial rollout coverage permitted incomparable projections
+
+- Affected versions: v0.7.0 through v0.7.3.
+- Reproduction scope: repeated field observations and deterministic truncated
+  tail fixtures.
+- Evidence: selected cumulative snapshots and file-lifetime projections moved
+  under capped or truncated coverage without corresponding interval semantics.
+- Root cause: cumulative snapshots drove the frozen quota heuristic while file
+  lifetime projection remained populated before continuity was classified.
+- v0.7.4 correction: add timestamped marginal interval deltas and suppress the
+  projection after any partial-continuity condition. The frozen score still
+  uses its existing cumulative basis and is labeled as such.
+- Regression: two comparable token snapshots and an over-2-GiB truncated tail.
 
 ## Heuristic / Tuning Issues
 
 No threshold, scoring, prediction, or calibration-sensitive change is included
-in v0.7.3. Existing calibration work remains frozen pending labeled evidence.
+in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 
 ## Feature / UX Improvements
 
@@ -61,3 +94,5 @@ in v0.7.3. Existing calibration work remains frozen pending labeled evidence.
   than a missing current installation.
 - Return actionable, privacy-safe Governor recovery metadata without telemetry
   or local log collection.
+- Report the active installed manifest version, plan cancellation, expired-plan
+  capacity, threshold contributors, and privacy-safe rule candidate categories.

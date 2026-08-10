@@ -1,6 +1,6 @@
 # Efficiency Governor
 
-Chronos 0.7.1 provides bounded, local observations for Codex approval review,
+Chronos 0.7.4 provides bounded, local observations for Codex approval review,
 permission-rule quality, worker context, and rollout amplification. It is an
 observer and advisor, not an approval-policy manager.
 
@@ -31,6 +31,11 @@ aggregate fields.
   structured fields. `metricSource=local_rollout`,
   `dashboardEquivalence=unsupported`, and `billingInference=unsupported` keep
   local activity distinct from dashboard turns and account billing.
+- Current `response_item/function_call` escalations are recognized only when a
+  structured categorical permission says `require_escalated`. Terminal tool
+  results provide resolved/unresolved and bounded latency aggregates; they do
+  not imply allow or deny without a structured decision record. Commands,
+  justifications, tool output, call IDs, prefixes, and hashes are never returned.
 - `approval_state_persistence_runaway` requires an allowed request to remain
   pending and regenerate with the same ephemeral correlation or structural
   fingerprint. High review volume alone is not this defect.
@@ -43,7 +48,11 @@ aggregate fields.
 - `rolloutSelectedMiB` describes the selected files.
 - `rolloutGrowthMiBPerHour` and `rolloutProjected24hMiB` are file-lifetime
   metadata estimates, explicitly labeled by `rolloutGrowthObservation`. They
-  are not persisted time-series measurements.
+  are not persisted time-series measurements and are suppressed whenever
+  selected coverage is partial.
+- `tokenSelectedCumulativeInputM` retains the existing frozen heuristic basis.
+  `tokenInterval*` reports marginal deltas only between comparable timestamped
+  snapshots in selected tails. Neither is billing telemetry.
 - `rolloutCrossFileDuplicateRecords` and
   `rolloutCrossFileDuplicateCompactions` report exact matching structured
   records across different selected files. Duplicate bytes, replay percentage,
@@ -75,6 +84,8 @@ Rule text, prefixes, environment assignments, and credential values are never
 returned. A credential-shaped result should lead the user to remove the value
 from the rule and rotate it if it may still be valid. Chronos never performs
 either action automatically.
+Bounded rule ordinals, safe shape classes, and confidence make the finding
+locally actionable without returning paths, rule text, fingerprints, or values.
 
 Every interpretation must consider the coverage fields. A partial tail, capped
 selection, unreadable file, malformed record, or out-of-order record means the
@@ -83,7 +94,7 @@ observation is incomplete.
 ## What It Does Not Infer
 
 Chronos reports `approvalRequestObservation=unsupported_schema` unless the
-runtime exposes structured request-level approval data. If a request exists but
+runtime exposes a supported structured request shape. If a request exists but
 lacks enough safe categorical fields, it reports
 `observed_insufficient_structure`. It does not guess an approval cause from
 command text, model names, or the number of reviews. It may hash a structured

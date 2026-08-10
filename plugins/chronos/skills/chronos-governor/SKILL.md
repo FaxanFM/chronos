@@ -106,6 +106,19 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
 
 One worker ID may own only one active lease. When `reuse_worker_id` is returned,
 reuse it only for the same workspace, role, model, effort, and access mode.
+If the native spawn fails or the worker ID is unavailable, cancel the issued
+plan exactly once with its original opaque token so it does not reserve pending
+capacity:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  -File scripts/governor.ps1 -Action cancel-plan -Repository C:\repo `
+  -TaskId inspect-auth-tests -PlanToken PLAN_TOKEN
+```
+
+Never delete or edit Governor state to recover capacity. `status` reports
+unexpired `pending_plans`, separate `expired_plans`, and the active
+`plugin_version` read from the installed manifest.
 
 ### 5. Record And Verify
 
@@ -171,6 +184,7 @@ paths. It creates no telemetry and sends no state remotely.
 - `state_lock_unavailable`: wait briefly or continue locally; do not delete it.
 - `worker_already_leased`: finish or release the worker's active lease.
 - `plan_token_mismatch`, `plan_expired`, or `plan_already_consumed`: plan again.
+- `cancel-plan` is terminal; a canceled token cannot later create a lease.
 - `invalid_worker_id`: use the exact runtime ID; `/root/name` is supported.
 - `workspace_fingerprint_limit_exceeded`: stop delegation and inspect locally.
 - `read_worker_modified_workspace`: preserve and inspect the changes; do not

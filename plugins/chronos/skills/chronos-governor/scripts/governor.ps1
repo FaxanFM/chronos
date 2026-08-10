@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("plan", "lease", "renew", "result", "verify", "correct", "accept", "retire", "release", "status")]
+  [ValidateSet("plan", "cancel-plan", "lease", "renew", "result", "verify", "correct", "accept", "retire", "release", "status")]
   [string]$Action = "status",
   [string]$Repository = (Get-Location).Path,
   [string]$StatePath = "",
@@ -38,8 +38,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-ChronosPluginVersion {
+  try {
+    $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\.codex-plugin\plugin.json'))
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $version = ([string]$manifest.version).Trim()
+    if ($version -match '^\d+\.\d+\.\d+$') { return $version }
+  } catch {}
+  "unavailable"
+}
+
+$script:ChronosPluginVersion = Get-ChronosPluginVersion
+
 function Write-GovernorOutput {
   param([hashtable]$Data)
+  if (-not $Data.ContainsKey('plugin_version')) { $Data.plugin_version = $script:ChronosPluginVersion }
   Write-Output ("CHRONOS GOVERNOR " + ($Data | ConvertTo-Json -Compress -Depth 10))
 }
 
@@ -986,6 +999,11 @@ try {
     $stale = @($active | Where-Object {
       try { [DateTimeOffset]::Parse([string]$_.updated_at) -lt $staleCutoff } catch { $true }
     })
+    $nowOffset = [DateTimeOffset]::UtcNow
+    $issuedPlans = @($state.plans.Values | Where-Object { $_.status -eq 'issued' })
+    $expiredPlans = @($issuedPlans | Where-Object {
+      try { [DateTimeOffset]::Parse([string]$_.expires_at) -le $nowOffset } catch { $true }
+    })
     Write-GovernorOutput @{
       ok = $true
       action = 'status'
@@ -997,7 +1015,8 @@ try {
       expired_leases = @($active | Where-Object { Test-LeaseExpired $_ }).Count
       idle_workers = @($state.workers.Values | Where-Object { $_.status -eq 'idle' }).Count
       stale_leases = $stale.Count
-      pending_plans = @($state.plans.Values | Where-Object { $_.status -eq 'issued' }).Count
+      pending_plans = $issuedPlans.Count - $expiredPlans.Count
+      expired_plans = $expiredPlans.Count
       tasks = $state.tasks.Count
       state_version = $state.version
       state_revision = [int64]$state.state_revision
@@ -1158,6 +1177,28 @@ try {
     $now = $nowOffset.ToString('o')
     $task = Normalize-Identifier $TaskId 'invalid_task_id'
 
+    if ($Action -eq 'cancel-plan') {
+      if (-not $PlanToken) { Throw-GovernorError "plan_token_required" }
+      if (-not $state.plans.ContainsKey($task)) { Throw-GovernorError "plan_not_found" }
+      $plan = $state.plans[$task]
+      if ($plan.status -ne 'issued') { Throw-GovernorError "plan_already_consumed" }
+      if ((Get-TextHash $PlanToken) -ne $plan.token_hash) { Throw-GovernorError "plan_token_mismatch" }
+      if ($plan.repository_id -ne $repositoryId -or $plan.workspace_id -ne $workspaceId) {
+        Throw-GovernorError "plan_workspace_mismatch"
+      }
+      $plan.status = 'canceled'
+      $plan.canceled_at = $now
+      Write-State $state
+      Write-GovernorOutput @{
+        ok = $true
+        action = 'cancel-plan'
+        task_id = $task
+        status = 'canceled'
+        capacity_released = $true
+      }
+      exit 0
+    }
+
     if ($Action -eq 'lease') {
       $worker = Normalize-WorkerIdentifier $WorkerId
       if (-not $PlanToken) { Throw-GovernorError "plan_token_required" }
@@ -1313,6 +1354,7 @@ try {
         model_inventory_hash = $plan.model_inventory_hash
         model_inventory_index = $selection.index
         model_cost_rank = $selection.cost_rank
+        lease_state_transition = 'atomic_single_write_after_validation'
         attempt = $attempts
         max_attempts = [int]$leasePolicy.max_total_attempts
         delegation_depth_policy = 1

@@ -11,6 +11,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-ChronosPluginVersion {
+  try {
+    $manifestPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\.codex-plugin\plugin.json'))
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $version = ([string]$manifest.version).Trim()
+    if ($version -match '^\d+\.\d+\.\d+$') { return $version }
+  } catch {}
+  "unavailable"
+}
+
+$script:ChronosPluginVersion = Get-ChronosPluginVersion
+
 function Initialize-ChronosReadRoot {
   param([string]$Path)
   $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
@@ -655,6 +667,9 @@ function Get-RuleHealth {
     ReusableNarrow = 0
     BroadInterpreter = 0
     CredentialShaped = 0
+    CredentialCandidateOrdinals = "none"
+    CredentialCandidateClasses = "none"
+    CredentialConfidence = "not_observed"
     AverageLength = $null
     MaximumLiteralLength = 0
     Status = "UNAVAILABLE"
@@ -683,6 +698,9 @@ function Get-RuleHealth {
     return [pscustomobject]$result
   }
   $lengthTotal = 0L
+  $credentialOrdinals = [System.Collections.Generic.List[int]]::new()
+  $credentialClasses = [System.Collections.Generic.List[string]]::new()
+  $credentialConfidenceRank = 0
   $remainingRules = 2048
   foreach ($file in $files) {
     if ($remainingRules -le 0) { $result.CoverageCapped = $true; break }
@@ -709,12 +727,31 @@ function Get-RuleHealth {
 
       $secretShape = $trimmed -match '(?i)(token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)\s*[=:]' -or
         $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
-      if ($secretShape) { $result.CredentialShaped++ }
+      if ($secretShape) {
+        $result.CredentialShaped++
+        $ordinal = $result.Count
+        $placeholderLike = $trimmed -match '(?i)placeholder|example|synthetic|dummy|redacted|test[_-]?only|your[_-]'
+        $providerToken = $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+        $category = if ($placeholderLike) { "placeholder-like" } elseif ($providerToken) {
+          "provider-token"
+        } else { "named-assignment" }
+        $confidenceRank = if ($placeholderLike) { 1 } elseif ($providerToken) { 3 } else { 2 }
+        if ($credentialOrdinals.Count -lt 32) {
+          $credentialOrdinals.Add($ordinal)
+          $credentialClasses.Add(($ordinal.ToString() + ":" + $category))
+        }
+        if ($confidenceRank -gt $credentialConfidenceRank) { $credentialConfidenceRank = $confidenceRank }
+      }
     }
     $remainingRules -= @($parsedRules.Blocks).Count
   }
   $result.Observation = if ($result.CoverageCapped) { "observed_partial" } else { "observed" }
   if ($result.Count -gt 0) { $result.AverageLength = [math]::Round($lengthTotal / [double]$result.Count, 1) }
+  if ($credentialOrdinals.Count -gt 0) {
+    $result.CredentialCandidateOrdinals = @($credentialOrdinals) -join ","
+    $result.CredentialCandidateClasses = @($credentialClasses) -join ","
+    $result.CredentialConfidence = @("not_observed", "low", "medium", "high")[$credentialConfidenceRank]
+  }
   $result.Status = if ($result.CredentialShaped -gt 0) { "CRITICAL" } elseif (
     $result.Monolithic -gt 0 -or $result.BroadInterpreter -gt 0
   ) { "WARNING" } elseif ($result.CoverageCapped) { "WARNING" } else { "HEALTHY" }
@@ -840,6 +877,7 @@ function Get-ApprovalRequestClass {
     if ($value) { $dimensions.Add($definition.label + ":" + $value) }
   }
   [pscustomobject]@{
+    Schema = "event_msg"
     Source = $source
     PrefixFingerprint = $prefixFingerprint
     OperationClass = if ($operationClass) { $operationClass } else { "unknown" }
@@ -855,6 +893,109 @@ function Get-ApprovalRequestClass {
       $payloadType + "|" + (@($dimensions | Sort-Object) -join "|") +
         $(if ($prefixFingerprint) { "|prefix:" + $prefixFingerprint } else { "|prefix:unavailable" })
     } else { $null }
+  }
+}
+
+function Get-FunctionCallApprovalRequestClass {
+  param($Record)
+  if (-not $Record -or $Record.type -ne "response_item" -or
+      -not $Record.payload -or $Record.payload.type -ne "function_call") { return $null }
+  $arguments = ConvertFrom-StructuredArguments $Record.payload.arguments
+  $permission = Get-SafeCategory $arguments @("sandbox_permissions", "permission_class")
+  if ($permission -ne "require_escalated") { return $null }
+
+  $functionName = Get-SafeCategory $Record.payload @("name")
+  $source = switch ($functionName) {
+    "shell_command" { "shell" }
+    "apply_patch" { "filesystem" }
+    "web__run" { "network" }
+    default { "unknown" }
+  }
+  $prefixFingerprint = Get-CanonicalPrefixFingerprint $arguments
+  $operationClass = Get-InspectionOperationClass $arguments
+  $callProperty = $Record.payload.PSObject.Properties["call_id"]
+  $callId = if ($callProperty -and $null -ne $callProperty.Value) { [string]$callProperty.Value } else { $null }
+  $correlation = if ($callId -and $callId.Length -le 512) { Get-TextFingerprint $callId } else { $null }
+  $signatureParts = @(
+    "function_call_escalation",
+    "source:" + $source,
+    "function:" + $(if ($functionName) { $functionName } else { "unknown" }),
+    "operation:" + $(if ($operationClass) { $operationClass } else { "unknown" }),
+    "permission:" + $permission,
+    "prefix:" + $(if ($prefixFingerprint) { $prefixFingerprint } else { "unavailable" })
+  )
+  [pscustomobject]@{
+    Schema = "function_call_escalation"
+    Source = $source
+    PrefixFingerprint = $prefixFingerprint
+    OperationClass = if ($operationClass) { $operationClass } else { "unknown" }
+    InspectionShaped = $operationClass -in @(
+      "get-content", "rg", "get-childitem", "select-string", "resolve-path", "test-path",
+      "repository-read", "filesystem-read"
+    )
+    AccessMode = "unknown"
+    BoundaryCause = "sandbox_escalation"
+    State = "pending"
+    CorrelationFingerprint = $correlation
+    Signature = $signatureParts -join "|"
+  }
+}
+
+function Add-ApprovalRequestObservation {
+  param($Health, $ApprovalClass, $RecordTimestamp, $ApprovalClasses, $ApprovalPrefixes,
+    $ApprovalBoundaryCauses, $ApprovalSources, $ApprovalStates, $ApprovalRequestCorrelations,
+    $ApprovalSchemas)
+  if (-not $ApprovalClass) { return }
+  if ($ApprovalClass.CorrelationFingerprint -and
+      $ApprovalRequestCorrelations.ContainsKey($ApprovalClass.CorrelationFingerprint)) { return }
+  if ($ApprovalClass.CorrelationFingerprint) {
+    $ApprovalRequestCorrelations[$ApprovalClass.CorrelationFingerprint] = $true
+  }
+  if ($ApprovalClass.Schema) { $null = $ApprovalSchemas.Add([string]$ApprovalClass.Schema) }
+  $Health.ApprovalRequestsObserved++
+  if ($ApprovalClass.InspectionShaped) { $Health.InspectionShapedApprovalRequests++ }
+  foreach ($pair in @(
+      @{ Map = $ApprovalBoundaryCauses; Key = $ApprovalClass.BoundaryCause },
+      @{ Map = $ApprovalSources; Key = $ApprovalClass.Source },
+      @{ Map = $ApprovalClasses; Key = $ApprovalClass.Signature },
+      @{ Map = $ApprovalPrefixes; Key = $ApprovalClass.PrefixFingerprint }
+    )) {
+    if (-not $pair.Key) { continue }
+    if ($pair.Map.ContainsKey($pair.Key)) { $pair.Map[$pair.Key]++ } else { $pair.Map[$pair.Key] = 1 }
+  }
+  $stateKey = if ($ApprovalClass.CorrelationFingerprint) {
+    $ApprovalClass.CorrelationFingerprint
+  } else { $ApprovalClass.Signature }
+  if (-not $stateKey) { return }
+  $prior = if ($ApprovalStates.ContainsKey($stateKey)) {
+    $ApprovalStates[$stateKey]
+  } elseif ($ApprovalClass.Signature -and $ApprovalStates.ContainsKey($ApprovalClass.Signature)) {
+    $ApprovalStates[$ApprovalClass.Signature]
+  } else { $null }
+  if ($prior -and $prior.decision -eq "allowed" -and
+      $ApprovalClass.State -eq "pending" -and -not $prior.resolved) {
+    $Health.ApprovalPersistenceRetries++
+  }
+  $state = @{
+    decision = if ($prior) { $prior.decision } else { "unknown" }
+    resolved = $false
+    requested_at = $RecordTimestamp
+  }
+  $ApprovalStates[$stateKey] = $state
+  if ($ApprovalClass.Signature) { $ApprovalStates[$ApprovalClass.Signature] = $state }
+}
+
+function Resolve-ApprovalObservation {
+  param($Health, [string]$CorrelationFingerprint, $RecordTimestamp, $ApprovalStates,
+    $ApprovalResolutionLatencies)
+  if (-not $CorrelationFingerprint -or -not $ApprovalStates.ContainsKey($CorrelationFingerprint)) { return }
+  $state = $ApprovalStates[$CorrelationFingerprint]
+  if ($state.resolved) { return }
+  $state.resolved = $true
+  $Health.ApprovalResolvedRequests++
+  if ($RecordTimestamp -and $state.requested_at) {
+    $latency = ($RecordTimestamp - $state.requested_at).TotalMilliseconds
+    if ($latency -ge 0 -and $latency -le 86400000) { $ApprovalResolutionLatencies.Add([double]$latency) }
   }
 }
 
@@ -885,6 +1026,15 @@ function Get-QuotaHealth {
     Files = 0
     Samples = 0
     SessionInputM = $null
+    IntervalInputM = $null
+    IntervalCachedInputM = $null
+    IntervalOutputM = $null
+    IntervalReasoningM = $null
+    IntervalCacheWriteM = $null
+    IntervalFiles = 0
+    IntervalStartUtc = $null
+    IntervalEndUtc = $null
+    IntervalObservation = "unavailable"
     CachedReadPercent = $null
     CacheWriteM = $null
     CacheWriteObserved = $null
@@ -935,7 +1085,14 @@ function Get-QuotaHealth {
     ReviewerTokenAttribution = "unavailable"
     ReviewerMainInputRatio = $null
     ApprovalRequestObservation = "unsupported_schema"
+    ApprovalRequestSchemas = "none"
     ApprovalRequestsObserved = 0
+    ApprovalResolvedRequests = 0
+    ApprovalUnresolvedRequests = 0
+    ApprovalResolutionObservation = "unavailable"
+    ApprovalLatencySamples = 0
+    ApprovalMedianLatencyMs = $null
+    ApprovalP95LatencyMs = $null
     ApprovalUniqueClasses = 0
     ApprovalRepeatedRequests = 0
     ApprovalRepeatPercent = $null
@@ -982,6 +1139,7 @@ function Get-QuotaHealth {
     RolloutGrowthMiBPerHour = $null
     RolloutGrowthObservation = "unavailable"
     RolloutProjected24hMiB = $null
+    RolloutProjectionComparable = $false
     RolloutLineageLinksObserved = 0
     RolloutForkFilesObserved = 0
     RolloutNearSizeClusterFiles = 0
@@ -1009,6 +1167,7 @@ function Get-QuotaHealth {
     CodexVersionsObserved = "unavailable"
     AuthProvidersObserved = "unavailable"
     TokenUsageScope = "selected_rollout_cumulative_snapshots"
+    QuotaRiskBasis = "frozen_selected_cumulative_heuristic"
     QuotaContributors = "none"
     Advice = "none"
     AdviceReason = "no_supported_action_threshold_crossed"
@@ -1024,6 +1183,9 @@ function Get-QuotaHealth {
     RuleReusableNarrow = 0
     RuleBroadInterpreter = 0
     RuleCredentialShaped = 0
+    RuleCredentialCandidateOrdinals = "none"
+    RuleCredentialCandidateClasses = "none"
+    RuleCredentialConfidence = "not_observed"
     RuleAverageLength = $null
     RuleMaximumLiteralLength = 0
     RuleStatus = "UNAVAILABLE"
@@ -1044,6 +1206,14 @@ function Get-QuotaHealth {
   $cacheWriteAvailableFiles = 0
   $outputTokens = 0L
   $reasoningTokens = 0L
+  $intervalInputTokens = 0L
+  $intervalCachedInputTokens = 0L
+  $intervalOutputTokens = 0L
+  $intervalReasoningTokens = 0L
+  $intervalCacheWriteTokens = 0L
+  $intervalCacheWriteFiles = 0
+  $intervalStart = [DateTimeOffset]::MaxValue
+  $intervalEnd = [DateTimeOffset]::MinValue
   $reviewerInputTokens = 0L
   $primaryInputTokens = 0L
   $unclassifiedInputTokens = 0L
@@ -1067,7 +1237,10 @@ function Get-QuotaHealth {
   $approvalPrefixes = @{}
   $approvalBoundaryCauses = @{}
   $approvalStates = @{}
+  $approvalRequestCorrelations = @{}
   $approvalSources = @{}
+  $approvalSchemas = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $approvalResolutionLatencies = [System.Collections.Generic.List[double]]::new()
   $reviewerEscalationPrefixes = @{}
   $codexVersions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   $authProviders = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -1094,6 +1267,9 @@ function Get-QuotaHealth {
   $health.RuleReusableNarrow = $ruleHealth.ReusableNarrow
   $health.RuleBroadInterpreter = $ruleHealth.BroadInterpreter
   $health.RuleCredentialShaped = $ruleHealth.CredentialShaped
+  $health.RuleCredentialCandidateOrdinals = $ruleHealth.CredentialCandidateOrdinals
+  $health.RuleCredentialCandidateClasses = $ruleHealth.CredentialCandidateClasses
+  $health.RuleCredentialConfidence = $ruleHealth.CredentialConfidence
   $health.RuleAverageLength = $ruleHealth.AverageLength
   $health.RuleMaximumLiteralLength = $ruleHealth.MaximumLiteralLength
   $health.RuleStatus = $ruleHealth.Status
@@ -1147,6 +1323,10 @@ function Get-QuotaHealth {
     $lastSnapshot = $null
     $lastSnapshotTimestamp = [DateTimeOffset]::MinValue
     $lastSnapshotOrdinal = -1
+    $firstIntervalSnapshot = $null
+    $firstIntervalTimestamp = [DateTimeOffset]::MaxValue
+    $lastIntervalSnapshot = $null
+    $lastIntervalTimestamp = [DateTimeOffset]::MinValue
     $fileInheritedSnapshot = $null
     $lastTurnContext = $null
     $lastTurnContextTimestamp = [DateTimeOffset]::MinValue
@@ -1349,51 +1529,9 @@ function Get-QuotaHealth {
 
       if ($record.type -eq "event_msg") {
         $approvalClass = Get-ApprovalRequestClass $record
-        if ($approvalClass) {
-          $health.ApprovalRequestsObserved++
-          if ($approvalClass.InspectionShaped) { $health.InspectionShapedApprovalRequests++ }
-          if ($approvalBoundaryCauses.ContainsKey($approvalClass.BoundaryCause)) {
-            $approvalBoundaryCauses[$approvalClass.BoundaryCause]++
-          } else { $approvalBoundaryCauses[$approvalClass.BoundaryCause] = 1 }
-          if ($approvalSources.ContainsKey($approvalClass.Source)) {
-            $approvalSources[$approvalClass.Source]++
-          } else {
-            $approvalSources[$approvalClass.Source] = 1
-          }
-          if ($approvalClass.Signature) {
-            if ($approvalClasses.ContainsKey($approvalClass.Signature)) {
-              $approvalClasses[$approvalClass.Signature]++
-            } else {
-              $approvalClasses[$approvalClass.Signature] = 1
-            }
-          }
-          if ($approvalClass.PrefixFingerprint) {
-            if ($approvalPrefixes.ContainsKey($approvalClass.PrefixFingerprint)) {
-              $approvalPrefixes[$approvalClass.PrefixFingerprint]++
-            } else { $approvalPrefixes[$approvalClass.PrefixFingerprint] = 1 }
-          }
-          $approvalStateKey = if ($approvalClass.CorrelationFingerprint) {
-            $approvalClass.CorrelationFingerprint
-          } else { $approvalClass.Signature }
-          if ($approvalStateKey) {
-            $priorApproval = if ($approvalStates.ContainsKey($approvalStateKey)) {
-              $approvalStates[$approvalStateKey]
-            } elseif ($approvalClass.Signature -and $approvalStates.ContainsKey($approvalClass.Signature)) {
-              $approvalStates[$approvalClass.Signature]
-            } else { $null }
-            if ($priorApproval) {
-              if ($priorApproval.decision -eq "allowed" -and $approvalClass.State -eq "pending" -and -not $priorApproval.resolved) {
-                $health.ApprovalPersistenceRetries++
-              }
-            }
-            $approvalState = @{
-              decision = if ($priorApproval) { $priorApproval.decision } else { "unknown" }
-              resolved = $false
-            }
-            $approvalStates[$approvalStateKey] = $approvalState
-            if ($approvalClass.Signature) { $approvalStates[$approvalClass.Signature] = $approvalState }
-          }
-        }
+        Add-ApprovalRequestObservation $health $approvalClass $recordTimestamp $approvalClasses `
+          $approvalPrefixes $approvalBoundaryCauses $approvalSources $approvalStates `
+          $approvalRequestCorrelations $approvalSchemas
         $approvalDecision = Get-ApprovalDecisionRecord $record
         if ($approvalDecision) {
           $health.ApprovalDecisionsObserved++
@@ -1407,7 +1545,7 @@ function Get-QuotaHealth {
         if ($payloadType -in @("approval_resolved", "approval_state_applied")) {
           $resolvedId = Get-SafeCategory $record.payload @("approval_id", "request_id", "call_id")
           $resolvedKey = if ($resolvedId) { Get-TextFingerprint $resolvedId } else { $null }
-          if ($resolvedKey -and $approvalStates.ContainsKey($resolvedKey)) { $approvalStates[$resolvedKey].resolved = $true }
+          Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates $approvalResolutionLatencies
         } elseif ($payloadType -in @("approval_state_persistence_error", "approval_persistence_error")) {
           $health.ApprovalPersistenceFailures++
         }
@@ -1430,6 +1568,16 @@ function Get-QuotaHealth {
             $tokenSnapshotOwners[$recordHash] = @{ file = $file.FullName; snapshot = $snapshot }
           }
           $candidateTimestamp = if ($recordTimestamp) { $recordTimestamp } else { [DateTimeOffset]::MinValue }
+          if ($recordTimestamp) {
+            if (-not $firstIntervalSnapshot -or $recordTimestamp -lt $firstIntervalTimestamp) {
+              $firstIntervalSnapshot = $snapshot
+              $firstIntervalTimestamp = $recordTimestamp
+            }
+            if (-not $lastIntervalSnapshot -or $recordTimestamp -gt $lastIntervalTimestamp) {
+              $lastIntervalSnapshot = $snapshot
+              $lastIntervalTimestamp = $recordTimestamp
+            }
+          }
           if (
             -not $lastSnapshot -or
             $snapshot.TotalTokens -gt $lastSnapshot.TotalTokens -or
@@ -1460,6 +1608,10 @@ function Get-QuotaHealth {
         $fileToolCalls++
         $functionName = Get-SafeCategory $record.payload @("name")
         $arguments = ConvertFrom-StructuredArguments $record.payload.arguments
+        $approvalClass = Get-FunctionCallApprovalRequestClass $record
+        Add-ApprovalRequestObservation $health $approvalClass $recordTimestamp $approvalClasses `
+          $approvalPrefixes $approvalBoundaryCauses $approvalSources $approvalStates `
+          $approvalRequestCorrelations $approvalSchemas
         if ($currentTurnIsReviewer) {
           $health.ReviewerToolCalls++
           $sandboxPermission = Get-SafeCategory $arguments @("sandbox_permissions", "permission_class")
@@ -1508,6 +1660,12 @@ function Get-QuotaHealth {
           }
         }
       }
+      if ($record.type -eq "response_item" -and $record.payload.type -eq "function_call_output") {
+        $callProperty = $record.payload.PSObject.Properties["call_id"]
+        $callId = if ($callProperty -and $null -ne $callProperty.Value) { [string]$callProperty.Value } else { $null }
+        $resolvedKey = if ($callId -and $callId.Length -le 512) { Get-TextFingerprint $callId } else { $null }
+        Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates $approvalResolutionLatencies
+      }
     }
 
     if ($reviewerSeenInFile -and $fileParentLinkSeen) {
@@ -1535,6 +1693,26 @@ function Get-QuotaHealth {
           ).TotalDays)
         IsReviewer = $reviewerSeenInFile
       })
+
+    if ($firstIntervalSnapshot -and $lastIntervalSnapshot -and
+        $lastIntervalTimestamp -gt $firstIntervalTimestamp -and
+        $lastIntervalSnapshot.InputTokens -ge $firstIntervalSnapshot.InputTokens -and
+        $lastIntervalSnapshot.CachedInputTokens -ge $firstIntervalSnapshot.CachedInputTokens -and
+        $lastIntervalSnapshot.OutputTokens -ge $firstIntervalSnapshot.OutputTokens -and
+        $lastIntervalSnapshot.ReasoningTokens -ge $firstIntervalSnapshot.ReasoningTokens) {
+      $health.IntervalFiles++
+      $intervalInputTokens += [long]$lastIntervalSnapshot.InputTokens - [long]$firstIntervalSnapshot.InputTokens
+      $intervalCachedInputTokens += [long]$lastIntervalSnapshot.CachedInputTokens - [long]$firstIntervalSnapshot.CachedInputTokens
+      $intervalOutputTokens += [long]$lastIntervalSnapshot.OutputTokens - [long]$firstIntervalSnapshot.OutputTokens
+      $intervalReasoningTokens += [long]$lastIntervalSnapshot.ReasoningTokens - [long]$firstIntervalSnapshot.ReasoningTokens
+      if ($lastIntervalSnapshot.CacheWriteAvailable -and $firstIntervalSnapshot.CacheWriteAvailable -and
+          $lastIntervalSnapshot.CacheWriteTokens -ge $firstIntervalSnapshot.CacheWriteTokens) {
+        $intervalCacheWriteFiles++
+        $intervalCacheWriteTokens += [long]$lastIntervalSnapshot.CacheWriteTokens - [long]$firstIntervalSnapshot.CacheWriteTokens
+      }
+      if ($firstIntervalTimestamp -lt $intervalStart) { $intervalStart = $firstIntervalTimestamp }
+      if ($lastIntervalTimestamp -gt $intervalEnd) { $intervalEnd = $lastIntervalTimestamp }
+    }
 
     if ($lastSnapshot) {
       $health.Files++
@@ -1604,6 +1782,30 @@ function Get-QuotaHealth {
     $health.CoverageContinuity = "partial"
   } else {
     $health.CoverageContinuity = "complete"
+  }
+  if ($health.IntervalFiles -gt 0) {
+    $health.IntervalInputM = [math]::Round($intervalInputTokens / 1000000.0, 3)
+    $health.IntervalCachedInputM = [math]::Round($intervalCachedInputTokens / 1000000.0, 3)
+    $health.IntervalOutputM = [math]::Round($intervalOutputTokens / 1000000.0, 3)
+    $health.IntervalReasoningM = [math]::Round($intervalReasoningTokens / 1000000.0, 3)
+    $health.IntervalCacheWriteM = if ($intervalCacheWriteFiles -gt 0) {
+      [math]::Round($intervalCacheWriteTokens / 1000000.0, 3)
+    } else { $null }
+    $health.IntervalStartUtc = $intervalStart.ToUniversalTime().ToString("o")
+    $health.IntervalEndUtc = $intervalEnd.ToUniversalTime().ToString("o")
+    $health.IntervalObservation = if ($health.CoverageContinuity -eq "complete") {
+      "observed"
+    } else { "observed_partial_coverage" }
+  } elseif ($health.Samples -gt 0) {
+    $health.IntervalObservation = "insufficient_comparable_samples"
+  }
+  if ($health.CoverageContinuity -ne "complete") {
+    $health.RolloutGrowthMiBPerHour = $null
+    $health.RolloutProjected24hMiB = $null
+    $health.RolloutProjectionComparable = $false
+    $health.RolloutGrowthObservation = "suppressed_partial_coverage"
+  } elseif ($null -ne $health.RolloutGrowthMiBPerHour) {
+    $health.RolloutProjectionComparable = $true
   }
   $health.QuotaConfidence = if ($health.FilesSelected -eq 0) {
     "unavailable"
@@ -1744,6 +1946,28 @@ function Get-QuotaHealth {
   if ($approvalModes.Count -gt 0) {
     $health.ApprovalModesObserved = @($approvalModes | Sort-Object) -join ","
   }
+  if ($approvalSchemas.Count -gt 0) {
+    $health.ApprovalRequestSchemas = @($approvalSchemas | Sort-Object) -join ","
+  }
+  $health.ApprovalUnresolvedRequests = [math]::Max(
+    0, $health.ApprovalRequestsObserved - $health.ApprovalResolvedRequests
+  )
+  if ($health.ApprovalRequestsObserved -gt 0) {
+    $health.ApprovalResolutionObservation = if ($health.ApprovalResolvedRequests -gt 0) {
+      "observed_partial_outcomes"
+    } else { "requests_observed_no_structured_outcome" }
+  }
+  if ($approvalResolutionLatencies.Count -gt 0) {
+    $orderedLatencies = @($approvalResolutionLatencies | Sort-Object)
+    $health.ApprovalLatencySamples = $orderedLatencies.Count
+    $middle = [int][math]::Floor($orderedLatencies.Count / 2)
+    $medianLatency = if ($orderedLatencies.Count % 2 -eq 0) {
+      ($orderedLatencies[$middle - 1] + $orderedLatencies[$middle]) / 2.0
+    } else { $orderedLatencies[$middle] }
+    $health.ApprovalMedianLatencyMs = [math]::Round($medianLatency, 1)
+    $p95LatencyIndex = [math]::Max(0, [int][math]::Ceiling(0.95 * $orderedLatencies.Count) - 1)
+    $health.ApprovalP95LatencyMs = [math]::Round($orderedLatencies[$p95LatencyIndex], 1)
+  }
   if ($reviewTimestamps.Count -ge 2) {
     $orderedReviewTimestamps = @($reviewTimestamps | Sort-Object)
     $reviewDuration = $orderedReviewTimestamps[-1] - $orderedReviewTimestamps[0]
@@ -1811,7 +2035,8 @@ function Get-QuotaHealth {
       100.0 * [long]$health.CrossFileDuplicateBytes / [long]$parsedBytes, 1
     )
   }
-  if (-not $health.RolloutGrowthMiBPerHour) {
+  if ($health.RolloutGrowthObservation -ne "suppressed_partial_coverage" -and
+      $null -eq $health.RolloutGrowthMiBPerHour) {
     $health.RolloutGrowthObservation = "insufficient_file_lifetime"
   }
   if ($health.ApprovalRequestsObserved -gt 0) {
@@ -2012,6 +2237,25 @@ function Get-ProcessLevel($snapshot) {
   "HEALTHY"
 }
 
+function Get-ProcessLevelReasons($snapshot, [string]$Level) {
+  $reasons = [System.Collections.Generic.List[string]]::new()
+  if ($Level -eq "CRITICAL") {
+    if ($snapshot.Count -ge 100) { $reasons.Add("process-count-100") }
+    if ($snapshot.NodeRepl -ge 50) { $reasons.Add("node-repl-50") }
+    if ($snapshot.PrivateMB -ge 4096) { $reasons.Add("private-memory-4096mb") }
+    if ($snapshot.Handles -ge 30000) { $reasons.Add("handles-30000") }
+    if ($snapshot.DiskFreeGB -ge 0 -and $snapshot.DiskFreeGB -lt 5) { $reasons.Add("disk-free-below-5gb") }
+  } elseif ($Level -eq "WARNING") {
+    if ($snapshot.Count -ge 40) { $reasons.Add("process-count-40") }
+    if ($snapshot.NodeRepl -ge 20) { $reasons.Add("node-repl-20") }
+    if ($snapshot.PrivateMB -ge 2048) { $reasons.Add("private-memory-2048mb") }
+    if ($snapshot.Handles -ge 15000) { $reasons.Add("handles-15000") }
+    if ($snapshot.CpuCores -ge 1) { $reasons.Add("cpu-1-core") }
+    if ($snapshot.DiskFreeGB -ge 0 -and $snapshot.DiskFreeGB -lt 10) { $reasons.Add("disk-free-below-10gb") }
+  }
+  if ($reasons.Count -eq 0) { "none" } else { @($reasons) -join "," }
+}
+
 function Get-LogDbLevel($metrics) {
   if (-not $metrics.Present) { return "UNAVAILABLE" }
 
@@ -2101,6 +2345,7 @@ function Get-Candidates($snapshot) {
 $logBefore = if ($Action -eq "inspect") { Get-LogDbSample } else { $null }
 $snapshot = Get-Snapshot
 $processLevel = Get-ProcessLevel $snapshot
+$processReasons = Get-ProcessLevelReasons $snapshot $processLevel
 
 if ($Action -eq "inspect") {
   $logAfter = Get-LogDbSample
@@ -2110,6 +2355,11 @@ if ($Action -eq "inspect") {
   $filesystemHelper = Get-FilesystemHelperHealth
   $quotaHealth = Get-QuotaHealth
   $machineLevel = Get-WorseLevel $processLevel $filesystemHelper.Level
+  $machineContributors = [System.Collections.Generic.List[string]]::new()
+  if ($processReasons -ne "none") { $machineContributors.Add($processReasons) }
+  if ($filesystemHelper.CopyFailure) { $machineContributors.Add("filesystem-helper-copy-failure") }
+  if ($filesystemHelper.LaunchFailure) { $machineContributors.Add("filesystem-helper-launch-failure") }
+  $machineContributorText = if ($machineContributors.Count) { @($machineContributors) -join "," } else { "none" }
   $resourceLevel = Get-WorseLevel $machineLevel $logLevel
   $quotaLevel = if ($quotaHealth.Level -eq 'HIGH') { 'CRITICAL' } elseif ($quotaHealth.Level -eq 'ELEVATED') { 'WARNING' } elseif ($quotaHealth.Level -eq 'LOW') { 'HEALTHY' } else { 'UNAVAILABLE' }
   $overallLevel = Get-WorseLevel (Get-WorseLevel $resourceLevel $quotaLevel) $quotaHealth.RuleStatus
@@ -2169,7 +2419,12 @@ if ($Action -eq "inspect") {
     $quotaHealth.QuotaContributors,
     $quotaHealth.Advice)
   $efficiencyFields = [ordered]@{
+    pluginVersion = $script:ChronosPluginVersion
     headlineScope = 'machine_health'
+    processDiagnosticLevel = $processLevel
+    machineHealthContributors = $machineContributorText
+    machineHealthConfidence = 'threshold_observation_only'
+    responsivenessObservation = 'not_measured'
     processSampleSeconds = $SampleSeconds
     processOwnershipObservation = 'executable_name_only_unverified'
     filesystemHelperObservation = 'known_markers_15m'
@@ -2190,6 +2445,18 @@ if ($Action -eq "inspect") {
     dashboardEquivalence = $quotaHealth.DashboardEquivalence
     billingInference = $quotaHealth.BillingInference
     quotaConfidence = $quotaHealth.QuotaConfidence
+    quotaRiskBasis = $quotaHealth.QuotaRiskBasis
+    tokenSelectedCumulativeInputM = $quotaHealth.SessionInputM
+    tokenIntervalInputM = $quotaHealth.IntervalInputM
+    tokenIntervalCachedInputM = $quotaHealth.IntervalCachedInputM
+    tokenIntervalOutputM = $quotaHealth.IntervalOutputM
+    tokenIntervalReasoningM = $quotaHealth.IntervalReasoningM
+    tokenIntervalCacheWriteM = $quotaHealth.IntervalCacheWriteM
+    tokenIntervalFiles = $quotaHealth.IntervalFiles
+    tokenIntervalStartUtc = $quotaHealth.IntervalStartUtc
+    tokenIntervalEndUtc = $quotaHealth.IntervalEndUtc
+    tokenIntervalObservation = $quotaHealth.IntervalObservation
+    rolloutProjectionComparable = $quotaHealth.RolloutProjectionComparable
     primaryTurnsObserved = $quotaHealth.PrimaryTurnsObserved
     approvalReviewTurnsObserved = $quotaHealth.ReviewerTurnsObserved
     reviewerTokenAttribution = $quotaHealth.ReviewerTokenAttribution
@@ -2199,6 +2466,13 @@ if ($Action -eq "inspect") {
     approvalAllowedObserved = $quotaHealth.ApprovalAllowedObserved
     approvalDeniedObserved = $quotaHealth.ApprovalDeniedObserved
     approvalAllowPct = $quotaHealth.ApprovalAllowPercent
+    approvalRequestSchemas = $quotaHealth.ApprovalRequestSchemas
+    approvalResolvedRequests = $quotaHealth.ApprovalResolvedRequests
+    approvalUnresolvedRequests = $quotaHealth.ApprovalUnresolvedRequests
+    approvalResolutionObservation = $quotaHealth.ApprovalResolutionObservation
+    approvalLatencySamples = $quotaHealth.ApprovalLatencySamples
+    approvalMedianLatencyMs = $quotaHealth.ApprovalMedianLatencyMs
+    approvalP95LatencyMs = $quotaHealth.ApprovalP95LatencyMs
     approvalPersistenceRetries = $quotaHealth.ApprovalPersistenceRetries
     approvalPersistenceFailures = $quotaHealth.ApprovalPersistenceFailures
     approvalPersistenceDiagnosis = $quotaHealth.ApprovalPersistenceDiagnosis
@@ -2228,6 +2502,9 @@ if ($Action -eq "inspect") {
     ruleReusableNarrow = $quotaHealth.RuleReusableNarrow
     ruleBroadInterpreter = $quotaHealth.RuleBroadInterpreter
     ruleCredentialShaped = $quotaHealth.RuleCredentialShaped
+    ruleSecretCandidateOrdinals = $quotaHealth.RuleCredentialCandidateOrdinals
+    ruleSecretCandidateClasses = $quotaHealth.RuleCredentialCandidateClasses
+    ruleSecretConfidence = $quotaHealth.RuleCredentialConfidence
     ruleAverageLength = $quotaHealth.RuleAverageLength
     ruleMaximumLiteralLength = $quotaHealth.RuleMaximumLiteralLength
     ruleStatus = $quotaHealth.RuleStatus

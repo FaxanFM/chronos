@@ -32,8 +32,8 @@ The normal lifecycle is:
 
 ```text
 plan -> spawn with fork_turns=none -> lease -> result -> verify -> accept
-                                      |                    |
-                                      +-> renew            +-> correct once
+  |                                   |                    |
+  +-> cancel-plan                     +-> renew            +-> correct once
                                       +-> release          +-> retire
 ```
 
@@ -41,6 +41,12 @@ Plans select only models advertised by the active runtime. Missing or malformed
 inventory returns the work to the coordinator. Selection is deterministic:
 complete runtime cost ranks are honored; otherwise runtime inventory order is
 preserved. A worker ID can own only one active lease.
+If spawning fails before lease activation, the coordinator may consume the
+original opaque plan token with `cancel-plan`. Cancellation is terminal and
+releases pending capacity. `status` excludes expired plans from `pending_plans`,
+reports them separately as `expired_plans`, and includes `plugin_version` read
+from the installed manifest. Lease creation validates every prerequisite before
+one atomic state write.
 
 The current Codex Multi-Agent V2 contract uses `fork_turns="none"`. Governor
 does not emit the removed V1 `fork_context` field. Worker-created agents are
@@ -94,6 +100,8 @@ check.
 - `workspace_fingerprint_limit_exceeded`: stop delegation and inspect locally.
 - `read_worker_modified_workspace`: preserve and review the changes.
 - `invalid_lifecycle_transition`: preserve the terminal record.
+- `cancel-plan`: use only with the original task ID and opaque plan token after
+  spawn or binding fails; never edit state manually.
 
 See the installed Governor skill for the command contract and
 [Architecture](ARCHITECTURE.md) for the wider trust model.

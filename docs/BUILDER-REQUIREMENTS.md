@@ -1,11 +1,11 @@
 # Consolidated Builder Requirements
 
 This ledger maps the consolidated Machine 1 and Machine 2 builder handoffs to
-shipped behavior through 0.7.3.
+shipped behavior through 0.7.4.
 "Unavailable" is an implemented result state when the bounded local schema does
 not expose enough evidence. It is not converted to zero or inferred from text.
 
-| Area | 0.7.3 disposition |
+| Area | 0.7.4 disposition |
 | --- | --- |
 | Reviewer discovery and exact turn counting | Implemented from exact `turn_context` model records; bookkeeping is excluded. |
 | Reviewer identity and parent lineage | Sanitized counts implemented; raw session and parent IDs are intentionally not returned. |
@@ -15,7 +15,7 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Runaway reviewer warning | Existing quota contributors remain frozen; raw review measurements are exposed without adding an uncalibrated severity threshold. |
 | Fork and lineage governor | Parent/fork counts, selected bytes, size clusters, exact replay bytes, and replay percentage are implemented without returning IDs. |
 | Inherited history | Exact copied records and exact ancestor token snapshots are detected; child totals use the observed delta. Non-exact inheritance is unavailable rather than guessed. |
-| Rollout growth and projection | Implemented as explicitly labeled file-lifetime metadata estimates. No background history is created. |
+| Rollout growth and projection | File-lifetime estimates are suppressed under partial coverage; comparable timestamped tails also report marginal token deltas. No background history is created. |
 | Compaction amplification | Unique exact snapshots, duplicated snapshots, and duplicated bytes are implemented. |
 | Approval source analysis | Implemented for structured shell, filesystem, network, and unknown request types. |
 | Repeated approval classes | Uses whitelisted categories plus an ephemeral hash of bounded structured prefix tokens. Raw commands, arguments, prompts, and paths are never returned. |
@@ -38,7 +38,9 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Three approval problem classes | Persistence runaway, repeated rule-miss amplification, and legitimate/diverse boundary volume are reported separately. |
 | Inspection-shaped approval pressure | Implemented from structured operation/prefix fields with actual boundary-cause categories when present. Read-only shape is never treated as proof that review was unnecessary. |
 | Permission Rule Governor | Implemented for rule counts, long literals, brittle monolithic rules, reusable narrow candidates, broad interpreter rules, and secret-shaped structures. No rule is changed. |
-| Credential-shaped rule safety | Implemented as counts and named diagnosis only. Values, rule text, prefixes, hashes, assignments, and paths are never returned. |
+| Credential-shaped rule safety | Counts plus bounded ordinal, safe shape category, and confidence are returned. Values, rule text, prefixes, hashes, assignments, and paths are never returned. |
+| Current approval request schema | Structured `function_call` escalations are counted and terminal outputs are correlated ephemerally; commands, justification, output, IDs, and decisions not explicitly observed remain unavailable. |
+| Governor abandoned plan recovery | Opaque-token `cancel-plan` is terminal; status separates unexpired pending plans from expired issued plans. |
 | Repeated prefix rule miss | Implemented from ephemeral structured prefix hashes; exact prefix recommendations require later explicit user review and are never auto-created. |
 | Reviewer-originated escalation | Tool calls, escalated calls, unique/repeated prefix counts, and largest repeat are implemented separately from nested reviewer evidence. |
 | Reviewer recursion | Reported only when escalation and directly observed nested reviewer lineage coexist. Reviewer escalation alone is not called recursion. |

@@ -69,6 +69,12 @@ are bounded observations, not account-wide billing totals. Check
 `approvalRequestObservation` before interpreting them. `unsupported_schema` or
 `observed_insufficient_structure` means the rollout did not expose enough safe
 categorical data; do not infer a cause from model names or unstructured text.
+Current structured escalation calls are counted without returning commands,
+justifications, tool output, call IDs, prefixes, or hashes. Read
+`approvalRequestSchemas`, resolved/unresolved request counts,
+`approvalResolutionObservation`, and latency sample fields together. A function
+call output proves only that a request reached a terminal tool result; it does
+not prove an allow or deny decision without an explicit structured decision.
 `metricSource=local_rollout`, `dashboardEquivalence=unsupported`, and
 `billingInference=unsupported` are hard semantic boundaries. The inspector is
 diagnostic-only: it never changes reviewer models, approval modes, or trusted
@@ -95,6 +101,14 @@ value. `rule_brittleness_warning` identifies literals longer than 256 characters
 `broad_interpreter_rule` identifies interpreter-wide trust. Never create or
 recommend broad PowerShell, shell, Python, Node, curl, network, filesystem-write,
 or outside-workspace rules.
+`ruleSecretCandidateOrdinals`, `ruleSecretCandidateClasses`, and
+`ruleSecretConfidence` identify only the bounded local rule order and safe shape
+category. Use an ordinal for local follow-up; never paste the rule or value.
+
+`machineHealthContributors` names the unchanged threshold clauses that produced
+the process diagnosis. `machineHealthConfidence=threshold_observation_only` and
+`responsivenessObservation=not_measured` mean the result is resource pressure,
+not a measured UI-latency or freeze prediction.
 
 Use `approvalModesObserved`, `reviewerControlCapability`, and
 `reviewerCompatibility` as a capability probe. `supported` means only that the
@@ -110,6 +124,13 @@ proof of billed-token duplication. `tokenInheritedSnapshots` and
 `tokenLineageDeltaFiles` show exact ancestor deltas that were removed;
 non-exact history is not inferred. `tokenUsageScope` means the token total is not
 a usage invoice and must not be presented as one.
+`tokenSelectedCumulativeInputM` retains the frozen cumulative heuristic input.
+Use `tokenIntervalInputM` and the other `tokenInterval*` fields for the marginal
+difference between comparable timestamped snapshots in the selected tails.
+`rolloutProjectionComparable=false` or
+`rolloutGrowthObservation=suppressed_partial_coverage` means no 24-hour
+projection should be quoted. `quotaRiskBasis=frozen_selected_cumulative_heuristic`
+confirms that this engineering release did not recalibrate scoring.
 
 Use task-age, top-lineage review share, fork, effort, and spawn-origin fields as
 bounded efficiency observations. For simple work with

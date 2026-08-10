@@ -11,6 +11,10 @@
 - [x] Reserve worker capacity when a delegation plan is issued.
 - [x] Add package byte and file limits before content materialization.
 - [x] Keep calibration-sensitive thresholds and scoring frozen.
+- [x] Parse current structured escalation requests without returning private fields.
+- [x] Separate marginal token intervals from cumulative heuristic snapshots.
+- [x] Suppress incomparable rollout projections and expose resource contributors.
+- [x] Add terminal plan cancellation and expired-plan accounting.
 
 ## Release quality
 
@@ -19,9 +23,11 @@
 - [x] Parse every PowerShell source and JSON manifest in ordinary CI.
 - [x] Require deterministic Governor, inspector, and release tests.
 - [x] Publish signed v0.7.3 state-hardening commit and annotated tag.
-- [x] Verify checksum, attestation, immutable release, and packaged version.
+- [x] Verify v0.7.3 checksum, attestation, immutable release, and packaged version.
 - [x] Install v0.7.3 locally and exercise inspect plus Governor status.
-- [ ] Receive one successful exercise report from a second installation machine.
+- [x] Receive one successful v0.7.3 exercise report from a second installation machine.
+- [ ] Publish, verify, and install signed v0.7.4 engineering release.
+- [ ] Receive one successful v0.7.4 exercise report from a second installation machine.
 
 ## Discovery
 
