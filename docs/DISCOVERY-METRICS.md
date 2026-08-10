@@ -45,3 +45,13 @@ At 7 and 14 days after the v0.7.2 discovery update, record:
 Chronos itself must remain telemetry-free. Do not add an analytics endpoint,
 install beacon, background task, unique identifier, or phone-home behavior to
 improve these measurements.
+
+## Metadata Correction
+
+On August 10, 2026, the public GitHub About description was corrected from the
+v0.2 helper-process-only copy to the current diagnostics and worker-governance
+scope. Discovery topics were expanded without adding telemetry. Immediately
+after the update, GitHub repository search returned `FaxanFM/chronos` for
+`Codex diagnostics worker governance Windows`; it had returned no results for
+the comparable generic query before the correction. Search indexing can change,
+so this is a point-in-time discoverability check rather than an adoption claim.

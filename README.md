@@ -125,8 +125,8 @@ See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
-[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the v0.7.1 safety
-and release model.
+[Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the current
+safety and release model.
 See [v0.7.0 Audit Response](docs/AUDIT-RESPONSE-2026-08-09.md) for the sanitized
 fixed, contained, and deferred finding disposition.
 See [v0.7.1 Delta Audit Response](docs/V0.7.1-DELTA-AUDIT-RESPONSE.md) for the

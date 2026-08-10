@@ -11,6 +11,7 @@ $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
 $supportPath = Join-Path $repoRoot "SUPPORT.md"
 $fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
 $submissionPacketPath = Join-Path $repoRoot "docs\PLUGIN-DIRECTORY-SUBMISSION.md"
+$sanitizedResultPath = Join-Path $repoRoot ".github\ISSUE_TEMPLATE\sanitized-result.yml"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
@@ -44,6 +45,10 @@ try {
     if ($fieldReports.Contains($forbidden)) {
       throw "Sanitized field-report ledger contains an identifying marker: $forbidden"
     }
+  }
+  $sanitizedResult = Get-Content -Raw -LiteralPath $sanitizedResultPath
+  if (-not $sanitizedResult.Contains("placeholder: $version")) {
+    throw "Sanitized-result issue form is out of sync with plugin version $version."
   }
   foreach ($excluded in @('apps', 'mcpServers')) {
     if ($manifest.PSObject.Properties[$excluded]) {
