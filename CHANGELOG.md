@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.6
+
+- Publish the v0.7.4 engineering changes through GitHub's required
+  draft-upload-publish flow for repositories with automatic immutable releases.
+  v0.7.4 and v0.7.5 remain immutable source-only records; v0.7.6 is the first
+  packaged release in this series. Runtime behavior is unchanged.
+
+No diagnostic threshold, score, prediction, telemetry, background behavior, or
+Governor policy changed.
+
 ## v0.7.5
 
 - Repackage the v0.7.4 engineering changes under a new immutable release after

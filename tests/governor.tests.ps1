@@ -182,7 +182,7 @@ try {
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
-  Assert-Equal $versionStatus.plugin_version '0.7.5' 'Governor must report the active packaged plugin version.'
+  Assert-Equal $versionStatus.plugin_version '0.7.6' 'Governor must report the active packaged plugin version.'
   $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
   if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Governor runtime state must not be stored beneath Git metadata.'

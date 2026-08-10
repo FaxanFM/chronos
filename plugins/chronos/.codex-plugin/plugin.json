@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Detect Codex degradation, approval loops, quota amplification, rule risks, rollout duplication, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
     "name": "FaxanFM",
