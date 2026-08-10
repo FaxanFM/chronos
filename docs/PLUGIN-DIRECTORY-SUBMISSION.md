@@ -1,7 +1,7 @@
 # OpenAI Plugin Directory Submission Packet
 
 Status: package-ready for a publisher draft. The signed, immutable
-[v0.7.4 release](https://github.com/FaxanFM/chronos/releases/tag/v0.7.4) is
+[v0.7.5 release](https://github.com/FaxanFM/chronos/releases/tag/v0.7.5) is
 published and its ZIP SHA-256 is
 `d299682016ea0ee9957382240e3e2f25a9a31dbf35d2e900f3069aeefa3dbf3d`.
 OpenAI review and publication have not occurred. Publisher identity and
@@ -23,7 +23,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Select **Create plugin**, choose **Skills only**, and upload the final
-   `chronos-v0.7.4.zip` release asset.
+   `chronos-v0.7.5.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -39,7 +39,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.7.4`
+- Version: `0.7.5`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -185,7 +185,7 @@ Selected countries or regions: pending publisher decision
 
 ## Initial Release Notes
 
-> Initial public-directory submission of Chronos for Codex v0.7.4. Chronos is
+> Initial public-directory submission of Chronos for Codex v0.7.5. Chronos is
 > a telemetry-free, on-demand Windows diagnostic and read-task coordination
 > plugin. It reports Codex process, diagnostic SQLite, token/context, approval,
 > rule, rollout, and helper evidence with explicit coverage boundaries.

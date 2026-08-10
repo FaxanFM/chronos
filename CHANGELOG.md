@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.5
+
+- Repackage the v0.7.4 engineering changes under a new immutable release after
+  the v0.7.4 GitHub release was locked before its external assets were attached.
+  Runtime behavior is otherwise identical to v0.7.4.
+
+No diagnostic threshold, score, prediction, telemetry, background behavior, or
+Governor policy changed.
+
 ## v0.7.4
 
 - Recognize current structured `function_call` escalation requests without
