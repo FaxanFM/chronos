@@ -6,7 +6,7 @@ security-coverage percentage, and the project does not describe it as one.
 
 ## Governor
 
-`tests/governor.tests.ps1` currently runs 36 deterministic validations. They
+`tests/governor.tests.ps1` currently runs 41 deterministic validations. They
 cover runtime inventory selection, model binding, canonical worker IDs,
 single-use plan tokens, V2 `fork_turns=none`, categorical write containment,
 one active lease per worker, fencing, renewal, read-mutation detection,

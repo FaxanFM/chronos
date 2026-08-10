@@ -54,7 +54,7 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 
 ## Release Acceptance
 
-The release gate requires diagnostics tests, 36 of 36 Governor safety controls,
+The release gate requires diagnostics tests, all 41 Governor safety scenarios,
 plugin and skill validation, two byte-identical release builds, a signed release
 commit, a signed annotated tag, GitHub verification, artifact attestation, and
 immutable release verification.

@@ -226,7 +226,8 @@ Submission URL: https://platform.openai.com/plugins
 
 Submitted at: pending
 
-Review status: package upload pending; the verified release ZIP has not yet been
-uploaded or submitted for review
+Review status: private publisher draft created on 2026-08-10; the public listing
+fields and icons are populated, the automated skill scan is pending, and the
+draft has not been submitted for review
 
 OpenAI reviewer notes: none
