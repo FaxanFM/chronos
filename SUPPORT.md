@@ -1,5 +1,8 @@
 # Support
 
+Dravara, LLC publishes and supports Chronos through its `FaxanFM` GitHub
+project account.
+
 Use the public issue tracker for Chronos support:
 
 https://github.com/FaxanFM/chronos/issues

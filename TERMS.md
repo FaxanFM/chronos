@@ -1,8 +1,10 @@
 # Terms of Use
 
-Effective July 31, 2026
+Effective August 10, 2026
 
-By installing or using Chronos, you agree to these terms.
+Chronos is published by Dravara, LLC through its `FaxanFM` GitHub project
+account. By installing or using Chronos, you agree to these terms with Dravara,
+LLC.
 
 ## Purpose
 

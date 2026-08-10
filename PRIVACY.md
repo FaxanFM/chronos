@@ -1,12 +1,16 @@
 # Privacy Policy
 
-Effective August 9, 2026
+Effective August 10, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
+Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
 
 ## Data handling
 
-Chronos does not collect, transmit, sell, or share personal data. It does not use analytics, advertising, telemetry, cookies, remote APIs, or external storage.
+Chronos does not use analytics, advertising, telemetry, cookies, remote APIs,
+or publisher-operated external storage. The local scripts make no network
+requests. Dravara, LLC does not receive, sell, or share data through the
+plugin.
 
 When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It also opens the known Codex diagnostic SQLite database in read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. Results remain in the active Codex task unless the user chooses to share them.
 
@@ -53,6 +57,18 @@ usernames, or absolute paths. It is not transmitted by Chronos.
 Governor verification may return repository-relative changed paths when its
 advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
+## Recipients
+
+Chronos returns its compact summaries in the active Codex task. OpenAI may
+process that task content under the terms and data controls for the user's
+OpenAI account or workspace. Chronos does not send the underlying local files
+or raw values to Dravara, LLC or another service.
+
+If a user voluntarily opens a support issue, GitHub and the public repository
+receive the information that the user chooses to post. The support instructions
+tell users not to post raw records, credentials, source code, identifiers, or
+local paths.
+
 ## User control
 
 Health checks are read-only. Chronos does not create database triggers, delete
@@ -73,4 +89,5 @@ Material changes to this policy will be published in this repository with a new 
 
 ## Contact
 
-For privacy questions, open an issue at https://github.com/FaxanFM/chronos/issues.
+Dravara, LLC is the publisher responsible for this policy. For privacy
+questions, open an issue at https://github.com/FaxanFM/chronos/issues.

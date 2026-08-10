@@ -11,6 +11,9 @@ churn, and Windows process degradation. Chronos keeps machine health separate
 from workflow diagnostics and coordinates bounded read tasks without
 creating an autonomous agent loop.
 
+Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
+used to develop and distribute it.
+
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
