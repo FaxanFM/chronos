@@ -109,5 +109,12 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 - Local plugin replacement retained only cache version v0.7.6. Installed
   Governor `status` reported its manifest version, three idle workers, no active
   workers, no pending or expired plans, and disabled write delegation.
-- External v0.7.6 canary validation remains pending and is tracked separately
-  from the completed v0.7.3 independent validation.
+- An independent Windows installation loaded v0.7.6 from signed annotated tag
+  object `1e9f4d6`, which resolves to release commit `6811cea`. Governor
+  `status` returned `ok=true`, `plugin_version=0.7.6`, state version 4, no
+  active workers, no pending plans, no stale or expired leases, two idle
+  workers, and disabled write delegation. One expired plan remained as
+  historical metadata and did not reserve capacity.
+- This independently validates installation, version reporting, state loading,
+  status, and expired-plan capacity semantics. It does not validate a complete
+  `plan` to `lease` to `result` to `verify` to `accept` lifecycle.

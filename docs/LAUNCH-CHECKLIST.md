@@ -27,7 +27,8 @@
 - [x] Install v0.7.3 locally and exercise inspect plus Governor status.
 - [x] Receive one successful v0.7.3 exercise report from a second installation machine.
 - [x] Publish, verify, and install signed v0.7.6 engineering package.
-- [ ] Receive one successful v0.7.6 exercise report from a second installation machine.
+- [x] Receive one successful v0.7.6 status exercise report from a second installation machine.
+- [ ] Exercise the complete v0.7.6 read-task lifecycle on a second installation machine.
 
 ## Discovery
 

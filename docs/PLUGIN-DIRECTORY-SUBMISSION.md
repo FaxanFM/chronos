@@ -64,14 +64,15 @@ is one line and under the 30-character final limit.
 Long description:
 
 > Chronos is an on-demand local diagnostic and coordination plugin for people
-> running long-lived or parallel Codex work on Windows. It separates current
-> machine health from workflow, quota, rule, rollout, and diagnostic-database
-> conditions; reports explicit evidence windows and unavailable data;
-> recommends proportionate recovery; and coordinates bounded read tasks using
-> advisory leases and final coordinator verification. Chronos does not modify
-> Codex, terminate processes, stop tasks, alter SQLite, run in the background,
-> or send telemetry. Governor is an advisory coordination aid, not a sandbox or
-> filesystem security boundary.
+> whose Codex sessions slow down after hours or days of work on Windows. It
+> reports process pressure, diagnostic SQLite churn, token and context
+> amplification, approval loops, permission-rule risks, rollout duplication,
+> and filesystem-helper failures. It separates current machine health from
+> other diagnostic conditions. It also marks missing or partial evidence.
+> Chronos recommends proportionate recovery and coordinates bounded read tasks
+> through Governor. It runs only when requested and sends no telemetry. It does
+> not modify Codex, terminate processes, stop tasks, or alter SQLite. Governor
+> is a coordination aid, not a sandbox or filesystem security boundary.
 
 Developer name: use the verified Platform identity that owns the submission.
 Use `FaxanFM` only if that exact individual or business identity is verified.
@@ -185,13 +186,14 @@ Selected countries or regions: pending publisher decision
 
 ## Initial Release Notes
 
-> Initial public-directory submission of Chronos for Codex v0.7.6. Chronos is
-> a telemetry-free, on-demand Windows diagnostic and read-task coordination
-> plugin. It reports Codex process, diagnostic SQLite, token/context, approval,
-> rule, rollout, and helper evidence with explicit coverage boundaries.
-> Governor coordinates bounded read tasks but is not a sandbox or security
-> boundary. This skills-only package has no MCP server, UI, authentication,
-> external API, background service, scheduler, or commerce.
+> First Plugin Directory release of Chronos for Codex v0.7.6. Chronos is an
+> on-demand Windows diagnostic and bounded read-task coordination plugin. It
+> reports local process health, diagnostic SQLite churn, token and context
+> pressure, approval persistence, permission-rule risks, rollout duplication,
+> and filesystem-helper evidence. It marks missing and partial evidence instead
+> of treating it as healthy. Governor coordinates bounded read tasks but is not
+> a sandbox or security boundary. The package has no MCP server, UI, sign-in,
+> external API, background service, scheduler, commerce, or telemetry.
 
 ## Assets and Evidence
 
@@ -212,16 +214,16 @@ after publication.
 
 ## Portal Record
 
-Publisher organization: pending
+Publisher organization: `Dravara`
 
-Verified developer identity: pending
+Verified developer identity: pending `Dravara, LLC` business verification
 
-Apps Management write access: pending
+Apps Management write access: confirmed by successful skills-only draft creation
 
-Submission URL: pending
+Submission URL: https://platform.openai.com/plugins
 
 Submitted at: pending
 
-Review status: not submitted
+Review status: draft creation paused before upload for business verification
 
 OpenAI reviewer notes: none
