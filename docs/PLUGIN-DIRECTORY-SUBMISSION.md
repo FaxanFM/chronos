@@ -227,8 +227,8 @@ Submission URL: https://platform.openai.com/plugins
 Submitted at: pending
 
 Review status: private publisher draft created on 2026-08-10; the public listing
-fields and icons are populated, the `chronos` skill scan passed, the
-`chronos-governor` skill scan is pending, and the draft has not been submitted
-for review
+fields and icons are populated, both skill scans passed, all four publisher
+attestations are checked, and the draft is enabled for submission but has not
+been submitted for review
 
 OpenAI reviewer notes: none
