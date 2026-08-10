@@ -10,6 +10,7 @@ $readmePath = Join-Path $repoRoot "README.md"
 $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
 $supportPath = Join-Path $repoRoot "SUPPORT.md"
 $fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
+$submissionPacketPath = Join-Path $repoRoot "docs\PLUGIN-DIRECTORY-SUBMISSION.md"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
@@ -142,6 +143,17 @@ try {
 
   $checksum = (Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.sha256")).Trim()
   if ($checksum -ne ($firstHash.ToLowerInvariant() + "  " + $artifactName)) { throw "Checksum file does not match the artifact." }
+  $submissionPacket = Get-Content -Raw -LiteralPath $submissionPacketPath
+  foreach ($required in @(
+    "Version: ``$version``",
+    "chronos-v$version.zip",
+    "releases/tag/v$version",
+    $firstHash.ToLowerInvariant()
+  )) {
+    if (-not $submissionPacket.Contains($required)) {
+      throw "Plugin Directory submission packet is out of sync with the release: $required"
+    }
+  }
   $releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.release.json") | ConvertFrom-Json
   if ($releaseManifest.schema_version -ne 2 -or @($releaseManifest.files).Count -ne $releaseManifest.packaged_files) {
     throw "Release manifest must contain a versioned per-file inventory."

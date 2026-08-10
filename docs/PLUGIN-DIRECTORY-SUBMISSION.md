@@ -3,7 +3,7 @@
 Status: package-ready for a publisher draft. The signed, immutable
 [v0.7.6 release](https://github.com/FaxanFM/chronos/releases/tag/v0.7.6) is
 published and its ZIP SHA-256 is
-`d299682016ea0ee9957382240e3e2f25a9a31dbf35d2e900f3069aeefa3dbf3d`.
+`e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
 OpenAI review and publication have not occurred. Publisher identity and
 organization permissions must be verified in the authenticated OpenAI
 Platform.
@@ -33,7 +33,7 @@ Official references:
 
 - [Submit plugins](https://developers.openai.com/plugins/deploy/submission)
 - [Plugin submission errors](https://developers.openai.com/plugins/deploy/submission-errors)
-- [Plugin guidelines](https://developers.openai.com/plugins/deploy/guidelines)
+- [Plugin guidelines](https://developers.openai.com/plugins/app-guidelines)
 
 ## Submission Type
 
