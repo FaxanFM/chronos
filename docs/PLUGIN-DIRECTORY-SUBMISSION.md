@@ -8,16 +8,15 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-Candidate status: v0.8.0 adds native Heartbeat transition detection. It has not
-been submitted, approved, or published. The reproducible release candidate is
+GitHub release status: v0.8.0 adds native Heartbeat transition detection and is
+published as an immutable GitHub release. It has not been submitted, approved,
+or published in the OpenAI Plugin Directory. The release artifact is
 `chronos-v0.8.0.zip` with SHA-256
 `d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
 The exact package passed independent source and archive audit with no release
-blockers. The audit did not infer CI, signing, publication, or canary results.
-Its planned immutable release record is
-https://github.com/FaxanFM/chronos/releases/tag/v0.8.0. This candidate is not an
-official release until the signed tag, external installer canary, and release
-workflow complete.
+blockers. The signed tag, remote Windows package-install checks, release
+workflow, artifact attestation, and immutable asset verification also passed.
+Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.0.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571

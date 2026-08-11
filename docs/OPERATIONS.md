@@ -27,10 +27,11 @@ The authoritative immutable v0.7.7 ZIP SHA-256 is
 It is identical to the independently audited and externally exercised release
 candidate.
 
-The tested and independently audited v0.8.0 release-candidate ZIP SHA-256 is
+The authoritative immutable v0.8.0 ZIP SHA-256 is
 `d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
-It is not an authoritative immutable release until an external installer
-canary, the signed tag, and the release workflow pass.
+It matches the independently audited candidate. The signed tag, two remote
+Windows package-install checks, artifact attestation, immutable publication,
+and post-publication asset verification all passed.
 
 ## Published Release
 
@@ -70,16 +71,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.7.7.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.7.7.zip -R FaxanFM/chronos
-gh release verify v0.7.7 -R FaxanFM/chronos
-gh release verify-asset v0.7.7 .\chronos-v0.7.7.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.0.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.0.zip -R FaxanFM/chronos
+gh release verify v0.8.0 -R FaxanFM/chronos
+gh release verify-asset v0.8.0 .\chronos-v0.8.0.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.7.7.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.0.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published

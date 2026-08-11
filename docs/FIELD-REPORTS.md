@@ -154,3 +154,35 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   completed with `machineHealth=HEALTHY`, and Governor `status` returned
   `ok=true`, no active or stale leases, and disabled shared-folder write
   delegation.
+
+## v0.8.0 Release Verification
+
+- Signed annotated tag `v0.8.0` resolves to signed release commit
+  `9ce24fd83be9f174f196733d28467ba0a700b406`; GitHub reports the commit and tag
+  signatures as valid.
+- Published ZIP SHA-256:
+  `d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
+  This exactly matches the independently audited candidate.
+- GitHub workflow `31526335415` passed the full inspector, Heartbeat, Governor,
+  reproducibility, and fresh-package installation checks on Windows Server 2022
+  and the current Windows runner. Each runner extracted the exact ZIP, verified
+  version 0.8.0 and the two-skill inventory, and executed packaged Heartbeat
+  status successfully.
+- The immutable GitHub release contains the ZIP, checksum, and per-file release
+  manifest. Its publication job verified the signed tag and commit, created and
+  verified the artifact attestation, published once, and verified the immutable
+  release and every asset.
+- A separate isolated installed-package canary verified silent normal cycles,
+  Governor-only routing despite conflicting owner hints, duplicate suppression,
+  stable EventId retry after newer evidence, acknowledgement, and one-shot
+  resolution. No suspicious behavior was observed.
+- The supported topology uses one dedicated Governor task, recommended on
+  `gpt-5.6-luna` with Medium reasoning. Monitored tasks can use Luna, Terra, Sol,
+  or mixed models. They do not run Heartbeats, receive direct Heartbeat wakes,
+  or install recurrences. Deterministic collection invokes no model.
+- Local installation from the refreshed public marketplace reports v0.8.0.
+  All 11 release files match the release manifest; the CLI adds only its local
+  `.gitignore` cache marker. Installed Heartbeat status returned
+  `engine=healthy`, eight active detector types, and exit code 0.
+- OpenAI Plugin Directory version 0.7.7 remains published. v0.8.0 has not been
+  submitted to the Directory.
