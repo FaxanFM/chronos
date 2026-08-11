@@ -37,6 +37,9 @@ jobs:
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python
+      - name: Test Chronos Heartbeats
+        shell: powershell
+        run: .\tests\heartbeat.tests.ps1
       - name: Test Chronos Governor
         shell: powershell
         run: .\tests\governor.tests.ps1

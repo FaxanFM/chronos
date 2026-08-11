@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective August 10, 2026
+Effective August 11, 2026
 
 Chronos is an on-demand plugin that runs locally on the user's Windows computer.
 Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
@@ -60,12 +60,38 @@ usernames, or absolute paths. It is not transmitted by Chronos.
 Governor verification may return repository-relative changed paths when its
 advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
+When the user explicitly enables or runs Chronos Heartbeats, the Codex host can
+supply a bounded normalized snapshot containing safe counters, status values,
+timestamps, coverage labels, and opaque task, machine, agent, or route
+identifiers. The local Heartbeat engine validates and compares that snapshot. It
+rejects credential-shaped values, Windows or Unix absolute-path identifiers,
+and slash-rooted identifiers outside the canonical `/root` Codex worker form. It
+persists only bounded transition, cadence, coverage, deduplication,
+delivery/outbox, and engine-health metadata in a per-scope file beneath the user's local Chronos
+application-data directory. Raw collector snapshots, prompts, responses, source
+code, diffs, commands, tool arguments, tool output, credentials, usernames, and
+absolute paths are not persisted.
+
+The Heartbeat PowerShell code does not create a scheduler, call a model, send a
+message, or make a network request. It sends no publisher telemetry. It emits a
+concise event to one Governor inbox only when an actionable condition appears,
+resolves, or worsens materially. Owner and subject identifiers are triage hints;
+Chronos does not directly wake monitored tasks. The Codex host processes and
+delivers that event under the user's OpenAI account or workspace controls. A
+cycle with no actionable transition ends without output.
+Stable SHA-256 identifiers in local state are pseudonymous metadata, not
+anonymous data. Unacknowledged event records contain hashes, type, severity,
+timestamps, delivery attempts, and route class; they do not contain raw owner,
+task, subject, or route IDs.
+
 ## Recipients
 
-Chronos returns its compact summaries in the active Codex task. OpenAI may
-process that task content under the terms and data controls for the user's
-OpenAI account or workspace. Chronos does not send the underlying local files
-or raw values to Dravara, LLC or another service.
+Chronos returns its compact summaries in the active Codex task. The supported
+Heartbeat topology returns events only in the dedicated Governor task. OpenAI
+may process that task content and any host-delivered follow-up under
+the terms and data controls for the user's OpenAI account or workspace. Chronos
+does not send the underlying local files or raw values to Dravara, LLC or
+another service.
 
 If a user voluntarily opens a support issue, GitHub and the public repository
 receive the information that the user chooses to post. The support instructions
@@ -87,8 +113,10 @@ it started when bounded fingerprinting exceeds its time or byte limit.
 
 Chronos health inspection creates no persistent logs, user profiles, background
 services, or scheduled tasks. Governor metadata remains local until the user or
-Windows temporary-storage maintenance removes it. Chronos performs no automatic state or
-workspace cleanup.
+Windows temporary-storage maintenance removes it. Heartbeat transition state
+remains local until the user removes it or local application-data maintenance
+does so. Chronos performs no automatic workspace cleanup. The plugin does not
+create or retain a host automation when Heartbeats are not explicitly enabled.
 
 ## Changes
 

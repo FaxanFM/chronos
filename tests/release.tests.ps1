@@ -78,7 +78,8 @@ try {
     'os: [windows-2022, windows-latest]',
     'timeout-minutes: 25',
     'Parse PowerShell sources',
-    'Parse JSON manifests'
+    'Parse JSON manifests',
+    'Test Chronos Heartbeats'
   )) {
     if (-not $testWorkflow.Contains($required)) {
       throw "Ordinary CI is missing release-quality validation: $required"
@@ -90,6 +91,7 @@ try {
     'commit.commit.verification.verified',
     'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
     'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+    'Test Chronos Heartbeats',
     'timeout-minutes:',
     'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
     '--draft',
@@ -143,7 +145,7 @@ try {
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
       }
     }
-    foreach ($required in @('.codex-plugin/plugin.json', 'skills/chronos/SKILL.md', 'skills/chronos-governor/SKILL.md')) {
+    foreach ($required in @('.codex-plugin/plugin.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos-governor/SKILL.md')) {
       if ($names -notcontains $required) { throw "Release is missing $required." }
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {

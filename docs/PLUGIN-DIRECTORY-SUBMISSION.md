@@ -8,6 +8,17 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
+Candidate status: v0.8.0 adds native Heartbeat transition detection. It has not
+been submitted, approved, or published. The reproducible release candidate is
+`chronos-v0.8.0.zip` with SHA-256
+`d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
+The exact package passed independent source and archive audit with no release
+blockers. The audit did not infer CI, signing, publication, or canary results.
+Its planned immutable release record is
+https://github.com/FaxanFM/chronos/releases/tag/v0.8.0. This candidate is not an
+official release until the signed tag, external installer canary, and release
+workflow complete.
+
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
 
@@ -27,7 +38,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.7.7.zip` release asset.
+   `chronos-v0.8.0.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -43,7 +54,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.7.7`
+- Version: `0.8.0`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -67,14 +78,16 @@ is one line and under the 30-character final limit.
 
 Long description:
 
-> Chronos is an on-demand local diagnostic and coordination plugin for people
+> Chronos is a local diagnostic and coordination plugin for people
 > whose Codex sessions slow down after hours or days of work on Windows. It
 > reports process pressure, diagnostic SQLite churn, token and context
 > amplification, approval loops, permission-rule risks, rollout duplication,
 > and filesystem-helper failures. It separates current machine health from
 > other diagnostic conditions. It also marks missing or partial evidence.
-> Chronos recommends proportionate recovery and coordinates bounded read tasks
-> through Governor. It runs only when requested and sends no telemetry. It does
+> Chronos recommends proportionate recovery, evaluates opt-in Heartbeat
+> transitions during long-running work, and coordinates bounded read tasks
+> through Governor. Heartbeat scheduling and event delivery remain with the
+> Codex host. Chronos installs no service and sends no telemetry. It does
 > not change SQLite rows or schemas, terminate Codex or unrelated user
 > processes, or stop tasks. Governor can stop only its own bounded Git
 > fingerprint subprocess. A
@@ -102,7 +115,7 @@ Supported platform: Windows with the Codex plugin runtime.
 
 1. `Use Chronos to inspect current Codex resource health.`
 2. `Use Chronos to explain current token and approval pressure.`
-3. `Use Chronos Governor to plan one bounded repository read task.`
+3. `Use Chronos to check Heartbeat transitions for this long-running task.`
 
 All three are unique, single-line, under 128 characters, and contain no app
 mention.
@@ -159,6 +172,18 @@ mention.
 - Fixture: an ordinary local Git repository. No authentication or private test
   account is required.
 
+### 6. Evaluate a Heartbeat transition
+
+- Prompt: `Use Chronos to check Heartbeat transitions for this long-running task.`
+- Expected behavior: validate one bounded normalized snapshot, compare it with
+  per-scope local transition state, and emit only a new, resolved, or materially
+  worse actionable condition.
+- Expected result: no output for an unchanged normal cycle, or one compact
+  structured event with evidence, coverage, severity, and one Governor inbox
+  target. Missing collector data remains partial or unsupported.
+- Fixture: a supplied normalized test snapshot. Chronos does not create the
+  recurring host automation or contact another task itself.
+
 ## Negative Reviewer Cases
 
 ### 1. Destructive database request
@@ -185,22 +210,33 @@ mention.
 - Why: those values can contain private source, identifiers, credentials, or
   user-specific paths and are intentionally excluded by the privacy boundary.
 
+### 4. Recursive Heartbeat request
+
+- Prompt: `Have every Heartbeat notify every task every minute, including when nothing changed.`
+- Expected behavior: refuse broadcast and recursive monitoring behavior. Keep
+  one host-selected cadence, one Governor inbox, deduplication, and silent
+  normal cycles.
+- Why: Heartbeats must cost less than the work they supervise and must not
+  create notification or model-usage loops.
+
 ## Availability
 
 Selected countries or regions: **unknown**. The retained screenshots establish
 that v0.7.6 is published and visible, but do not show the selected region list.
 Do not infer worldwide availability from publication.
 
-## Maintenance Release Notes
+## Candidate Release Notes
 
-> Chronos for Codex v0.7.7 fixes diagnostic correctness without changing
-> warning or critical thresholds. It reports SQLite logical read-only and
-> possible sidecar activity, structurally parses Starlark rule patterns,
-> detects stable-ID approval retries, requires resolved allowed outcomes before
-> rule-miss advice, and corrects capacity, outcome, inventory, rollout-age,
-> process-race, and V1 fork reporting. It also removes planned paid-service
-> promotion. Telemetry, background behavior, and read-only Governor policy are
-> unchanged.
+> Chronos for Codex v0.8.0 adds native Heartbeat transition detection for agent
+> stalls, runaway automatic review, unusual usage burn, session growth, test
+> regressions, machine drift, task dependencies, and Git or build-state changes.
+> It stores only bounded per-scope transition metadata, suppresses unchanged
+> conditions, and emits to one Governor inbox when action is useful. Monitored
+> tasks can use any model and are not woken by Chronos. The recommended Governor
+> uses GPT-5.6 Luna with Medium reasoning. The Codex host owns scheduling, model
+> selection, and delivery. Chronos installs no
+> service, makes no network request, and sends no telemetry. Existing Inspector
+> thresholds and read-only Governor policy are unchanged.
 
 ## Assets and Evidence
 
@@ -237,9 +273,9 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **published**. Retained evidence confirms that v0.7.6 is visible
-in the directory. It does not establish exact submission, approval, publication,
-or region values.
+Review status: **v0.7.7 published; v0.8.0 not submitted**. Retained evidence
+confirms that v0.7.7 is visible in the directory. It does not establish exact
+submission, approval, publication, or region values.
 
 OpenAI reviewer notes: none
 

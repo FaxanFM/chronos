@@ -1,6 +1,7 @@
 # Architecture And Safety Model
 
-Chronos has two independent, on-demand skills.
+Chronos has two installed skills. Heartbeats is a native action of the existing
+health-inspector skill, not a third skill, service, or application.
 
 ## Health Inspector
 
@@ -68,6 +69,38 @@ Filesystem-helper detection parses a timestamped event envelope and compares
 the complete event message against known failure forms. Marker text embedded in
 an unrelated payload does not count.
 
+## Heartbeat Engine
+
+`chronos.ps1 -Action heartbeat` invokes an internal deterministic transition
+engine. The Codex host supplies one bounded normalized snapshot across the
+monitored task set and chooses the recurring cadence. The recommended topology
+uses one Governor task on `gpt-5.6-luna` with Medium reasoning. Monitored tasks
+remain model-agnostic and do not run Heartbeats. Chronos does not create the
+recurring automation, call a model, contact a task, or make a network request.
+
+The engine supports eight families: agent stall, Guardian or automatic-review
+runaway, usage burn, session or context explosion, test regression,
+cross-machine drift, task dependency or zombie work, and Git or build state.
+Each collector reports observed, partial, or unsupported coverage. Missing
+fields do not become numeric zero or proof that a condition is absent.
+
+Each cycle compares the current allowlisted aggregates with the previous
+persisted aggregates. Stable condition keys, semantic severity escalation,
+per-family cadence, condition-origin epoch binding, source sequence continuity,
+and a restrictive canonical-state global per-user execution lock prevent
+unchanged conditions, Windows path aliases, or duplicate scheduler runs from
+repeatedly waking a coordinator. A bounded acknowledged outbox gives events
+stable IDs and at-least-once host delivery semantics, including a repeated host
+run after an interrupted delivery. A normal cycle with
+no transition or pending delivery produces no output. Event records contain
+concise evidence, ownership hints, and one Governor target. They never broadcast
+to or directly wake monitored tasks. A host can forward a reviewed event under
+an explicit policy.
+
+The engine is not a scheduler, task transport, security boundary, telemetry
+client, or general transcript store. Semantic interpretation and event delivery
+remain host responsibilities. See [Heartbeats](HEARTBEATS.md).
+
 ## Governor
 
 `governor.ps1` is a synchronous advisory read-coordination state machine. It has no
@@ -101,17 +134,24 @@ must match the model persisted by `plan`. A difference fails with
 
 ## Persistent Data
 
-The inspector persists nothing. Governor persists only metadata beneath the
-current user's temporary application-data directory, keyed by a hash of Git's
-canonical common directory. No component sends telemetry, starts a service,
-creates a scheduled task, changes Codex database rows or schemas, terminates
-Codex or unrelated user processes, or cleans worktrees. Governor can stop only
-the Git subprocess it started when fingerprinting exceeds its time or byte
-limit.
+The inspector persists nothing. Governor persists only coordination metadata
+beneath the current user's temporary application-data directory, keyed by a
+hash of Git's canonical common directory. An invoked Heartbeat cycle persists
+bounded per-scope transition, cadence, coverage, deduplication, and engine-health
+metadata plus a hashed, bounded delivery outbox beneath the user's local Chronos
+application-data directory. It does not persist the raw collector snapshot or
+raw route, subject, or owner IDs.
+
+No component sends telemetry, starts a service, creates a scheduled task,
+changes Codex database rows or schemas, terminates Codex or unrelated user
+processes, or cleans worktrees. A user can separately ask the Codex host to
+schedule Heartbeat evaluation. Governor can stop only the Git subprocess it
+started when fingerprinting exceeds its time or byte limit.
 
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.7.1 deliberately changes parser observability without changing any
-warning threshold, critical threshold, scoring weight, predictive claim, or
-heuristic interpretation. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).
+of failure. v0.8.0 does not change the existing inspector warning thresholds,
+critical thresholds, scoring weights, or predictive claims. Heartbeat transition
+rules are a separate engineering subsystem and must retain explicit coverage and
+evidence. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

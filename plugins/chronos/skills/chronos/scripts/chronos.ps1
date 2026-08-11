@@ -1,15 +1,39 @@
 param(
-  [ValidateSet("inspect", "plan", "cleanup")]
+  [ValidateSet("inspect", "plan", "cleanup", "heartbeat")]
   [string]$Action = "inspect",
   [int]$MinAgeMinutes = 60,
   [int]$ProcessId = 0,
   [string]$CodexHome = (Join-Path $HOME ".codex"),
   [ValidateRange(1, 10)]
   [int]$SampleSeconds = 2,
+  [string]$HeartbeatInputPath,
+  [string]$HeartbeatInspectorOutputPath,
+  [string]$HeartbeatStatePath,
+  [string]$HeartbeatScope,
+  [string]$HeartbeatAcknowledgeEventId,
   [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+
+# Heartbeats share the installed Chronos command surface.  The implementation
+# remains a small internal module so inspection behavior stays backward-compatible.
+if ($Action -eq 'heartbeat') {
+  $heartbeatScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
+  if (-not (Test-Path -LiteralPath $heartbeatScript)) { throw 'heartbeat_module_missing' }
+  if ($HeartbeatAcknowledgeEventId) {
+    if ($HeartbeatStatePath) { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -StatePath $HeartbeatStatePath -Scope $HeartbeatScope }
+    else { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -Scope $HeartbeatScope }
+  } elseif (-not $HeartbeatInputPath -and -not $HeartbeatInspectorOutputPath) {
+    if ($HeartbeatStatePath) { & $heartbeatScript -Action status -StatePath $HeartbeatStatePath -Scope $HeartbeatScope }
+    else { & $heartbeatScript -Action status -Scope $HeartbeatScope }
+  } elseif ($HeartbeatStatePath) {
+    & $heartbeatScript -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -StatePath $HeartbeatStatePath -Scope $HeartbeatScope
+  } else {
+    & $heartbeatScript -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -Scope $HeartbeatScope
+  }
+  exit $LASTEXITCODE
+}
 
 function Get-ChronosPluginVersion {
   try {

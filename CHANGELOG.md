@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.8.0
+
+- Add Heartbeats as a native action of the existing Chronos inspector skill.
+- Add deterministic transition detection for agent stalls, runaway automatic
+  review, unusual usage burn, session growth, test regressions, cross-machine
+  drift, task dependencies or zombie work, and Git or build-state changes.
+- Add per-family cadence and coverage, bounded per-scope local state, stable
+  deduplication, material severity escalation, resolution tracking, duplicate
+  execution protection, source epoch/sequence continuity, strict duplicate-key
+  JSON rejection, a restrictive cross-session mutex, and one Governor inbox.
+- Add stable event IDs and a bounded acknowledged outbox. Pending events use
+  at-least-once host delivery semantics and privacy-safe Governor retry,
+  including recovery when a host retries the same run after an interrupted
+  delivery. Retry cadence uses wall-clock delivery time rather than replayable
+  snapshot evidence time, and due delivery precedes stale-evidence rejection.
+- Bind recovery to the source epoch that opened each condition. Canonicalize
+  Windows state identity across path-case aliases, reject hard-linked state
+  files, and reject Windows or Unix path-shaped and secret-shaped event IDs.
+- Keep scheduling, evaluator-model selection, semantic triage, and event
+  delivery in the Codex host. Chronos does not install a scheduler, service,
+  network client, or separate plugin.
+- Keep monitored tasks model-agnostic and free of Heartbeat runs. Recommend one
+  `gpt-5.6-luna` Medium Governor task, and retain owner IDs only as triage hints.
+- End normal cycles silently. Persist no raw collector snapshots, prompts,
+  responses, source, diffs, commands, tool output, credentials, usernames, or
+  absolute paths.
+- Add deterministic Windows tests for all detector families, state transitions,
+  routing, deduplication, recursion protection, malformed inputs, persistence,
+  delivery recovery, counter/source discontinuity, and concurrent execution.
+
+Existing Inspector and Governor thresholds, quota scoring, predictive claims,
+shared-folder write policy, and no-telemetry behavior are unchanged.
+
 ## v0.7.7
 
 - Remove unrelated commercial material from the public and packaged product

@@ -7,6 +7,40 @@ description: Detect and mitigate Codex process, CPU, memory, handle, disk, diagn
 
 Keep this skill lean and on-demand. Do not create a scheduler, daemon, recurring automation, telemetry file, or persistent log.
 
+## Heartbeats
+
+Heartbeat evaluation is an opt-in action of this installed Chronos skill, not a
+separate product. A host-side collector supplies a privacy-safe normalized JSON
+snapshot; Chronos persists compact transition and dedupe state, then routes only
+meaningful changes to one Governor inbox. Monitored tasks can use any model and
+do not run Heartbeats. The recommended host configuration is one Governor task
+using `gpt-5.6-luna` with Medium reasoning. The host selects that model; Chronos
+cannot change a task's model setting.
+
+`OwningSolThread` is always `governor`. `Owner` and `Subject` are compact triage
+hints, not direct-delivery instructions. Chronos never sends a message, starts
+another task, or wakes each monitored task. The host supplies collector coverage
+and chooses when to invoke the action. The engine enforces its registered
+minimum cadence for each observed family. Supply a stable
+`sourceEpoch` and increasing `sourceSequence`; without continuity proof, Chronos
+can open a condition but will not resolve one.
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat -HeartbeatInputPath snapshot.json
+```
+
+Use `-HeartbeatStatePath` only for controlled test or host-managed state. The
+default state is
+`%LOCALAPPDATA%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json`.
+Run the same action without an input path to show compact Heartbeat status.
+After the host deduplicates and successfully delivers an event, pass its stable
+ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain
+in a bounded local outbox and retry after 15 minutes with the same ID.
+Use `-HeartbeatInspectorOutputPath` only with captured compact `CHRONOS` and
+`CHRONOS EFFICIENCY` lines. See the public
+[Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
+for the strict normalized input contract and coverage limits.
+
 Before running Chronos, resolve `<skill-root>` to the directory containing this `SKILL.md`. Do not assume the user's workspace is the skill directory and do not search the whole disk.
 
 ## Run an inspection

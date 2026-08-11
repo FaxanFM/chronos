@@ -1,4 +1,4 @@
-# Chronos for Codex - diagnostics and read-task coordination
+# Chronos for Codex - diagnostics, heartbeats, and read-task coordination
 
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
@@ -8,8 +8,8 @@
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
 churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics and coordinates bounded read tasks without
-creating an autonomous agent loop.
+from workflow diagnostics, detects meaningful changes during long-running work,
+and coordinates bounded read tasks without creating an autonomous agent loop.
 
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
@@ -72,6 +72,13 @@ paths, identifiers, prompts, commands, credentials, or private source.
   without returning rule text or values, and measures full-history worker forks,
   effort, task age, and lineage concentration.
 - Recommends the safest next step for the current condition.
+- Evaluates eight opt-in Heartbeat families for agent stalls, runaway review,
+  unusual usage burn, session growth, test regressions, machine drift, task
+  dependencies, and Git or build-state changes.
+- Suppresses unchanged Heartbeat conditions and sends only new, resolved, or
+  materially worse transitions to one Governor inbox. Monitored tasks remain
+  model-agnostic and are not woken by Chronos. Stable event IDs and a bounded
+  acknowledged outbox protect host delivery across restarts.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
 - Discovers worker models from the active runtime instead of assuming a model.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
@@ -118,6 +125,22 @@ Use Chronos to inspect current Codex resource health.
 ```
 
 Chronos reports the current condition and recommends a proportionate response.
+
+For long-running or asynchronous work, ask:
+
+```text
+Enable Chronos Heartbeats in one Governor task using GPT-5.6 Luna with Medium reasoning.
+Monitor the other tasks without waking them unless Governor decides intervention is needed.
+```
+
+The Codex host owns the recurring schedule and model choice. Chronos does not
+install a service or scheduler. Monitored tasks can use any model and do not
+run Heartbeats. Each due cycle compares one bounded normalized snapshot with
+compact local state. A cycle with no actionable transition ends silently. All
+events enter one Governor inbox; owner IDs are triage hints. The host deduplicates
+and acknowledges emitted `EventId` values. See
+[Heartbeats](docs/HEARTBEATS.md) for the collector contract, coverage limits,
+routing, delivery, deduplication, and stored fields.
 
 To delegate a small repository task, ask:
 
@@ -173,7 +196,13 @@ focused v0.7.7 correctness repairs and validation boundary.
   assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
-- Creates no recurring task, service, telemetry, or persistent log.
+- Creates no recurring task, service, publisher telemetry, or persistent log. A recurring
+  Codex automation exists only when the user explicitly enables it through the
+  host.
+- An invoked Heartbeat cycle stores bounded per-scope transition, coverage,
+  cadence, deduplication, hashed delivery/outbox, and health metadata in the user's local Chronos
+  application-data directory. It does not persist raw snapshots, prompts,
+  responses, commands, source, paths, credentials, or tool output.
 - When Governor is invoked, stores only untrusted local coordination metadata beneath the
   current user's Windows temporary application-data directory: opaque IDs, identity hashes, base
   commit, relative scopes, model labels, lease fencing, counters, status, and

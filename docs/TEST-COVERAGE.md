@@ -43,6 +43,31 @@ alternative fixed-script negative controls.
 The tests require explicit coverage and availability fields. Local token and
 approval aggregates remain unsupported as account billing evidence.
 
+## Heartbeats
+
+`tests/heartbeat.tests.ps1` exercises the native Heartbeat action through the
+installed `chronos.ps1` command surface. It covers normal and actionable paths
+for all eight families, first observation and current-versus-previous deltas,
+deduplication, material escalation, resolution, Governor-only routing with
+preserved owner hints, silent normal cycles, recursion
+suppression, per-family cadence and coverage, bounded persistence, malformed and
+oversized input or state, duplicate and case-colliding JSON keys, strict Boolean
+and integer handling, secret-shaped values, Windows and Unix absolute-path
+identifiers, state replacement, duplicate scheduler execution, case-alias
+cross-process serialization, cross-session mutex naming, hard-link rejection,
+abandoned-mutex recovery, originating source-epoch binding, source sequence and
+counter rollback, missing-entity and missing-source non-resolution, same-run
+outbox retry, replayed-evidence wall-clock retry, acknowledgement,
+reparse-point containment, out-of-order
+timestamps, due replay after a newer evidence cycle, compact Inspector-field
+adaptation, persisted-state privacy, and
+PowerShell 5.1 compatibility.
+
+These tests validate deterministic transition and Governor-inbox decisions.
+They do not prove that the host collected complete evidence, delivered an
+event, or configured the recommended Luna Medium Governor. Missing host data
+remains partial or unsupported.
+
 ## Release
 
 `tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
@@ -50,7 +75,7 @@ tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
 per-file manifest hashes and sizes, pre-materialization package limits, required
 plugin files, repository-file exclusion, and a matching artifact checksum.
 
-Tagged CI runs inspector, Governor, and release tests on two Windows runner
+Tagged CI runs inspector, Heartbeat, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the
 artifact attestation is verified before a draft is created, and the immutable
 release and assets are verified again after publication.

@@ -27,6 +27,11 @@ The authoritative immutable v0.7.7 ZIP SHA-256 is
 It is identical to the independently audited and externally exercised release
 candidate.
 
+The tested and independently audited v0.8.0 release-candidate ZIP SHA-256 is
+`d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
+It is not an authoritative immutable release until an external installer
+canary, the signed tag, and the release workflow pass.
+
 ## Published Release
 
 A `vX.Y.Z` tag must exactly match `.codex-plugin/plugin.json`. Before creating a
@@ -110,6 +115,39 @@ the task as coordinator. Do not delete or edit state to force recovery. Report
 the compact result only. An `internal_error` now includes a privacy-safe
 `failure_stage` and exception class, but never the exception message, local
 path, or state content.
+
+## Heartbeat Recovery
+
+Use one recurring Governor task for the monitored task set. Configure that task
+with `gpt-5.6-luna` and Medium reasoning when the host offers it. Do not create a
+recurrence in every monitored task. Monitored tasks can use any available model.
+Chronos emits only to the Governor inbox; `Owner` and `Subject` are triage hints
+for an explicit host follow-up.
+
+Run `chronos.ps1 -Action heartbeat` without an input path to inspect compact
+Heartbeat health. `outboxPending` counts transitions that the host has not yet
+acknowledged. Deduplicate each event by `EventId`, deliver it once, then pass the
+ID with `-HeartbeatAcknowledgeEventId`. Do not acknowledge an event before host
+delivery succeeds. If delivery is interrupted after state persistence, the host
+can safely retry the same `runId`; due outbox events are returned before that
+run is suppressed. The retry window uses local wall-clock delivery time, so a
+replayed `capturedAtUtc` cannot postpone an already-due event. Due delivery is
+also evaluated before evidence-time ordering, so a newer intervening collector
+cycle cannot preempt replay of the old serialized run.
+
+When a host supplies `-HeartbeatStatePath`, it must also supply the same stable
+`-HeartbeatScope` from every working directory and Windows session. The default
+path and scope need no manual configuration.
+
+Preserve a state file that returns `heartbeat_state_invalid`,
+`heartbeat_source_out_of_order`, `heartbeat_outbox_capacity`, or
+`heartbeat_condition_capacity`. Do not delete or edit it to manufacture a
+healthy result. Stop duplicate schedulers, verify the collector epoch and
+sequence, and report the privacy-safe error code. Chronos reopens and validates
+authoritative state after an abandoned mutex; stale temporary files do not
+replace the committed state. State-path case aliases use the same canonical
+mutex. Chronos rejects hard-linked state files instead of permitting two names
+for one writable state object.
 
 ## Rollback
 

@@ -1,12 +1,12 @@
 <p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
 
-# Chronos for Codex - diagnostics and read-task coordination
+# Chronos for Codex - diagnostics, heartbeats, and read-task coordination
 
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
 churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics and coordinates bounded read tasks without
-creating an autonomous agent loop.
+from workflow diagnostics, detects meaningful changes during long-running work,
+and coordinates bounded read tasks without creating an autonomous agent loop.
 
 **[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
 
@@ -35,6 +35,9 @@ commands below only as a fallback.
   without returning rule text or values, and measures full-history worker forks,
   effort, task age, and lineage concentration.
 - Recommends the safest next step for the current condition.
+- Evaluates eight opt-in Heartbeat families and emits an event only for an
+  actionable transition or material worsening. Stable event IDs and a bounded
+  acknowledged outbox protect host delivery across restarts.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
 - Discovers worker models from the active runtime instead of assuming a model.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
@@ -67,6 +70,22 @@ Use Chronos to inspect current Codex resource health.
 ```
 
 Chronos reports the current condition and recommends a proportionate response.
+
+For long-running or asynchronous work, ask:
+
+```text
+Enable Chronos Heartbeats in one Governor task using GPT-5.6 Luna with Medium reasoning.
+Monitor the other tasks without waking them unless Governor decides intervention is needed.
+```
+
+See the public [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
+for the normalized collector schema, coverage rules, and host delivery contract.
+
+The Codex host owns the recurring schedule, evaluator model, and delivery to the
+Governor inbox. Chronos does not install a scheduler or service. Monitored tasks
+can use any model and do not run Heartbeats. A cycle with no actionable
+transition ends silently. The host deduplicates and acknowledges emitted
+`EventId` values. Any forwarding to an owner is an explicit host decision.
 
 To delegate a small repository task, ask:
 
@@ -120,7 +139,11 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
   assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
-- Creates no recurring task, service, telemetry, or persistent log.
+- Creates no recurring task, service, publisher telemetry, or persistent log. The host
+  creates a recurring automation only after the user asks for one.
+- Heartbeat evaluation stores bounded per-scope transition, coverage, cadence,
+  deduplication, hashed delivery/outbox, and health metadata. It does not persist raw snapshots,
+  prompts, responses, commands, source, paths, credentials, or tool output.
 - When Governor is invoked, stores only untrusted local coordination metadata beneath the
   current user's Windows temporary application-data directory: opaque IDs, identity hashes, base
   commit, relative scopes, model labels, lease fencing, counters, status, and
