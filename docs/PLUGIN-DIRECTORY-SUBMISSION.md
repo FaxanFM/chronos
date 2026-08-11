@@ -1,9 +1,11 @@
 # OpenAI Plugin Directory Published Listing Record
 
-Status: v0.7.6 is published in the OpenAI Plugins Directory. A focused
+Status: v0.7.6 is published in the OpenAI Plugins Directory. The focused
 [v0.7.7 maintenance package](https://github.com/FaxanFM/chronos/releases/tag/v0.7.7)
-is being prepared to replace it after testing and independent exercise. The
-candidate reproducible ZIP SHA-256 is
+is an immutable GitHub release and has been uploaded as the next Directory
+version under the verified Dravara, LLC business identity. OpenAI skill scans
+must complete before the update can be submitted for review. The authoritative
+reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
 Direct listing:

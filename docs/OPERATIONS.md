@@ -22,6 +22,11 @@ Different hashes recorded for attempted or pre-publication packages are not the
 v0.7.6 release artifact. Do not rewrite its tag or immutable release to correct
 an earlier working note; record the distinction as an erratum.
 
+The authoritative immutable v0.7.7 ZIP SHA-256 is
+`b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
+It is identical to the independently audited and externally exercised release
+candidate.
+
 ## Published Release
 
 A `vX.Y.Z` tag must exactly match `.codex-plugin/plugin.json`. Before creating a

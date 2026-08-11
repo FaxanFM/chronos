@@ -132,3 +132,25 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 - This clears the independent-installation gate for publishing v0.7.7. The
   report is intentionally sanitized and does not record a machine name, user,
   workspace, repository, task, or session identifier.
+
+## v0.7.7 Release Verification
+
+- Signed annotated tag `v0.7.7` resolves to signed release commit
+  `dbe5084442b1ca07989826495b97d6a11dcb8cf8`; GitHub reports both signatures as
+  verified.
+- The tag-triggered Test workflow passed on Windows Server 2022 and the current
+  Windows runner. The Release workflow also passed both test jobs and its
+  publication job.
+- The GitHub release is immutable and marked Latest. It contains the ZIP,
+  checksum, per-file release manifest, source archives, and release
+  attestation. GitHub artifact attestation `40038741` was created by the release
+  workflow, and the release page exposes attestation `40038775`.
+- Published ZIP SHA-256:
+  `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
+  This exactly matches the independently audited and externally exercised
+  candidate.
+- Local installation from the refreshed public marketplace reports v0.7.7.
+  All ten installed package files match the release manifest hashes. Inspector
+  completed with `machineHealth=HEALTHY`, and Governor `status` returned
+  `ok=true`, no active or stale leases, and disabled shared-folder write
+  delegation.

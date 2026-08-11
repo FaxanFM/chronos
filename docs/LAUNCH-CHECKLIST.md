@@ -38,7 +38,7 @@
 - [x] Receive one successful v0.7.6 status exercise report from a second installation machine.
 - [ ] Exercise the complete v0.7.6 read-task lifecycle on a second installation machine.
 - [x] Receive one successful v0.7.7 canary report from a second Windows installation.
-- [ ] Publish, verify, and install signed v0.7.7 focused audit-remediation package.
+- [x] Publish, verify, and install signed v0.7.7 focused audit-remediation package.
 
 ## Discovery
 
@@ -54,7 +54,7 @@
 - [x] Verify publisher identity and Apps Management write access in OpenAI Platform.
 - [x] Upload through the authenticated OpenAI Platform plugin submission portal.
 - [x] Pass both OpenAI package scans and publish v0.7.6 in the Plugin Directory.
-- [ ] Replace the published package with the focused v0.7.7 audit-remediation update.
+- [ ] Replace the published package with the focused v0.7.7 audit-remediation update. Draft uploaded; OpenAI skill scans are pending.
 - [x] Submit the completed v0.7.6 draft for OpenAI review.
 - [x] Add the approved Plugin Directory URL to the README.
 
