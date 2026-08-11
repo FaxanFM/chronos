@@ -73,7 +73,9 @@ remains partial or unsupported.
 `tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
 tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
 per-file manifest hashes and sizes, pre-materialization package limits, required
-plugin files, repository-file exclusion, and a matching artifact checksum.
+plugin files, repository-file exclusion, and a matching artifact checksum. It
+also extracts the exact ZIP as a fresh install, verifies the two-skill inventory
+and version, and runs the packaged Heartbeat status command.
 
 Tagged CI runs inspector, Heartbeat, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the

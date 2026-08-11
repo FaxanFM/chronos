@@ -158,6 +158,30 @@ try {
     $archive.Dispose()
   }
 
+  $installRoot = Join-Path $testRoot "installed"
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($firstArtifact, $installRoot)
+  $installedManifestPath = Join-Path $installRoot ".codex-plugin\plugin.json"
+  $installedManifest = Get-Content -Raw -LiteralPath $installedManifestPath | ConvertFrom-Json
+  if ([string]$installedManifest.version -ne $version) {
+    throw "Extracted package version does not match $version."
+  }
+  $installedSkills = @(
+    Get-ChildItem -LiteralPath (Join-Path $installRoot "skills") -Directory |
+      Sort-Object Name |
+      ForEach-Object { $_.Name }
+  )
+  if (($installedSkills -join "`n") -ne "chronos`nchronos-governor") {
+    throw "Extracted package must contain exactly the chronos and chronos-governor skills."
+  }
+  $installedHeartbeat = Join-Path $installRoot "skills\chronos\scripts\chronos.ps1"
+  $installedState = Join-Path $testRoot "installed-heartbeat-state.json"
+  $installedOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $installedHeartbeat -Action heartbeat -HeartbeatStatePath $installedState `
+    -HeartbeatScope "release-install-smoke" 2>&1)
+  if ($LASTEXITCODE -ne 0 -or ($installedOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
+    throw "Extracted package Heartbeat status smoke test failed.`n$($installedOutput -join "`n")"
+  }
+
   $checksum = (Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.sha256")).Trim()
   if ($checksum -ne ($firstHash.ToLowerInvariant() + "  " + $artifactName)) { throw "Checksum file does not match the artifact." }
   $submissionPacket = Get-Content -Raw -LiteralPath $submissionPacketPath
