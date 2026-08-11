@@ -37,6 +37,7 @@
 - [x] Publish, verify, and install signed v0.7.6 engineering package.
 - [x] Receive one successful v0.7.6 status exercise report from a second installation machine.
 - [ ] Exercise the complete v0.7.6 read-task lifecycle on a second installation machine.
+- [x] Receive one successful v0.7.7 canary report from a second Windows installation.
 - [ ] Publish, verify, and install signed v0.7.7 focused audit-remediation package.
 
 ## Discovery

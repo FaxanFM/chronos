@@ -118,3 +118,17 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 - This independently validates installation, version reporting, state loading,
   status, and expired-plan capacity semantics. It does not validate a complete
   `plan` to `lease` to `result` to `verify` to `accept` lifecycle.
+
+## v0.7.7 Independent Canary
+
+- Candidate commit: `db23dc0debb27317697f8b1e824dbaf59f3d3e39`.
+- Candidate ZIP SHA-256:
+  `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
+- An independent Windows installation refreshed the public Chronos marketplace,
+  installed manifest version v0.7.7, opened a fresh Codex task, and exercised
+  the requested canary procedure.
+- The independent operator reported that v0.7.7 worked as expected. No failure,
+  stale version path, or version-reporting mismatch was reported.
+- This clears the independent-installation gate for publishing v0.7.7. The
+  report is intentionally sanitized and does not record a machine name, user,
+  workspace, repository, task, or session identifier.
