@@ -12,12 +12,15 @@ or publisher-operated external storage. The local scripts make no network
 requests. Dravara, LLC does not receive, sell, or share data through the
 plugin.
 
-When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It also opens the known Codex diagnostic SQLite database in read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. Results remain in the active Codex task unless the user chooses to share them.
+When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It opens the known Codex diagnostic SQLite database in logical read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. It does not change rows or schemas. SQLite can create or update `-wal` or `-shm` coordination sidecars while opening a WAL-mode database, even with a read-only database handle. Chronos reports the open mode, journal mode, whether sidecar mutation was possible, and whether it observed such activity. Results remain in the active Codex task unless the user chooses to share them.
 
-For token and quota diagnostics, Chronos traverses known session partitions for
-at most three seconds, skips reparse points, retains the eight newest files
+For token and quota diagnostics, Chronos traverses known session partitions
+with a three-second target and a 20,000-entry hard cap, skips reparse points,
+retains the eight newest files
 modified within the previous six hours, and reads at most 2 MiB from each
-selected tail. It reports when the bounded inventory times out. It retains in
+selected tail. It reports when the inventory reaches the time or entry cap.
+An individual Windows filesystem call can delay completion beyond the target.
+It retains in
 memory only structured
 aggregate token counts, model and reasoning-effort labels, context-window size,
 automatic-review counts, categorical approval fields, and counts or byte totals
@@ -71,10 +74,14 @@ local paths.
 
 ## User control
 
-Health checks are read-only. Chronos does not create database triggers, delete
-rows, run checkpoints, vacuum databases, or alter Codex state. Governor records
+Health checks are logical read-only with respect to SQLite content. Chronos does
+not create database triggers, delete rows, run checkpoints, vacuum databases,
+or alter Codex application records. SQLite coordination sidecars can still be
+created or updated as described above. Governor records
 coordination status but never automatically merges, resets, cleans, deletes
-worktrees or branches, closes Codex, terminates processes, or deletes user files.
+worktrees or branches, closes Codex, terminates Codex or unrelated user
+processes, or deletes user files. Governor can terminate only the Git subprocess
+it started when bounded fingerprinting exceeds its time or byte limit.
 
 ## Retention
 

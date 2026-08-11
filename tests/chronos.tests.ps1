@@ -22,10 +22,15 @@ $v2CoverageHome = Join-Path $testRoot "v2-coverage-home"
 $reviewerHealthHome = Join-Path $testRoot "reviewer-health-home"
 $machine2Home = Join-Path $testRoot "machine2-home"
 $ruleMissHome = Join-Path $testRoot "rule-miss-home"
+$ruleStructureHome = Join-Path $testRoot "rule-structure-home"
+$independentAllowHome = Join-Path $testRoot "independent-allow-home"
+  $stableApprovalHome = Join-Path $testRoot "stable-approval-home"
+  $v1ForkHome = Join-Path $testRoot "v1-fork-home"
   $forkReplayHome = Join-Path $testRoot "fork-replay-home"
   $completeNoNewlineHome = Join-Path $testRoot "complete-no-newline-home"
   $invalidDbHome = Join-Path $testRoot "invalid-db-home"
-  $partialDbHome = Join-Path $testRoot "partial-db-home"
+$partialDbHome = Join-Path $testRoot "partial-db-home"
+  $walSidecarHome = Join-Path $testRoot "wal-sidecar-home"
   $unsupportedCacheHome = Join-Path $testRoot "unsupported-cache-home"
   $partialCacheHome = Join-Path $testRoot "partial-cache-home"
   $reparseHome = Join-Path $testRoot "reparse-home"
@@ -39,10 +44,16 @@ function Assert-Match($value, $pattern, $message) {
   }
 }
 
+function Get-DirectorySnapshot([string]$Path) {
+  @((Get-ChildItem -LiteralPath $Path -File | Sort-Object Name | ForEach-Object {
+      $_.Name + ':' + $_.Length + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+    })) -join '|'
+}
+
 try {
   New-Item -ItemType Directory -Path $fixtureHome, $missingHome, $helperWarningHome, `
     $helperCriticalHome, $helperFalsePositiveHome, $tokenHealthHome, $tokenIntegrityHome, $tokenIntervalHome, `
-    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $partialDbHome, $unsupportedCacheHome, $partialCacheHome, $reparseHome, $reparseExternal `
+    $largeTailHome, $aggregateOverflowHome, $v2CoverageHome, $reviewerHealthHome, $machine2Home, $ruleMissHome, $ruleStructureHome, $independentAllowHome, $stableApprovalHome, $v1ForkHome, $forkReplayHome, $completeNoNewlineHome, $invalidDbHome, $partialDbHome, $walSidecarHome, $unsupportedCacheHome, $partialCacheHome, $reparseHome, $reparseExternal `
     -Force | Out-Null
   & $PythonPath $fixtureScript create $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
@@ -115,6 +126,21 @@ try {
   Assert-Match $partialDbOutput " logDbReasons=query-partial " `
     "Partial diagnostic coverage must explain the warning."
   Assert-Match $missingOutput " logSeq=unknown " "Missing database should not invent a sequence."
+
+  $walDatabasePath = Join-Path $walSidecarHome "logs_2.sqlite"
+  & $PythonPath $fixtureScript wal $walDatabasePath
+  if ($LASTEXITCODE -ne 0) { throw "Failed to create closed WAL SQLite fixture." }
+  $walBeforeHash = (Get-FileHash -LiteralPath $walDatabasePath -Algorithm SHA256).Hash
+  $walBeforeDirectory = Get-DirectorySnapshot $walSidecarHome
+  $walSidecarOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $walSidecarHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos closed-WAL inspection failed." }
+  $walAfterDirectory = Get-DirectorySnapshot $walSidecarHome
+  $walAfterHash = (Get-FileHash -LiteralPath $walDatabasePath -Algorithm SHA256).Hash
+  if ($walBeforeHash -ne $walAfterHash) { throw "Logical read-only inspection changed the main WAL database." }
+  $sidecarMutationObserved = $walBeforeDirectory -ne $walAfterDirectory
+  Assert-Match $walSidecarOutput " sqliteOpenMode=logical_readonly sqliteJournalMode=wal sqliteSidecarMutationPossible=true sqliteSidecarMutationObserved=$($sidecarMutationObserved.ToString().ToLowerInvariant()) " `
+    "SQLite open mode and observed coordination-sidecar behavior must match the Windows directory result."
 
   [System.IO.File]::WriteAllText(
     (Join-Path $reparseExternal "escaped.jsonl"),
@@ -555,15 +581,15 @@ try {
     "Reviewer-control capability must be explicit and must not invent an override."
   Assert-Match $reviewerOutput " rolloutCrossFileDuplicateCompactions=1 " `
     "Exact cross-rollout compaction duplicates should be identified separately."
-  Assert-Match $reviewerOutput " approvalRequestObservation=observed approvalOptimization=manual_narrow_rule_review " `
-    "Observed structured repetition should recommend only manual narrow-rule review."
+  Assert-Match $reviewerOutput " approvalRequestObservation=observed approvalOptimization=no_change_recommended " `
+    "Denied or unresolved repetition must not recommend a permission rule."
   if (($reviewerOutput -join "`n") -match "private-parent-id|private command text") {
     throw "Chronos output exposed a session identifier or approval command."
   }
   Assert-Match $reviewerOutput " metricSource=local_rollout dashboardEquivalence=unsupported billingInference=unsupported " `
     "Local approval metrics must not be presented as dashboard or billing equivalents."
-  Assert-Match $reviewerOutput " approvalRepeatedPrefixRequests=9 approvalLargestPrefixRepeat=10 approvalRuleMissDiagnosis=repeated_rule_miss_candidate " `
-    "Repeated structured prefixes should be identified as rule-miss candidates."
+  Assert-Match $reviewerOutput " approvalRepeatedPrefixRequests=9 approvalLargestPrefixRepeat=10 approvalResolvedAllowedEquivalences=0 approvalLargestResolvedAllowedRepeat=0 approvalRuleMissDiagnosis=not_observed " `
+    "Repeated denied or unresolved prefixes must not be classified as rule misses."
   Assert-Match $reviewerOutput " inspectionShapedApprovalRequests=10 inspectionShapedApprovalPct=90([.,]9)? " `
     "Inspection-shaped approval pressure should remain a descriptive measurement."
   Assert-Match $reviewerOutput " approvalRateConfidence=low " `
@@ -584,7 +610,18 @@ try {
       "prefix_rule(",
       "    pattern = [`"cmd`", `"API_KEY=synthetic_value_for_test_only`"],",
       "    decision = `"allow`",",
-      ")"
+      ")",
+      "prefix_rule(pattern=['python3'], decision='allow')",
+      "prefix_rule(pattern=[r'C:\Tools\node.exe'], decision='allow')",
+      "prefix_rule(justification=`"`"`"required for tooling`"`"`", pattern=['pwsh'], decision='allow')",
+      "prefix_rule(justification='reordered', pattern=['npm.cmd','run','lint'], decision='allow')",
+      "prefix_rule(",
+      "    # API_KEY=sk-comment-only-must-not-match-123456789",
+      "    pattern=['git','status'], decision='allow',",
+      ")",
+      "prefix_rule(pattern=[['rg','--files'],['git','status']], decision='allow')",
+      "prefix_rule(pattern=['cmd','say \'hello\''], decision='allow')",
+      "prefix_rule(pattern=['cmd','$longLiteral'], decision='allow')"
     ),
     [System.Text.UTF8Encoding]::new($false)
   )
@@ -696,7 +733,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Chronos Machine 2 regression inspection failed." }
   Assert-Match $machine2Output " approvalReviewTurnsObserved=590 " `
     "Machine 1 regression must retain 590 distinct reviewer turn_context records."
-  Assert-Match $machine2Output " approvalDecisionsObserved=1 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalAllowPct=100 " `
+  Assert-Match $machine2Output " approvalDecisionsObserved=1 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalUnknownDecisions=0 approvalAllowPct=100 " `
     "Allowed decisions and allow rate were not accounted separately."
   Assert-Match $machine2Output " approvalPersistenceRetries=581 approvalPersistenceFailures=1 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
     "Structurally equivalent retries with regenerated IDs must be classified as a persistence runaway."
@@ -704,14 +741,14 @@ try {
     "Current function-call escalation requests must expose bounded resolution and latency aggregates."
   Assert-Match $machine2Output " reviewerToolCalls=3 reviewerEscalationsObserved=2 reviewerEscalationUniquePrefixes=1 reviewerEscalationRepeatedPrefixes=1 reviewerEscalationLargestPrefix=2 " `
     "Reviewer-originated escalation traffic was not classified independently."
-  Assert-Match $machine2Output " ruleCount=4 ruleMonolithic=1 ruleReusableNarrow=2 ruleBroadInterpreter=1 ruleCredentialShaped=1 " `
-    "Rule health did not classify brittle, narrow, broad, and credential-shaped rules."
+  Assert-Match $machine2Output " ruleCount=12 ruleMonolithic=2 ruleReusableNarrow=6 ruleBroadInterpreter=4 ruleCredentialShaped=1 " `
+    "Structured rule parsing did not classify single, raw, triple, reordered, nested, escaped, and comment forms correctly."
   Assert-Match $machine2Output " ruleStatus=CRITICAL ruleValuesReturned=false " `
     "Credential-shaped rule output must be critical and must never return values."
   Assert-Match $machine2Output " ruleSecretCandidateOrdinals=4 ruleSecretCandidateClasses=4:placeholder-like ruleSecretConfidence=low " `
     "Rule diagnostics must provide privacy-safe ordinal, category, and confidence without secret text."
   Assert-Match $machine2Output " ruleFilesEligible=2 ruleFilesSelected=2 ruleCoverageCapped=false ruleParseFailures=0 " `
-    "Comments and triple-quoted examples must not create false rule blocks or partial coverage."
+    "Comments, raw strings, escaped quotes, and triple-quoted examples must parse without false blocks."
   Assert-Match $machine2Output " ruleBrittlenessDiagnosis=rule_brittleness_warning ruleSecretDiagnosis=rule_secret_exposure ruleBroadInterpreterDiagnosis=broad_interpreter_rule " `
     "Named rule defect classes were not emitted."
   Assert-Match $machine2Output " spawnForkAll=1 spawnForkAllDefaulted=0 spawnForkNone=0 spawnForkBounded=0 .*spawnHighEffort=1 spawnMaxEffort=1 " `
@@ -725,6 +762,107 @@ try {
   if (($machine2Output -join "`n") -match "synthetic_value_for_test_only|API_KEY|synthetic-pattern|approval-machine2|root-machine-2|private current-schema|sk-not-returned") {
     throw "Chronos output exposed a credential, prefix, approval identifier, or session identifier."
   }
+
+  $ruleStructureRoot = Join-Path $ruleStructureHome "rules"
+  New-Item -ItemType Directory -Path $ruleStructureRoot -Force | Out-Null
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $ruleStructureRoot "structured.rules"),
+    @(
+      "prefix_rule(pattern=[['powershell','pwsh']], decision='allow')",
+      "prefix_rule(pattern=[['cmd.exe','cmd']], decision='allow')",
+      "prefix_rule(pattern=['powershell','-Command'], decision='allow')",
+      "prefix_rule(pattern=['bash','-c'], decision='allow')",
+      "prefix_rule(pattern=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'], decision='allow')",
+      "prefix_rule(pattern=['powershell','-NoProfile','-Command'], decision='allow')",
+      "prefix_rule(pattern=['cmd.exe','/d','/c'], decision='allow')",
+      "prefix_rule(pattern=['bash','--noprofile','-c'], decision='allow')",
+      "prefix_rule(pattern=['python','-I','-c'], decision='allow')",
+      "prefix_rule(pattern=['node','--no-warnings','-e'], decision='allow')",
+      "prefix_rule(pattern=['powershell','-File'], decision='allow')",
+      "prefix_rule(pattern=['powershell',['-NoProfile','safe.ps1']], decision='allow')",
+      "prefix_rule(pattern=['powershell',['-File','safe.ps1']], decision='allow')",
+      "prefix_rule(pattern=[['powershell','pwsh'],'-File','safe.ps1'], decision='allow')",
+      "prefix_rule(pattern=[['powershell','pwsh'],'-File',['safe.ps1','other.ps1']], decision='allow')",
+      "prefix_rule(pattern=['powershell'], decision='prompt')",
+      "prefix_rule(pattern=['cmd.exe'], decision='forbidden')"
+    ),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $ruleStructureOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $ruleStructureHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos structured rule regression failed." }
+  Assert-Match $ruleStructureOutput " ruleCount=17 ruleMonolithic=0 ruleReusableNarrow=4 ruleBroadInterpreter=13 ruleCredentialShaped=0 " `
+    "Nested alternatives, raw Windows paths, displaced arbitrary-code flags, branch-specific missing operands, constrained files, and non-allow decisions were not classified safely."
+  Assert-Match $ruleStructureOutput " ruleFilesEligible=1 ruleFilesSelected=1 ruleCoverageCapped=false ruleParseFailures=0 " `
+    "Valid structured rule alternatives must parse without degraded coverage."
+
+  $stableApprovalDay = Join-Path (Join-Path (Join-Path $stableApprovalHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $stableApprovalDay = Join-Path $stableApprovalDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $stableApprovalDay -Force | Out-Null
+  $stableStart = [DateTimeOffset]::UtcNow.AddMinutes(-5)
+  $stableRecords = @(
+    @{ timestamp=$stableStart.ToString('o'); type='session_meta'; payload=@{ id='stable-root' } },
+    @{ timestamp=$stableStart.AddSeconds(1).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='stable-request'; approval_state='pending'
+        operation_class='repository-read'; proposed_prefix=@('rg','stable') } },
+    @{ timestamp=$stableStart.AddSeconds(2).ToString('o'); type='event_msg'; payload=@{
+        type='approval_decision'; approval_id='stable-request'; decision='allow' } },
+    @{ timestamp=$stableStart.AddSeconds(3).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='stable-request'; approval_state='pending'
+        operation_class='repository-read'; proposed_prefix=@('rg','stable') } },
+    @{ timestamp=$stableStart.AddSeconds(4).ToString('o'); type='event_msg'; payload=@{
+        type='approval_resolved'; approval_id='stable-request'; status='resolved' } },
+    @{ timestamp=$stableStart.AddSeconds(5).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; call_id='mirror-request'; approval_state='pending'
+        operation_class='rg'; proposed_prefix=@('rg','mirror') } },
+    @{ timestamp=$stableStart.AddSeconds(5).ToString('o'); type='response_item'; payload=@{
+        type='function_call'; name='shell_command'; call_id='mirror-request'
+        arguments=(@{ sandbox_permissions='require_escalated'; prefix_rule=@('rg','mirror') } | ConvertTo-Json -Compress) } },
+    @{ timestamp=$stableStart.AddSeconds(6).ToString('o'); type='event_msg'; payload=@{
+        type='approval_decision'; decision='deferred' } }
+  ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 }
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $stableApprovalDay 'rollout-stable-approval.jsonl'), $stableRecords,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $stableOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $stableApprovalHome -SampleSeconds 1
+  Assert-Match $stableOutput " approvalRequestsObserved=3 " `
+    "A later same-ID request must count while an exact cross-schema mirror remains deduplicated."
+  Assert-Match $stableOutput " approvalPersistenceRetries=1 approvalPersistenceFailures=0 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
+    "A stable-correlation pending retry after ALLOW must be classified as a persistence runaway."
+  Assert-Match $stableOutput " approvalDecisionsObserved=2 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalUnknownDecisions=1 approvalAllowPct=100 " `
+    "Unknown outcomes must be counted but excluded from the known-decision allow-rate denominator."
+  if (($stableOutput -join "`n") -match "stable-request|mirror-request|stable-root") {
+    throw "Stable-correlation diagnostics exposed local identifiers."
+  }
+
+  $v1ForkDay = Join-Path (Join-Path (Join-Path $v1ForkHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $v1ForkDay = Join-Path $v1ForkDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $v1ForkDay -Force | Out-Null
+  $v1ForkStart = [DateTimeOffset]::UtcNow.AddMinutes(-4)
+  $v1ForkRecords = @(
+    @{ timestamp=$v1ForkStart.ToString('o'); type='session_meta'; payload=@{
+        id='v1-root'; multi_agent_version=1 } },
+    @{ timestamp=$v1ForkStart.AddSeconds(1).ToString('o'); type='response_item'; payload=@{
+        type='function_call'; name='spawn_agent'
+        arguments=(@{ fork_context=$false; task_complexity='simple' } | ConvertTo-Json -Compress) } },
+    @{ timestamp=$v1ForkStart.AddSeconds(2).ToString('o'); type='response_item'; payload=@{
+        type='function_call'; name='spawn_agent'
+        arguments=(@{ task_complexity='simple' } | ConvertTo-Json -Compress) } }
+  ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 }
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $v1ForkDay 'rollout-v1-fork.jsonl'), $v1ForkRecords,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $v1ForkOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $v1ForkHome -SampleSeconds 1
+  Assert-Match $v1ForkOutput " spawnForkAll=0 spawnForkAllDefaulted=0 spawnForkNone=1 spawnForkBounded=0 spawnForkUnknown=1 " `
+    "V1 fork_context=false must mean none; missing V1 fork context must remain unknown."
+  Assert-Match $v1ForkOutput " spawnSchemaV1=2 spawnSchemaV2=0 spawnSchemaUnknown=0 " `
+    "V1 spawn records must retain their advertised schema."
 
   $ruleMissSessionDay = Join-Path (Join-Path (Join-Path $ruleMissHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -762,15 +900,62 @@ try {
   $ruleMissOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action inspect -CodexHome $ruleMissHome -SampleSeconds 1
   if ($LASTEXITCODE -ne 0) { throw "Chronos repeated rule-miss regression failed." }
-  Assert-Match $ruleMissOutput " approvalDecisionsObserved=307 approvalAllowedObserved=307 approvalDeniedObserved=0 approvalAllowPct=100 " `
+  Assert-Match $ruleMissOutput " approvalDecisionsObserved=307 approvalAllowedObserved=307 approvalDeniedObserved=0 approvalUnknownDecisions=0 approvalAllowPct=100 " `
     "Repeated allowed decisions were not aggregated."
+  Assert-Match $ruleMissOutput " approvalResolvedRequests=307 approvalUnresolvedRequests=0 approvalResolutionObservation=observed_complete_outcomes " `
+    "A fully resolved approval sample must report complete outcomes."
   Assert-Match $ruleMissOutput " approvalPersistenceRetries=0 approvalPersistenceFailures=0 approvalPersistenceDiagnosis=not_observed " `
     "Resolved approvals must not be classified as persistence failures."
-  Assert-Match $ruleMissOutput " approvalRepeatedPrefixRequests=306 approvalLargestPrefixRepeat=307 approvalRuleMissDiagnosis=repeated_rule_miss_candidate approvalProblemClass=rule_miss_amplification " `
+  Assert-Match $ruleMissOutput " approvalRepeatedPrefixRequests=306 approvalLargestPrefixRepeat=307 approvalResolvedAllowedEquivalences=1 approvalLargestResolvedAllowedRepeat=307 approvalRuleMissDiagnosis=repeated_rule_miss_candidate approvalProblemClass=rule_miss_amplification " `
     "The exact 307-review prefix regression was not classified as a repeated rule miss."
   if (($ruleMissOutput -join "`n") -match "synthetic-file|resolved-request|rule-miss-root") {
     throw "Repeated rule-miss output exposed a prefix or local identifier."
   }
+
+  $independentAllowDay = Join-Path (Join-Path (Join-Path $independentAllowHome "sessions") `
+    (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
+  $independentAllowDay = Join-Path $independentAllowDay (Get-Date -Format "dd")
+  New-Item -ItemType Directory -Path $independentAllowDay -Force | Out-Null
+  $independentAllowStart = [DateTimeOffset]::UtcNow.AddMinutes(-4)
+  $independentAllowRecords = @(
+    @{ timestamp=$independentAllowStart.ToString('o'); type='session_meta'; payload=@{ id='independent-root' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(1).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='request-a'; approval_state='pending'; operation_class='repository-read'; proposed_prefix=@('rg','safe') } },
+    @{ timestamp=$independentAllowStart.AddSeconds(2).ToString('o'); type='event_msg'; payload=@{
+        type='approval_decision'; approval_id='request-a'; decision='allow' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(3).ToString('o'); type='event_msg'; payload=@{
+        type='approval_resolved'; approval_id='request-a'; status='resolved' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(4).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='request-b'; approval_state='pending'; operation_class='repository-read'; proposed_prefix=@('rg','safe') } },
+    @{ timestamp=$independentAllowStart.AddSeconds(5).ToString('o'); type='event_msg'; payload=@{
+        type='approval_resolved'; approval_id='request-b'; status='resolved' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(6).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='request-c'; approval_state='pending'; operation_class='repository-read' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(7).ToString('o'); type='event_msg'; payload=@{
+        type='approval_decision'; approval_id='request-c'; decision='allow' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(8).ToString('o'); type='event_msg'; payload=@{
+        type='approval_resolved'; approval_id='request-c'; status='resolved' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(9).ToString('o'); type='event_msg'; payload=@{
+        type='exec_approval_request'; approval_id='request-d'; approval_state='pending'; operation_class='repository-read' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(10).ToString('o'); type='event_msg'; payload=@{
+        type='approval_decision'; approval_id='request-d'; decision='allow' } },
+    @{ timestamp=$independentAllowStart.AddSeconds(11).ToString('o'); type='event_msg'; payload=@{
+        type='approval_resolved'; approval_id='request-d'; status='resolved' } }
+  ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 }
+  [System.IO.File]::WriteAllLines(
+    (Join-Path $independentAllowDay 'rollout-independent-allow.jsonl'),
+    $independentAllowRecords,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $independentAllowOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $independentAllowHome -SampleSeconds 1
+  if ($LASTEXITCODE -ne 0) { throw "Chronos independent ALLOW regression failed." }
+  Assert-Match $independentAllowOutput " approvalDecisionsObserved=3 approvalAllowedObserved=3 approvalDeniedObserved=0 approvalUnknownDecisions=0 approvalAllowPct=100 " `
+    "Explicit approval decisions were not counted independently."
+  Assert-Match $independentAllowOutput " approvalResolvedRequests=4 approvalUnresolvedRequests=0 approvalResolutionObservation=observed_complete_outcomes " `
+    "The independent ALLOW fixture must have four terminal request outcomes."
+  Assert-Match $independentAllowOutput " approvalResolvedAllowedEquivalences=1 approvalLargestResolvedAllowedRepeat=1 approvalRuleMissDiagnosis=not_observed " `
+    "A request without its own ALLOW or without a supported prefix must not qualify for rule-miss advice."
 
   $forkSessionDay = Join-Path (Join-Path (Join-Path $forkReplayHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -887,8 +1072,26 @@ try {
     "Partial rollout coverage must suppress the 24-hour projection."
   Assert-Match $largeTailOutput " rolloutProjectionComparable=false " `
     "A truncated rollout projection must be explicitly incomparable."
-  Assert-Match $largeTailOutput " rolloutAgeObservation=partial_head_metadata rolloutHeadTruncatedFiles=1 rolloutHeadMetadataUnavailableFiles=1 " `
+  Assert-Match $largeTailOutput " rolloutAgeObservation=partial_head_metadata rolloutAgeFilesystemFallbackFiles=1 rolloutHeadTruncatedFiles=1 rolloutHeadMetadataUnavailableFiles=1 " `
     "A bounded head without session metadata must disclose partial task-age coverage."
+  $largeHeadRecord = @{
+    timestamp = [DateTimeOffset]::UtcNow.AddDays(-10).ToString('o')
+    type = 'session_meta'
+    payload = @{ id = 'large-head-session'; multi_agent_version = 2 }
+  } | ConvertTo-Json -Compress -Depth 8
+  $largeHeadStream = [System.IO.File]::Open(
+    $largeSessionPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write,
+    [System.IO.FileShare]::Read
+  )
+  try {
+    $largeHeadBytes = [System.Text.Encoding]::UTF8.GetBytes($largeHeadRecord + "`n")
+    $largeHeadStream.Write($largeHeadBytes, 0, $largeHeadBytes.Length)
+    $largeHeadStream.Flush()
+  } finally { $largeHeadStream.Dispose() }
+  $largeHeadOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $chronosScript -Action inspect -CodexHome $largeTailHome -SampleSeconds 1
+  Assert-Match $largeHeadOutput " rolloutAgeObservation=observed rolloutAgeFilesystemFallbackFiles=0 rolloutHeadTruncatedFiles=1 rolloutHeadMetadataUnavailableFiles=0 " `
+    "A large rollout must use its bounded head session timestamp instead of filesystem creation time."
 
   $v2SessionDay = Join-Path (Join-Path (Join-Path $v2CoverageHome "sessions") `
     (Get-Date -Format "yyyy")) (Get-Date -Format "MM")
@@ -987,6 +1190,19 @@ try {
   if ($scriptText -match "\bStop-Process\b") {
     throw "Chronos script must not contain a process-termination path."
   }
+  Assert-Match $scriptText "EnumerateFileSystemEntries" `
+    "Session inventory must stream directory entries instead of materializing whole directories."
+  Assert-Match $scriptText "inventoryEntryLimit = 20000" `
+    "Session inventory must retain a deterministic total-entry bound."
+  if ($scriptText -match 'Get-ChildItem\s+-LiteralPath\s+\$directory') {
+    throw "Session inventory regressed to eager per-directory materialization."
+  }
+  Assert-Match $scriptText "function Get-SafeProcessSample" `
+    "Process property access must remain isolated from process-exit races."
+  Assert-Match $scriptText '(?s)function Get-Candidates.*?foreach \(\$process.*?try \{.*?\$startTime = \$process\.StartTime.*?catch \{\s*continue' `
+    "Legacy advisory candidates must also isolate process-exit races."
+  Assert-Match $scriptText "ProcessSampleObservation" `
+    "Partial process samples must lower reported observation confidence."
 
   $skillText = Get-Content -LiteralPath $chronosSkill -Raw
   if ($skillText -match "stop starting new work") {

@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.7.7
+
+- Remove unrelated commercial material from the public and packaged product
+  documentation.
+- Add a deterministic release check that keeps product documentation focused
+  on the local Chronos plugin.
+- Describe diagnostic SQLite access as logical read-only, disclose possible
+  `-wal` and `-shm` coordination-sidecar activity, and report the open mode,
+  journal mode, possible mutation, and observed mutation.
+- Parse Starlark `prefix_rule` named arguments and single, double, raw, triple,
+  escaped, reordered, commented, and nested literal forms. Preserve pattern
+  positions, nested command alternatives, raw Windows paths, decision semantics,
+  arbitrary-code flags in any later position, option-only prefixes, and missing
+  operands across nested alternative branches; fail partial instead of
+  false-safe.
+- Distinguish exact record duplicates, exact cross-schema approval mirrors, and
+  later same-ID requests. Count stable-correlation pending retries after
+  structured `ALLOW` outcomes.
+- Require at least two structurally equivalent requests with separate explicit
+  `ALLOW` decisions, terminal resolutions, and supported prefixes before
+  suggesting a repeated permission-rule miss. Denied, unknown, inherited,
+  prefix-unavailable, mixed, and unresolved repetitions do not produce it.
+- Correct Governor `capacity_reserved`, known-decision allow-rate denominators,
+  complete approval-resolution reporting, large-rollout head timestamps, V1
+  `fork_context=false`, and missing V1 fork semantics.
+- Stream rollout inventory under a 20,000-entry cap and three-second target,
+  disclose cap results, and isolate process property races with partial-sample
+  confidence.
+- Bind delegated plans to a pre-spawn Git-visible workspace fingerprint and
+  reject lease activation after an intervening mutation; isolate process races
+  in the legacy advisory candidate path as well.
+- Align the manifest publisher with Dravara, LLC and replace obsolete pending
+  directory copy with the verified public listing and explicit unknown dates
+  and regions.
+- Expand Windows regressions for SQLite sidecars, structured rules, stable-ID
+  approvals, safe rule-miss postconditions, V1 fork data, rollout head age,
+  inventory bounds, process sampling, and plan reservation reporting.
+
+No warning threshold, critical threshold, scoring weight, predictive claim,
+telemetry behavior, background behavior, or read-only Governor policy changed.
+
 ## v0.7.6
 
 - Publish the v0.7.4 engineering changes through GitHub's required

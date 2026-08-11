@@ -81,6 +81,20 @@ def create_partial_fixture(path: Path) -> None:
         connection.close()
 
 
+def create_closed_wal_fixture(path: Path) -> None:
+    create_fixture(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.commit()
+    finally:
+        connection.close()
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(str(path) + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
+
+
 def write_fixture(path: Path, duration: float) -> None:
     connection = sqlite3.connect(path, timeout=2)
     try:
@@ -104,7 +118,7 @@ def write_fixture(path: Path, duration: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("create", "partial", "verify", "write"))
+    parser.add_argument("action", choices=("create", "partial", "wal", "verify", "write"))
     parser.add_argument("path", type=Path)
     parser.add_argument("--duration", type=float, default=4.0)
     args = parser.parse_args()
@@ -113,6 +127,8 @@ def main() -> None:
         create_fixture(args.path)
     elif args.action == "partial":
         create_partial_fixture(args.path)
+    elif args.action == "wal":
+        create_closed_wal_fixture(args.path)
     elif args.action == "verify":
         verify_fixture(args.path)
     else:

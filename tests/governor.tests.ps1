@@ -182,7 +182,7 @@ try {
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
-  Assert-Equal $versionStatus.plugin_version '0.7.6' 'Governor must report the active packaged plugin version.'
+  Assert-Equal $versionStatus.plugin_version '0.7.7' 'Governor must report the active packaged plugin version.'
   $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
   if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Governor runtime state must not be stored beneath Git metadata.'
@@ -217,6 +217,22 @@ try {
       '-PlanToken', $cancelPlan.plan_token
     )) 'plan_already_consumed' 'A canceled plan token must never authorize a lease.'
   Register-SafetyControl 'cancel-plan-terminal'
+
+  $preLeaseMutationPlanResult = New-TestPlan 'pre-lease-mutation' 'read' @('src/**') 'review'
+  Assert-Success $preLeaseMutationPlanResult 'Pre-lease mutation plan creation failed.'
+  $preLeaseMutationPlan = Get-GovernorData $preLeaseMutationPlanResult
+  Add-Content -LiteralPath (Join-Path $fixtureRepo 'src\app.ps1') -Value "'changed before lease'"
+  Assert-Failure (Invoke-Governor @(
+      '-Action', 'lease', '-TaskId', 'pre-lease-mutation', '-WorkerId', '/root/pre-lease-mutator',
+      '-PlanToken', $preLeaseMutationPlan.plan_token
+    )) 'workspace_changed_since_plan' `
+    'A Git-visible mutation between plan and lease must invalidate the plan baseline.'
+  Assert-Success (Invoke-Governor @(
+      '-Action', 'cancel-plan', '-TaskId', 'pre-lease-mutation', '-PlanToken', $preLeaseMutationPlan.plan_token
+    )) 'The invalidated pre-lease plan must remain cancelable.'
+  & git -C $fixtureRepo restore -- src/app.ps1
+  if ($LASTEXITCODE -ne 0) { throw 'Could not restore the pre-lease mutation fixture.' }
+  Register-SafetyControl 'plan-to-lease-workspace-baseline'
 
   $expiredPlanResult = New-TestPlan 'expired-before-lease' 'read' @('README.md') 'review'
   Assert-Success $expiredPlanResult 'Expiring plan creation failed.'
@@ -361,9 +377,15 @@ $input | ForEach-Object { $_ }
   $capacityPlanB = New-TestPlan 'capacity-plan-b' 'read' @('docs/**') 'review'
   Assert-Equal (Get-GovernorData $capacityPlanA).decision 'delegate' 'First pending plan should reserve capacity.'
   Assert-Equal (Get-GovernorData $capacityPlanB).decision 'delegate' 'Second pending plan should reserve capacity.'
+  Assert-Equal (Get-GovernorData $capacityPlanA).capacity_reserved $true `
+    'A successful delegated plan must report its concurrency reservation.'
+  Assert-Equal (Get-GovernorData $capacityPlanB).capacity_reserved $true `
+    'Each issued delegated plan must report its concurrency reservation.'
   $capacityPlanC = New-TestPlan 'capacity-plan-c' 'read' @('README.md') 'docs'
   Assert-Equal (Get-GovernorData $capacityPlanC).reason 'concurrency_budget_reached' `
     'Issued plans must reserve the concurrency budget before workers bind.'
+  Assert-Equal (Get-GovernorData $capacityPlanC).capacity_reserved $false `
+    'A coordinator decision must not claim reserved worker capacity.'
   Close-TestReadPlan 'capacity-plan-a' $capacityPlanA
   Close-TestReadPlan 'capacity-plan-b' $capacityPlanB
   Register-SafetyControl 'pending-plan-capacity'

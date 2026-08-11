@@ -1,10 +1,10 @@
 {
   "name": "chronos",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Detect Codex degradation, approval loops, quota amplification, rule risks, rollout duplication, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
-    "name": "FaxanFM",
-    "url": "https://github.com/FaxanFM"
+    "name": "Dravara, LLC",
+    "url": "https://github.com/FaxanFM/chronos"
   },
   "homepage": "https://github.com/FaxanFM/chronos",
   "repository": "https://github.com/FaxanFM/chronos",
@@ -15,7 +15,7 @@
     "displayName": "Chronos for Codex",
     "shortDescription": "Diagnose Codex on Windows",
     "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health, then coordinate bounded Codex read tasks using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
-    "developerName": "FaxanFM",
+    "developerName": "Dravara, LLC",
     "category": "Developer Tools",
     "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Approval and rule diagnostics", "Fork and lineage diagnostics", "Bounded worker coordination", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",

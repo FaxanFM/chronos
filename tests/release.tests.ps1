@@ -7,6 +7,7 @@ $manifestPath = Join-Path $repoRoot "plugins\chronos\.codex-plugin\plugin.json"
 $releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
 $testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
 $readmePath = Join-Path $repoRoot "README.md"
+$pluginReadmePath = Join-Path $repoRoot "plugins\chronos\README.md"
 $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
 $supportPath = Join-Path $repoRoot "SUPPORT.md"
 $fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
@@ -38,6 +39,15 @@ try {
   foreach ($required in @('fresh task', 'versioned plugin skill locator', 'Do not copy', 'stale task catalog state')) {
     if (-not $upgradeBoundary.Contains($required)) {
       throw "Public upgrade guidance is missing the stale task-locator boundary: $required"
+    }
+  }
+  $publicReadmes = @(
+    Get-Content -Raw -LiteralPath $readmePath
+    Get-Content -Raw -LiteralPath $pluginReadmePath
+  ) -join "`n"
+  foreach ($forbidden in @('self-service agents', 'paid for directly', 'Public runner links', 'managed engagement')) {
+    if ($publicReadmes.Contains($forbidden)) {
+      throw "Public plugin documentation contains a prohibited service promotion: $forbidden"
     }
   }
   $fieldReports = Get-Content -Raw -LiteralPath $fieldReportsPath

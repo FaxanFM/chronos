@@ -15,6 +15,14 @@
 - [x] Separate marginal token intervals from cumulative heuristic snapshots.
 - [x] Suppress incomparable rollout projections and expose resource contributors.
 - [x] Add terminal plan cancellation and expired-plan accounting.
+- [x] Report SQLite logical read-only mode and possible or observed sidecar activity.
+- [x] Parse the named Starlark `pattern` argument without comment or quote false-safe results.
+- [x] Count stable-ID approval retries and require resolved `ALLOW` postconditions for rule-miss advice.
+- [x] Preserve nested command alternatives, raw Windows paths, decision semantics, and arbitrary-code flags in rule classification.
+- [x] Require a separate explicit `ALLOW`, terminal result, and supported prefix for every rule-miss observation.
+- [x] Bind plans to a pre-spawn Git-visible fingerprint and reject intervening workspace mutations at lease.
+- [x] Stream session inventory under time and entry bounds and isolate process-exit races.
+- [x] Correct plan capacity, approval denominator/outcome, rollout-age, and V1 fork semantics.
 
 ## Release quality
 
@@ -29,6 +37,7 @@
 - [x] Publish, verify, and install signed v0.7.6 engineering package.
 - [x] Receive one successful v0.7.6 status exercise report from a second installation machine.
 - [ ] Exercise the complete v0.7.6 read-task lifecycle on a second installation machine.
+- [ ] Publish, verify, and install signed v0.7.7 focused audit-remediation package.
 
 ## Discovery
 
@@ -41,10 +50,12 @@
 - [x] Remove UI screenshot metadata from the skills-only submission package.
 - [x] Update GitHub About description, website, and discovery topics.
 - [x] Upload the generated 1280x640 GitHub social preview.
-- [ ] Verify publisher identity and Apps Management write access in OpenAI Platform.
-- [ ] Upload through the authenticated OpenAI Platform plugin submission portal.
-- [ ] Submit the completed draft for OpenAI review.
-- [ ] Add the approved Plugin Directory URL to the README.
+- [x] Verify publisher identity and Apps Management write access in OpenAI Platform.
+- [x] Upload through the authenticated OpenAI Platform plugin submission portal.
+- [x] Pass both OpenAI package scans and publish v0.7.6 in the Plugin Directory.
+- [ ] Replace the published package with the focused v0.7.7 audit-remediation update.
+- [x] Submit the completed v0.7.6 draft for OpenAI review.
+- [x] Add the approved Plugin Directory URL to the README.
 
 ## Adoption without telemetry
 

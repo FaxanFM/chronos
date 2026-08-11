@@ -1088,6 +1088,8 @@ try {
       }
 
       if ($decision -eq 'delegate') {
+        $planHead = Get-HeadState
+        $plannedWorkspaceFingerprint = Get-WorkspaceFingerprint $planHead.commit
         $planId = [guid]::NewGuid().ToString('N')
         $planTokenValue = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
         $planExpiresAt = $nowOffset.AddMinutes($PlanMinutes).ToString('o')
@@ -1109,6 +1111,10 @@ try {
           reasoning_effort = $effort
           mutation_attribution_hash = $attributionHash
           mutation_attribution_verified = [bool]$MutationAttributionVerified
+          plan_base_commit = $planHead.commit
+          plan_head_mode = $planHead.mode
+          plan_reference_hash = $planHead.reference_hash
+          planned_workspace_fingerprint = $plannedWorkspaceFingerprint
           policy = @{
             max_concurrent_workers = $MaxConcurrentWorkers
             max_total_attempts = $MaxTotalAttempts
@@ -1154,7 +1160,7 @@ try {
       plan_token = $planTokenValue
       plan_id = if ($decision -eq 'delegate') { $planId } else { $null }
       plan_expires_at = $planExpiresAt
-      capacity_reserved = $false
+      capacity_reserved = [bool]($decision -eq 'delegate' -and $planTokenValue)
       state_store = 'per_user_temp'
       state_integrity = 'untrusted_coordination_only'
       security_boundary = $false
@@ -1246,6 +1252,16 @@ try {
         Throw-GovernorError "single_writer_lease_active"
       }
       $head = Get-HeadState
+      if (-not $plan.planned_workspace_fingerprint -or
+          $plan.plan_base_commit -ne $head.commit -or
+          $plan.plan_head_mode -ne $head.mode -or
+          $plan.plan_reference_hash -ne $head.reference_hash) {
+        Throw-GovernorError "workspace_changed_since_plan"
+      }
+      $baselineFingerprint = Get-WorkspaceFingerprint $head.commit
+      if ($baselineFingerprint -ne $plan.planned_workspace_fingerprint) {
+        Throw-GovernorError "workspace_changed_since_plan"
+      }
       if ($AccessMode -eq 'write') {
         if ($head.mode -eq 'detached') { Throw-GovernorError "detached_head_write_unsupported" }
         if (-not $plan.mutation_attribution_verified -or -not $plan.mutation_attribution_hash) { Throw-GovernorError "mutation_attribution_unverified" }
@@ -1273,7 +1289,6 @@ try {
       if ($attempts -gt [int]$leasePolicy.max_total_attempts) { Throw-GovernorError "attempt_budget_reached" }
 
       $baseCommit = $head.commit
-      $baselineFingerprint = Get-WorkspaceFingerprint $baseCommit
       $leaseIdentifier = [guid]::NewGuid().ToString('N')
       $fencing = [guid]::NewGuid().ToString('N')
       $expiresAt = $nowOffset.AddMinutes([int]$leasePolicy.lease_minutes).ToString('o')

@@ -1,6 +1,6 @@
 # Efficiency Governor
 
-Chronos 0.7.4 provides bounded, local observations for Codex approval review,
+Chronos 0.7.7 provides bounded, local observations for Codex approval review,
 permission-rule quality, worker context, and rollout amplification. It is an
 observer and advisor, not an approval-policy manager.
 
@@ -26,7 +26,8 @@ aggregate fields.
   `approvalReviewerMainInputRatio` use the greatest valid selected-rollout
   snapshots after exact observed ancestor deltas. They are not account billing
   or a savings estimate.
-- Allowed and denied decisions, allow percentage, inspection-shaped requests,
+- Allowed, denied, and unknown decisions, known-decision allow percentage,
+  inspection-shaped requests,
   boundary causes, repeated prefix counts, and source classes require supported
   structured fields. `metricSource=local_rollout`,
   `dashboardEquivalence=unsupported`, and `billingInference=unsupported` keep
@@ -37,11 +38,17 @@ aggregate fields.
   not imply allow or deny without a structured decision record. Commands,
   justifications, tool output, call IDs, prefixes, and hashes are never returned.
 - `approval_state_persistence_runaway` requires an allowed request to remain
-  pending and regenerate with the same ephemeral correlation or structural
-  fingerprint. High review volume alone is not this defect.
-- `repeated_rule_miss_candidate` requires a repeated structured proposed
-  prefix without persistence-runaway evidence. It remains an advisor, not proof
-  that the original boundary was unnecessary.
+  pending and later repeat with the same ephemeral correlation or structural
+  equivalence. Exact records and exact same-time cross-schema mirrors are
+  deduplicated separately. An explicit persistence write error is a separate
+  diagnosis. High review volume alone is not this defect.
+- `repeated_rule_miss_candidate` requires at least two structurally equivalent,
+  independently resolved allowed reviews without persistence-runaway evidence.
+  Each request must contain its own explicit structured `ALLOW`, a terminal
+  resolution, and a supported prefix fingerprint. Decisions are never inherited
+  by later requests. Denied, unknown, mixed, prefix-unavailable, and unresolved
+  volume cannot produce this advice. It remains an advisor, not proof that the
+  original boundary was unnecessary.
 - Reviewer tool calls and `require_escalated` traffic are counted separately.
   `approvalRecursionRisk=observed` requires both an escalation and directly
   observed nested reviewer lineage; escalation alone is not called recursion.
@@ -61,8 +68,8 @@ aggregate fields.
 - `tokenInheritedSnapshots` and `tokenLineageDeltaFiles` show when an exact
   copied ancestor snapshot was observed and removed from the child's cumulative
   total. Non-exact lineage is never guessed.
-- Spawn diagnostics distinguish explicit or defaulted `fork_turns=all`,
-  `none`, bounded history, worker effort, inherited turns, and root versus child
+- Spawn diagnostics distinguish explicit `fork_turns=all`, V1 or V2 `none`,
+  bounded history, unknown or malformed context, worker effort, inherited turns, and root versus child
   origin. Context amplification is reported only when a structured low/simple
   task label is paired with full-history delegation.
 - Task age and top-one/top-three reviewer concentration are derived from the
@@ -74,9 +81,23 @@ aggregate fields.
 Chronos inspects supported files only in the known Codex rules directory and
 returns aggregate rule health:
 
+The bounded parser reads named Starlark arguments and preserves top-level
+`pattern` positions and nested command alternatives across single, double, raw,
+triple, escaped, reordered, and commented literal forms. Raw Windows
+backslashes remain intact. A parse failure is partial coverage, not a safe rule.
+
 - literals longer than 256 characters are `rule_brittleness_warning`;
-- interpreter-only PowerShell, shell, Python, Node, or curl rules are
-  `broad_interpreter_rule`;
+- interpreter-only PowerShell, Cmd, POSIX shell, WSL, Python, Node, script-host,
+  or curl allow rules are `broad_interpreter_rule`; arbitrary-code prefixes such
+  as PowerShell `-Command`, shell `-c`, and Cmd `/c` receive the same diagnosis,
+  including when the command position contains alternatives or ordinary options
+  appear before the execution flag. Option-only prefixes and operand-taking
+  forms such as PowerShell `-File` without a fixed operand are also broad. A
+  nested-alternative position counts as a fixed operand only when every branch
+  supplies one;
+- constrained forms such as an interpreter alternative followed by `-File` and
+  a fixed script remain distinguishable, and prompt or forbidden decisions are
+  not described as broad trust;
 - credential-shaped assignments or token forms are `rule_secret_exposure`;
 - other bounded rules are counted as reusable narrow candidates.
 
@@ -116,7 +137,7 @@ Luna, is never treated as proof of cost or compatibility.
 
 ## Safe Response Order
 
-1. Repair an observed approval-state persistence failure before optimizing the
+1. Repair an observed approval-state persistence runaway or write failure before optimizing the
    reviewer model or permission rule.
 2. Reduce repeated, avoidable tool calls and try an expected sandbox-safe
    operation before requesting escalation.

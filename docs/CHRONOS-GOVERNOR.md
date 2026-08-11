@@ -46,7 +46,10 @@ original opaque plan token with `cancel-plan`. Cancellation is terminal and
 releases pending capacity. `status` excludes expired plans from `pending_plans`,
 reports them separately as `expired_plans`, and includes `plugin_version` read
 from the installed manifest. Lease creation validates every prerequisite before
-one atomic state write.
+one atomic state write. A delegated plan records the Git-visible workspace
+fingerprint before worker creation. Lease activation recomputes it and fails with
+`workspace_changed_since_plan` when the commit, reference, or Git-visible state
+changed between planning and worker binding.
 
 The current Codex Multi-Agent V2 contract uses `fork_turns="none"`. Governor
 does not emit the removed V1 `fork_context` field. Worker-created agents are
@@ -98,6 +101,8 @@ check.
 - `state_lock_unavailable`: wait briefly or continue locally; do not delete it.
 - `worker_already_leased`: finish or release the worker's current lease.
 - `workspace_fingerprint_limit_exceeded`: stop delegation and inspect locally.
+- `workspace_changed_since_plan`: cancel the plan, inspect the unexpected
+  mutation, then create a fresh plan only after the workspace is understood.
 - `read_worker_modified_workspace`: preserve and review the changes.
 - `invalid_lifecycle_transition`: preserve the terminal record.
 - `cancel-plan`: use only with the original task ID and opaque plan token after

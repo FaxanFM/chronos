@@ -1,15 +1,17 @@
-# OpenAI Plugin Directory Submission Packet
+# OpenAI Plugin Directory Published Listing Record
 
-Status: package-ready for a publisher draft. The signed, immutable
-[v0.7.6 release](https://github.com/FaxanFM/chronos/releases/tag/v0.7.6) is
-published and its ZIP SHA-256 is
-`e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
-OpenAI review and publication have not occurred. Publisher identity and
-organization permissions must be verified in the authenticated OpenAI
-Platform.
+Status: v0.7.6 is published in the OpenAI Plugins Directory. A focused
+[v0.7.7 maintenance package](https://github.com/FaxanFM/chronos/releases/tag/v0.7.7)
+is being prepared to replace it after testing and independent exercise. The
+candidate reproducible ZIP SHA-256 is
+`b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-Chronos remains installable from its public Codex marketplace while directory
-review is pending.
+Direct listing:
+https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
+
+The listing is shared across supported ChatGPT and Codex plugin surfaces.
+Availability still depends on region, surface, workspace controls, and role.
+Publication permits distribution; it is not an OpenAI endorsement.
 
 ## Official Submission Route
 
@@ -22,8 +24,8 @@ public ChatGPT directory:
 3. Open [organization general settings](https://platform.openai.com/settings/organization/general)
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
-5. Select **Create plugin**, choose **Skills only**, and upload the final
-   `chronos-v0.7.6.zip` release asset.
+5. Add a new version to the existing **Skills only** plugin and upload the final
+   `chronos-v0.7.7.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -39,7 +41,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.7.6`
+- Version: `0.7.7`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -71,11 +73,16 @@ Long description:
 > other diagnostic conditions. It also marks missing or partial evidence.
 > Chronos recommends proportionate recovery and coordinates bounded read tasks
 > through Governor. It runs only when requested and sends no telemetry. It does
-> not modify Codex, terminate processes, stop tasks, or alter SQLite. Governor
+> not change SQLite rows or schemas, terminate Codex or unrelated user
+> processes, or stop tasks. Governor can stop only its own bounded Git
+> fingerprint subprocess. A
+> logical read-only SQLite connection can create or update coordination
+> sidecars, which Chronos reports. Governor
 > is a coordination aid, not a sandbox or filesystem security boundary.
 
-Developer name: use the verified Platform identity that owns the submission.
-Use `FaxanFM` only if that exact individual or business identity is verified.
+Developer name: `Dravara, LLC`
+
+`FaxanFM` is the GitHub repository account, not the publisher identity.
 
 Website: https://github.com/FaxanFM/chronos
 
@@ -178,22 +185,20 @@ mention.
 
 ## Availability
 
-Select only countries where the chosen verified publisher identity, support
-process, privacy policy, and terms are ready. Do not claim global availability
-by default. Record the selected countries in the draft before attesting.
+Selected countries or regions: **unknown**. The retained screenshots establish
+that v0.7.6 is published and visible, but do not show the selected region list.
+Do not infer worldwide availability from publication.
 
-Selected countries or regions: pending publisher decision
+## Maintenance Release Notes
 
-## Initial Release Notes
-
-> First Plugin Directory release of Chronos for Codex v0.7.6. Chronos is an
-> on-demand Windows diagnostic and bounded read-task coordination plugin. It
-> reports local process health, diagnostic SQLite churn, token and context
-> pressure, approval persistence, permission-rule risks, rollout duplication,
-> and filesystem-helper evidence. It marks missing and partial evidence instead
-> of treating it as healthy. Governor coordinates bounded read tasks but is not
-> a sandbox or security boundary. The package has no MCP server, UI, sign-in,
-> external API, background service, scheduler, commerce, or telemetry.
+> Chronos for Codex v0.7.7 fixes diagnostic correctness without changing
+> warning or critical thresholds. It reports SQLite logical read-only and
+> possible sidecar activity, structurally parses Starlark rule patterns,
+> detects stable-ID approval retries, requires resolved allowed outcomes before
+> rule-miss advice, and corrects capacity, outcome, inventory, rollout-age,
+> process-race, and V1 fork reporting. It also removes planned paid-service
+> promotion. Telemetry, background behavior, and read-only Governor policy are
+> unchanged.
 
 ## Assets and Evidence
 
@@ -224,11 +229,26 @@ upload workflow
 
 Submission URL: https://platform.openai.com/plugins
 
-Submitted at: pending
+OpenAI approval date: **unknown**
 
-Review status: private publisher draft created on 2026-08-10; the public listing
-fields and icons are populated, both skill scans passed, all four publisher
-attestations are checked, and the draft is enabled for submission but has not
-been submitted for review
+OpenAI publication date: **unknown**
+
+Submitted at: **unknown**
+
+Review status: **published**. Retained evidence confirms that v0.7.6 is visible
+in the directory. It does not establish exact submission, approval, publication,
+or region values.
 
 OpenAI reviewer notes: none
+
+## Release Record Erratum
+
+The immutable v0.7.6 release ZIP SHA-256 is
+`e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
+Any different pre-publication or attempted-package hash in earlier working notes
+is not the immutable v0.7.6 artifact and must not be presented as such. The tag
+and immutable release are historical records and are not rewritten.
+
+Validation inventory: the immutable v0.7.6 tag contains 36 deterministic
+Governor validations. v0.7.7/current main contains 42 before any further
+release-gate additions.

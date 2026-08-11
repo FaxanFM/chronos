@@ -28,12 +28,12 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Governor lease reliability | Implemented in 0.5.4 with writable per-user state, opaque plan tokens, explicit failures, and coordinator fallback. |
 | Same-folder write safety | Implemented with canonical identity, attribution, fencing, one writer, scopes, fingerprints, and verification. |
 | Runtime worker selection | Complete cost metadata selects the lowest compatible rank; absent or partial metadata preserves runtime order. |
-| Safety and privacy | Inspector is read-only and ephemeral; no telemetry, scheduler, process termination, database mutation, approval mutation, or raw content output. |
+| Safety and privacy | Inspector is ephemeral and logical read-only for SQLite content; no telemetry, scheduler, process termination, row/schema mutation, approval mutation, or raw content output. SQLite coordination sidecars remain possible and are reported. |
 | Token-savings validation | Protocol is documented; savings claims remain disabled until matched observations exist. |
 | Threshold calibration | Frozen. A separate release requires the predeclared 14-day labeled study in `CALIBRATION-METHODOLOGY.md`. |
 | Machine-count comparability | Machine, date range, schema, source, coverage, and continuity remain distinct. Local rollout counts are explicitly not dashboard-equivalent. |
 | Allowed decision and approval share | Structured allowed/denied totals, allow percentage, comparable primary/reviewer turn share, duration, normalization, and confidence are implemented. |
-| Approval persistence runaway | Implemented only for the strong `ALLOW` plus unresolved pending plus equivalent regenerated request pattern or an explicit persistence-write failure. |
+| Approval persistence runaway | Implemented only for the strong `ALLOW` plus unresolved pending plus later equivalent request pattern, including stable correlation IDs. Explicit persistence-write failures remain a separate diagnosis. |
 | Fail closed after upstream approval persistence failure | Not enforceable by a diagnostic plugin. Chronos identifies the defect and recommends bounded fail-closed handling; Codex owns approval persistence and review regeneration. |
 | Three approval problem classes | Persistence runaway, repeated rule-miss amplification, and legitimate/diverse boundary volume are reported separately. |
 | Inspection-shaped approval pressure | Implemented from structured operation/prefix fields with actual boundary-cause categories when present. Read-only shape is never treated as proof that review was unnecessary. |
@@ -41,11 +41,11 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 | Credential-shaped rule safety | Counts plus bounded ordinal, safe shape category, and confidence are returned. Values, rule text, prefixes, hashes, assignments, and paths are never returned. |
 | Current approval request schema | Structured `function_call` escalations are counted and terminal outputs are correlated ephemerally; commands, justification, output, IDs, and decisions not explicitly observed remain unavailable. |
 | Governor abandoned plan recovery | Opaque-token `cancel-plan` is terminal; status separates unexpired pending plans from expired issued plans. |
-| Repeated prefix rule miss | Implemented from ephemeral structured prefix hashes; exact prefix recommendations require later explicit user review and are never auto-created. |
+| Repeated prefix rule miss | Requires at least two structurally equivalent, independently resolved `ALLOW` outcomes. Denied, unknown, mixed, or unresolved volume does not produce the recommendation; rules are never auto-created. |
 | Reviewer-originated escalation | Tool calls, escalated calls, unique/repeated prefix counts, and largest repeat are implemented separately from nested reviewer evidence. |
 | Reviewer recursion | Reported only when escalation and directly observed nested reviewer lineage coexist. Reviewer escalation alone is not called recursion. |
 | Long lineage and concentration | Selected-window maximum task age and top-one/top-three reviewer share are implemented without returning lineage identity. |
-| Fork context and worker effort | Explicit/defaulted full history, none, bounded history, inherited turns, high/max effort, and root/child spawn origin are implemented. Context amplification requires an explicit low/simple task label. |
+| Fork context and worker effort | Explicit full history, explicit V1/V2 none, bounded history, unknown/malformed context, inherited turns, high/max effort, and root/child spawn origin are implemented. Missing V1 context is unknown, not defaulted full. Context amplification requires an explicit low/simple task label. |
 | Infinite child fan-out negative case | Root-only spawning produces `nestedAgentObservation=not_observed`; it is not mislabeled as recursion. |
 | Configured/effective reviewer | Safe labels are reported separately; a difference is `different_labels_mapping_possible`, not automatically a configuration defect. |
 | Primary reasoning default | A safe configured effort label is reported for manual audit. Chronos never rewrites it. |
@@ -54,7 +54,7 @@ not expose enough evidence. It is not converted to zero or inferred from text.
 
 ## Release Acceptance
 
-The release gate requires diagnostics tests, all 41 Governor safety scenarios,
+The release gate requires diagnostics tests, all 42 Governor safety scenarios,
 plugin and skill validation, two byte-identical release builds, a signed release
 commit, a signed annotated tag, GitHub verification, artifact attestation, and
 immutable release verification.

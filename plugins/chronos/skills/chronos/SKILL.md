@@ -19,17 +19,23 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-
 
 Return only the compact `CHRONOS` summary unless details are requested. Do not paste raw process tables into the conversation.
 
-The inspection opens only the exact Codex `logs_2.sqlite` database in read-only
-mode. It reports database size, reclaimable freelist space, WAL activity,
-sequence movement, and the aggregate TRACE percentage from up to 2,000 recent
-rows. It never reads log bodies.
+The inspection opens only the exact Codex `logs_2.sqlite` database in logical
+read-only mode. It does not change rows or schemas. SQLite can create or update
+`-wal` or `-shm` coordination sidecars while opening a WAL-mode database, so
+read `sqliteOpenMode`, `sqliteJournalMode`,
+`sqliteSidecarMutationPossible`, and `sqliteSidecarMutationObserved`. It reports
+database size, reclaimable freelist space, WAL activity, sequence movement, and
+the aggregate TRACE percentage from up to 2,000 recent rows. It never reads log
+bodies.
 
 It also scans only the tail of recent, known Codex `sandbox*.log` files for two
 exact filesystem-helper failure markers. It returns aggregate booleans and
 never returns log text or paths.
 
-For quota diagnostics, it reads at most 2 MiB from each of up to eight rollout
-files modified in the last six hours. It retains only structured token-count,
+For quota diagnostics, it streams at most 20,000 session inventory entries
+under a three-second target, then reads at most 2 MiB from each of up to eight
+rollout files modified in the last six hours. One filesystem call can exceed
+the target. It retains only structured token-count,
 turn-context, compaction, approval-state, and worker-call fields. It counts an
 automatic review only when a `turn_context` record reports
 `model=codex-auto-review`; similarly named bookkeeping records do not count as
@@ -83,10 +89,12 @@ command rules.
 Interpret approval problem classes independently:
 
 - `persistence_runaway` requires a structured `ALLOW`, unresolved pending
-  state, and equivalent regenerated request, or an explicit persistence failure.
+  state, and a later equivalent request. An explicit persistence failure is
+  reported separately and does not by itself establish a runaway.
   Recommend repairing approval persistence before changing reviewer cost.
-- `rule_miss_amplification` means a structured proposed prefix repeated after
-  independently resolved reviews. Review the exact operation manually before
+- `rule_miss_amplification` means one structural equivalence repeated across at
+  least two independently resolved `ALLOW` reviews. Denied, unknown, mixed, or
+  unresolved repetition is not a rule miss. Review the exact operation manually before
   considering one narrow, reversible rule.
 - `legitimate_or_diverse_boundary_volume` means the available evidence does not
   prove either defect. Do not weaken the sandbox.
@@ -234,10 +242,13 @@ process-termination command.
 ## Safety
 
 - Never block, pause, or end a Codex task based on a Chronos result.
-- Never terminate any process.
+- This Inspector skill never terminates a process. Governor can stop only the
+  bounded Git subprocess it started when fingerprinting exceeds its time or
+  byte limit; it does not terminate Codex or unrelated user processes.
 - Never delete logs, caches, worktrees, or user data.
-- Never create SQLite triggers, delete rows, checkpoint, vacuum, or otherwise
-  modify Codex databases.
+- Never create SQLite triggers, delete rows, change schemas, checkpoint, or
+  vacuum Codex databases. SQLite coordination-sidecar activity remains possible
+  under the documented logical read-only connection.
 - Never change Codex reviewer configuration, approval mode, trusted-command
   rules, model catalogs, or sandbox permissions.
 - Never expose usernames, local paths, prompts, responses, tool arguments,

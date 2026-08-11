@@ -6,10 +6,15 @@ Chronos has two independent, on-demand skills.
 
 `chronos.ps1` takes one bounded snapshot of candidate Codex Windows processes,
 filesystem-helper events, disk availability, and the known diagnostic SQLite
-database. SQLite access is read-only. Rollout access is limited to 2 MiB tails
+database. SQLite content access is logical read-only: Chronos does not change
+rows or schemas, but SQLite can create or update `-wal` or `-shm` coordination
+sidecars for a WAL-mode database. The inspector exposes the open mode, journal
+mode, possible-sidecar flag, and observed-sidecar flag. Rollout access is limited to 2 MiB tails
 from at most eight files selected by recent modification time from the session
 date partitions overlapping the six-hour window, including old sessions
-resumed recently.
+resumed recently. Session inventory streams filesystem entries under a
+three-second target and a 20,000-entry hard cap. One filesystem call can exceed
+the target; timeout and entry-cap results remain explicit.
 
 The rollout parser retains only numeric token aggregates, effort labels,
 structured automatic-review counts, compaction counts, spawn counts, bounded
@@ -40,16 +45,22 @@ are bounded observations. The parser reports its coverage and labels token
 totals as selected-rollout cumulative snapshots, never as account billing.
 Request-level approval causes and structural equivalence are reported only when
 the rollout schema exposes sufficient structured data. A persistence runaway
-requires an allowed request, an unresolved pending state, and an equivalent
-regenerated request; review volume alone is insufficient. Repeated prefixes,
+requires an allowed request, an unresolved pending state, and a later equivalent
+request, including a repeated stable correlation identifier. Exact record
+duplicates and exact same-time cross-schema mirrors are suppressed separately.
+A rule-miss candidate requires at least two structurally equivalent,
+independently resolved allowed reviews; denied, unknown, mixed, or unresolved
+volume is insufficient. Repeated prefixes,
 inspection-shaped operations, reviewer-originated escalations, nested reviewer
 lineage, worker fork history, worker effort, and root/child spawn origin remain
 separate concepts. Chronos never modifies approval state, policies, reviewer
 configuration, runtime model catalogs, or sandbox permissions.
 
 The Rule Governor reads bounded supported files in the known Codex rules directory.
-It uses a bounded lexical parser for multiline `prefix_rule` blocks,
-calculates aggregate length and structure statistics, and detects
+It uses a bounded lexical parser for multiline `prefix_rule` blocks and parses
+named arguments plus single-, double-, raw-, triple-, nested-, and escaped-string
+literals. It classifies the `pattern` argument itself, calculates aggregate
+length and structure statistics, and detects
 credential-shaped patterns in memory. It never returns rule contents, prefix
 hashes, commands, assignments, or credential values and never edits rules.
 
@@ -93,8 +104,10 @@ must match the model persisted by `plan`. A difference fails with
 The inspector persists nothing. Governor persists only metadata beneath the
 current user's temporary application-data directory, keyed by a hash of Git's
 canonical common directory. No component sends telemetry, starts a service,
-creates a scheduled task, modifies Codex databases, terminates processes, or
-cleans worktrees.
+creates a scheduled task, changes Codex database rows or schemas, terminates
+Codex or unrelated user processes, or cleans worktrees. Governor can stop only
+the Git subprocess it started when fingerprinting exceeds its time or byte
+limit.
 
 ## Calibration Boundary
 

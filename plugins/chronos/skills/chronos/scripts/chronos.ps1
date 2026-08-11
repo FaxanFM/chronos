@@ -154,9 +154,15 @@ public sealed class ChronosSqlite : IDisposable {
 function Get-LogDbSample {
   $databasePath = Join-Path $CodexHome "logs_2.sqlite"
   $walPath = "$databasePath-wal"
+  $shmPath = "$databasePath-shm"
   $capturedAt = Get-Date
   $databaseFile = if (Test-ChronosReadPath $databasePath) { Get-Item -LiteralPath $databasePath -ErrorAction SilentlyContinue } else { $null }
   $walFile = if (Test-ChronosReadPath $walPath) { Get-Item -LiteralPath $walPath -ErrorAction SilentlyContinue } else { $null }
+  $shmFile = if (Test-ChronosReadPath $shmPath) { Get-Item -LiteralPath $shmPath -ErrorAction SilentlyContinue } else { $null }
+  $walBeforeBytes = if ($walFile) { [long]$walFile.Length } else { 0L }
+  $walBeforeTicks = if ($walFile) { [long]$walFile.LastWriteTimeUtc.Ticks } else { 0L }
+  $shmBeforeBytes = if ($shmFile) { [long]$shmFile.Length } else { 0L }
+  $shmBeforeTicks = if ($shmFile) { [long]$shmFile.LastWriteTimeUtc.Ticks } else { 0L }
 
   $sample = [ordered]@{
     Present = $null -ne $databaseFile
@@ -166,8 +172,14 @@ function Get-LogDbSample {
     LevelRowsOk = $false
     CapturedAt = $capturedAt
     DatabaseBytes = if ($databaseFile) { [long]$databaseFile.Length } else { 0L }
-    WalBytes = if ($walFile) { [long]$walFile.Length } else { 0L }
-    WalWriteTicks = if ($walFile) { [long]$walFile.LastWriteTimeUtc.Ticks } else { 0L }
+    WalBytes = $walBeforeBytes
+    WalWriteTicks = $walBeforeTicks
+    ShmBytes = $shmBeforeBytes
+    ShmWriteTicks = $shmBeforeTicks
+    SqliteOpenMode = "logical_readonly"
+    SqliteJournalMode = "unknown"
+    SqliteSidecarMutationPossible = $null
+    SqliteSidecarMutationObserved = $false
     PageSize = 0L
     PageCount = 0L
     FreelistCount = 0L
@@ -184,6 +196,12 @@ function Get-LogDbSample {
   try {
     $database = [ChronosSqlite]::OpenReadOnly($databasePath)
     try {
+      try {
+        $journalRows = $database.Query("PRAGMA journal_mode")
+        if ($journalRows.Count -gt 0 -and $journalRows[0].Count -gt 0) {
+          $sample.SqliteJournalMode = ([string]$journalRows[0][0]).ToLowerInvariant()
+        }
+      } catch { $sample.SqliteJournalMode = "unknown" }
       $pageSizeRows = $database.Query("PRAGMA page_size")
       $pageCountRows = $database.Query("PRAGMA page_count")
       $freelistRows = $database.Query("PRAGMA freelist_count")
@@ -214,6 +232,24 @@ function Get-LogDbSample {
   } finally {
     if ($database) { $database.Dispose() }
   }
+
+  $walAfter = Get-Item -LiteralPath $walPath -ErrorAction SilentlyContinue
+  $shmAfter = Get-Item -LiteralPath $shmPath -ErrorAction SilentlyContinue
+  $sample.SqliteSidecarMutationPossible = $true
+  $sample.SqliteSidecarMutationObserved =
+    ([bool]$walFile -ne [bool]$walAfter) -or ([bool]$shmFile -ne [bool]$shmAfter) -or
+    ($walFile -and $walAfter -and (
+        $walBeforeBytes -ne [long]$walAfter.Length -or
+        $walBeforeTicks -ne [long]$walAfter.LastWriteTimeUtc.Ticks
+      )) -or
+    ($shmFile -and $shmAfter -and (
+        $shmBeforeBytes -ne [long]$shmAfter.Length -or
+        $shmBeforeTicks -ne [long]$shmAfter.LastWriteTimeUtc.Ticks
+      ))
+  $sample.WalBytes = if ($walAfter) { [long]$walAfter.Length } else { 0L }
+  $sample.WalWriteTicks = if ($walAfter) { [long]$walAfter.LastWriteTimeUtc.Ticks } else { 0L }
+  $sample.ShmBytes = if ($shmAfter) { [long]$shmAfter.Length } else { 0L }
+  $sample.ShmWriteTicks = if ($shmAfter) { [long]$shmAfter.LastWriteTimeUtc.Ticks } else { 0L }
 
   [pscustomobject]$sample
 }
@@ -253,6 +289,11 @@ function Get-LogDbMetrics($before, $after) {
     ReclaimableGiB = if ($after.PageMetricsOk) { [math]::Round($reclaimableBytes / 1GB, 2) } else { $null }
     WalMiB = if ($after.Present) { [math]::Round($after.WalBytes / 1MB, 1) } else { $null }
     WalActive = $after.WalWriteTicks -gt 0 -and $after.WalWriteTicks -ne $before.WalWriteTicks
+    SqliteOpenMode = $after.SqliteOpenMode
+    SqliteJournalMode = $after.SqliteJournalMode
+    SqliteSidecarMutationPossible = $after.SqliteSidecarMutationPossible
+    SqliteSidecarMutationObserved = [bool]$before.SqliteSidecarMutationObserved -or
+      [bool]$after.SqliteSidecarMutationObserved
     Sequence = $after.Sequence
     InsertRate = $rate
     TracePercent = $tracePercent
@@ -429,12 +470,16 @@ function Get-RecentSessionFiles {
       -not (Test-ChronosReadPath $sessionsRoot)) {
     return [pscustomobject]@{
       Files = @(); EligibleCount = 0; SelectedCount = 0; Capped = $false
-      InventoryTimedOut = $false
+      InventoryTimedOut = $false; InventoryEntries = 0; InventoryEntryLimit = 20000
+      InventoryEntryLimitHit = $false
       WindowHours = 6; WindowStartUtc = $cutoff.ToString('o'); WindowEndUtc = $windowEnd.ToString('o')
     }
   }
 
   $eligibleCount = 0
+  $inventoryEntries = 0
+  $inventoryEntryLimit = 20000
+  $inventoryEntryLimitHit = $false
   $inventoryTimedOut = $false
   $inventoryDeadline = [DateTimeOffset]::UtcNow.AddSeconds(3)
   $newest = [System.Collections.Generic.List[object]]::new()
@@ -443,8 +488,15 @@ function Get-RecentSessionFiles {
   while ($directories.Count -gt 0) {
     if ([DateTimeOffset]::UtcNow -ge $inventoryDeadline) { $inventoryTimedOut = $true; break }
     $directory = $directories.Pop()
-    foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction SilentlyContinue)) {
+    try { $entryPaths = [System.IO.Directory]::EnumerateFileSystemEntries($directory) } catch { continue }
+    foreach ($entryPath in $entryPaths) {
       if ([DateTimeOffset]::UtcNow -ge $inventoryDeadline) { $inventoryTimedOut = $true; break }
+      $inventoryEntries++
+      if ($inventoryEntries -gt $inventoryEntryLimit) {
+        $inventoryEntryLimitHit = $true
+        break
+      }
+      try { $entry = Get-Item -LiteralPath $entryPath -Force -ErrorAction Stop } catch { continue }
       if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
       if ($entry.PSIsContainer) {
         if (Test-ChronosReadPath $entry.FullName) { $directories.Push($entry.FullName) }
@@ -459,15 +511,18 @@ function Get-RecentSessionFiles {
         $null = $newest.Remove($oldest)
       }
     }
-    if ($inventoryTimedOut) { break }
+    if ($inventoryTimedOut -or $inventoryEntryLimitHit) { break }
   }
   $selected = @($newest | Sort-Object LastWriteTimeUtc -Descending)
   [pscustomobject]@{
     Files = $selected
     EligibleCount = $eligibleCount
     SelectedCount = $selected.Count
-    Capped = $inventoryTimedOut -or $eligibleCount -gt $selected.Count
+    Capped = $inventoryTimedOut -or $inventoryEntryLimitHit -or $eligibleCount -gt $selected.Count
     InventoryTimedOut = $inventoryTimedOut
+    InventoryEntries = [math]::Min($inventoryEntries, $inventoryEntryLimit)
+    InventoryEntryLimit = $inventoryEntryLimit
+    InventoryEntryLimitHit = $inventoryEntryLimitHit
     WindowHours = 6
     WindowStartUtc = $cutoff.ToString('o')
     WindowEndUtc = $windowEnd.ToString('o')
@@ -587,8 +642,8 @@ function Get-BoundedPrefixRuleBlocks {
       $index += $(if ($triple) { 3 } else { 1 })
       $escaped = $false
       while ($index -lt $text.Length) {
-        if ($quote -eq '"' -and $escaped) { $escaped = $false; $index++; continue }
-        if ($quote -eq '"' -and $text[$index] -eq '\') { $escaped = $true; $index++; continue }
+        if ($escaped) { $escaped = $false; $index++; continue }
+        if ($text[$index] -eq '\') { $escaped = $true; $index++; continue }
         if ($triple -and $index + 2 -lt $text.Length -and
           $text[$index] -eq $quote -and $text[$index + 1] -eq $quote -and $text[$index + 2] -eq $quote) {
           $index += 3
@@ -626,7 +681,7 @@ function Get-BoundedPrefixRuleBlocks {
       }
       if ($inString) {
         if ($escaped) { $escaped = $false; continue }
-        if ($quote -eq '"' -and $character -eq '\') { $escaped = $true; continue }
+        if ($character -eq '\') { $escaped = $true; continue }
         if ($triple -and $cursor + 2 -lt $text.Length -and
           $text[$cursor] -eq $quote -and $text[$cursor + 1] -eq $quote -and $text[$cursor + 2] -eq $quote) {
           $inString = $false
@@ -657,6 +712,304 @@ function Get-BoundedPrefixRuleBlocks {
     if (-not $closed) { return [pscustomobject]@{ Blocks = @($blocks); Complete = $false } }
   }
   [pscustomobject]@{ Blocks = @($blocks); Complete = $true }
+}
+
+function Get-RuleLiteralTokens {
+  param([string]$Text)
+  $tokens = [System.Collections.Generic.List[string]]::new()
+  $index = 0
+  while ($index -lt $Text.Length) {
+    if ($Text[$index] -eq '#') {
+      $newline = $Text.IndexOf("`n", $index)
+      $index = if ($newline -lt 0) { $Text.Length } else { $newline + 1 }
+      continue
+    }
+    $quoteIndex = $index
+    $isRaw = ($Text[$index] -eq 'r' -or $Text[$index] -eq 'R') -and
+      $index + 1 -lt $Text.Length -and $Text[$index + 1] -in @('"', "'")
+    if ($isRaw) {
+      $quoteIndex++
+    }
+    if ($Text[$quoteIndex] -notin @('"', "'")) { $index++; continue }
+    $quote = $Text[$quoteIndex]
+    $triple = $quoteIndex + 2 -lt $Text.Length -and
+      $Text[$quoteIndex + 1] -eq $quote -and $Text[$quoteIndex + 2] -eq $quote
+    $cursor = $quoteIndex + $(if ($triple) { 3 } else { 1 })
+    $value = [System.Text.StringBuilder]::new()
+    while ($cursor -lt $Text.Length) {
+      if ($triple -and $cursor + 2 -lt $Text.Length -and
+          $Text[$cursor] -eq $quote -and $Text[$cursor + 1] -eq $quote -and
+          $Text[$cursor + 2] -eq $quote) {
+        $cursor += 3
+        break
+      }
+      if (-not $triple -and $Text[$cursor] -eq $quote) { $cursor++; break }
+      if ($Text[$cursor] -eq '\' -and $cursor + 1 -lt $Text.Length) {
+        if ($isRaw -and $Text[$cursor + 1] -notin @($quote, "`r", "`n")) {
+          $null = $value.Append($Text[$cursor])
+          $cursor++
+        } else {
+          $null = $value.Append($Text[$cursor + 1])
+          $cursor += 2
+        }
+        continue
+      }
+      $null = $value.Append($Text[$cursor])
+      $cursor++
+    }
+    $tokens.Add($value.ToString())
+    $index = $cursor
+  }
+  @($tokens)
+}
+
+function Split-RuleCommaSegments {
+  param([string]$Text)
+  $segments = [System.Collections.Generic.List[string]]::new()
+  $start = 0
+  $depth = 0
+  $inString = $false
+  $quote = [char]0
+  $triple = $false
+  $escaped = $false
+  $comment = $false
+  for ($cursor = 0; $cursor -lt $Text.Length; $cursor++) {
+    $character = $Text[$cursor]
+    if ($comment) { if ($character -eq "`n") { $comment = $false }; continue }
+    if ($inString) {
+      if ($escaped) { $escaped = $false; continue }
+      if ($character -eq '\') { $escaped = $true; continue }
+      if ($triple -and $cursor + 2 -lt $Text.Length -and
+          $Text[$cursor] -eq $quote -and $Text[$cursor + 1] -eq $quote -and
+          $Text[$cursor + 2] -eq $quote) {
+        $inString = $false
+        $cursor += 2
+      } elseif (-not $triple -and $character -eq $quote) { $inString = $false }
+      continue
+    }
+    if ($character -eq '#') { $comment = $true; continue }
+    if ($character -in @('"', "'")) {
+      $inString = $true
+      $quote = $character
+      $triple = $cursor + 2 -lt $Text.Length -and
+        $Text[$cursor + 1] -eq $quote -and $Text[$cursor + 2] -eq $quote
+      if ($triple) { $cursor += 2 }
+      continue
+    }
+    if ($character -in @('(', '[', '{')) { $depth++; continue }
+    if ($character -in @(')', ']', '}')) {
+      $depth--
+      if ($depth -lt 0) {
+        return [pscustomobject]@{ Complete = $false; Segments = @() }
+      }
+      continue
+    }
+    if ($character -eq ',' -and $depth -eq 0) {
+      $segments.Add($Text.Substring($start, $cursor - $start))
+      $start = $cursor + 1
+    }
+  }
+  if ($inString -or $depth -ne 0) {
+    return [pscustomobject]@{ Complete = $false; Segments = @() }
+  }
+  $segments.Add($Text.Substring($start))
+  [pscustomobject]@{ Complete = $true; Segments = @($segments) }
+}
+
+function ConvertFrom-RuleSingleLiteral {
+  param([string]$Text)
+  $cursor = 0
+  while ($cursor -lt $Text.Length) {
+    if ([char]::IsWhiteSpace($Text[$cursor])) { $cursor++; continue }
+    if ($Text[$cursor] -eq '#') {
+      $newline = $Text.IndexOf("`n", $cursor)
+      $cursor = if ($newline -lt 0) { $Text.Length } else { $newline + 1 }
+      continue
+    }
+    break
+  }
+  if ($cursor -ge $Text.Length) {
+    return [pscustomobject]@{ Complete = $false; Value = $null }
+  }
+  $isRaw = ($Text[$cursor] -eq 'r' -or $Text[$cursor] -eq 'R') -and
+    $cursor + 1 -lt $Text.Length -and $Text[$cursor + 1] -in @('"', "'")
+  if ($isRaw) { $cursor++ }
+  if ($Text[$cursor] -notin @('"', "'")) {
+    return [pscustomobject]@{ Complete = $false; Value = $null }
+  }
+  $quote = $Text[$cursor]
+  $triple = $cursor + 2 -lt $Text.Length -and
+    $Text[$cursor + 1] -eq $quote -and $Text[$cursor + 2] -eq $quote
+  $cursor += $(if ($triple) { 3 } else { 1 })
+  $value = [System.Text.StringBuilder]::new()
+  $closed = $false
+  while ($cursor -lt $Text.Length) {
+    if ($triple -and $cursor + 2 -lt $Text.Length -and
+        $Text[$cursor] -eq $quote -and $Text[$cursor + 1] -eq $quote -and
+        $Text[$cursor + 2] -eq $quote) {
+      $cursor += 3
+      $closed = $true
+      break
+    }
+    if (-not $triple -and $Text[$cursor] -eq $quote) {
+      $cursor++
+      $closed = $true
+      break
+    }
+    if ($Text[$cursor] -eq '\' -and $cursor + 1 -lt $Text.Length) {
+      if ($isRaw -and $Text[$cursor + 1] -notin @($quote, "`r", "`n")) {
+        $null = $value.Append($Text[$cursor])
+        $cursor++
+      } elseif ($isRaw -and $Text[$cursor + 1] -in @("`r", "`n")) {
+        $null = $value.Append($Text[$cursor])
+        $null = $value.Append($Text[$cursor + 1])
+        $cursor += 2
+      } else {
+        $null = $value.Append($Text[$cursor + 1])
+        $cursor += 2
+      }
+      continue
+    }
+    $null = $value.Append($Text[$cursor])
+    $cursor++
+  }
+  if (-not $closed) {
+    return [pscustomobject]@{ Complete = $false; Value = $null }
+  }
+  while ($cursor -lt $Text.Length) {
+    if ([char]::IsWhiteSpace($Text[$cursor])) { $cursor++; continue }
+    if ($Text[$cursor] -eq '#') {
+      $newline = $Text.IndexOf("`n", $cursor)
+      $cursor = if ($newline -lt 0) { $Text.Length } else { $newline + 1 }
+      continue
+    }
+    return [pscustomobject]@{ Complete = $false; Value = $null }
+  }
+  [pscustomobject]@{ Complete = $true; Value = $value.ToString() }
+}
+
+function ConvertFrom-RulePatternExpression {
+  param([string]$Text)
+  $trimmed = $Text.Trim()
+  if ($trimmed.Length -lt 2 -or $trimmed[0] -ne '[' -or $trimmed[$trimmed.Length - 1] -ne ']') {
+    return [pscustomobject]@{ Complete = $false; Elements = @() }
+  }
+  $outer = Split-RuleCommaSegments $trimmed.Substring(1, $trimmed.Length - 2)
+  if (-not $outer.Complete) {
+    return [pscustomobject]@{ Complete = $false; Elements = @() }
+  }
+  $elements = [System.Collections.Generic.List[object]]::new()
+  foreach ($rawSegment in @($outer.Segments)) {
+    $segment = $rawSegment.Trim()
+    if (-not $segment) { continue }
+    $isAlternatives = $segment.Length -ge 2 -and
+      $segment[0] -eq '[' -and $segment[$segment.Length - 1] -eq ']'
+    $literalSegments = if ($isAlternatives) {
+      $inner = Split-RuleCommaSegments $segment.Substring(1, $segment.Length - 2)
+      if (-not $inner.Complete) {
+        return [pscustomobject]@{ Complete = $false; Elements = @() }
+      }
+      @($inner.Segments)
+    } else { @($segment) }
+    $alternatives = [System.Collections.Generic.List[string]]::new()
+    foreach ($literalSegment in $literalSegments) {
+      $literal = ConvertFrom-RuleSingleLiteral $literalSegment
+      if (-not $literal.Complete) {
+        return [pscustomobject]@{ Complete = $false; Elements = @() }
+      }
+      $alternatives.Add([string]$literal.Value)
+    }
+    if ($alternatives.Count -eq 0) {
+      return [pscustomobject]@{ Complete = $false; Elements = @() }
+    }
+    $elements.Add([pscustomobject]@{
+        Alternatives = @($alternatives)
+        IsAlternatives = $isAlternatives
+      })
+  }
+  [pscustomobject]@{ Complete = $elements.Count -gt 0; Elements = @($elements) }
+}
+
+function Get-RuleExecutableName {
+  param([string]$Literal)
+  if (-not $Literal) { return "" }
+  $normalized = $Literal.Trim().Replace('/', '\')
+  ([System.IO.Path]::GetFileNameWithoutExtension($normalized)).ToLowerInvariant()
+}
+
+function ConvertFrom-PrefixRuleBlock {
+  param([string]$Block)
+  $open = $Block.IndexOf('(')
+  $close = $Block.LastIndexOf(')')
+  if ($open -lt 0 -or $close -le $open) {
+    return [pscustomobject]@{ Complete = $false; PatternLiterals = @(); AllLiterals = @(); SemanticText = "" }
+  }
+  $body = $Block.Substring($open + 1, $close - $open - 1)
+  $segments = [System.Collections.Generic.List[string]]::new()
+  $start = 0
+  $depth = 0
+  $inString = $false
+  $quote = [char]0
+  $triple = $false
+  $escaped = $false
+  $comment = $false
+  for ($cursor = 0; $cursor -lt $body.Length; $cursor++) {
+    $character = $body[$cursor]
+    if ($comment) { if ($character -eq "`n") { $comment = $false }; continue }
+    if ($inString) {
+      if ($escaped) { $escaped = $false; continue }
+      if ($character -eq '\') { $escaped = $true; continue }
+      if ($triple -and $cursor + 2 -lt $body.Length -and
+          $body[$cursor] -eq $quote -and $body[$cursor + 1] -eq $quote -and
+          $body[$cursor + 2] -eq $quote) {
+        $inString = $false; $cursor += 2
+      } elseif (-not $triple -and $character -eq $quote) { $inString = $false }
+      continue
+    }
+    if ($character -eq '#') { $comment = $true; continue }
+    if ($character -in @('"', "'")) {
+      $inString = $true; $quote = $character
+      $triple = $cursor + 2 -lt $body.Length -and
+        $body[$cursor + 1] -eq $quote -and $body[$cursor + 2] -eq $quote
+      if ($triple) { $cursor += 2 }
+      continue
+    }
+    if ($character -in @('(', '[', '{')) { $depth++; continue }
+    if ($character -in @(')', ']', '}')) { $depth--; continue }
+    if ($character -eq ',' -and $depth -eq 0) {
+      $segments.Add($body.Substring($start, $cursor - $start))
+      $start = $cursor + 1
+    }
+  }
+  if ($inString -or $depth -ne 0) {
+    return [pscustomobject]@{ Complete = $false; PatternLiterals = @(); AllLiterals = @(); SemanticText = "" }
+  }
+  $segments.Add($body.Substring($start))
+  $arguments = @{}
+  $patternStructure = $null
+  $allLiterals = [System.Collections.Generic.List[string]]::new()
+  $semantic = [System.Collections.Generic.List[string]]::new()
+  foreach ($segment in $segments) {
+    $match = [regex]::Match($segment, '(?ms)^\s*(?:\#.*?\r?\n\s*)*([A-Za-z_][A-Za-z0-9_]*)\s*=')
+    if (-not $match.Success) { continue }
+    $name = $match.Groups[1].Value.ToLowerInvariant()
+    $valueText = $segment.Substring($match.Index + $match.Length)
+    $literals = @(Get-RuleLiteralTokens $valueText)
+    $arguments[$name] = $literals
+    if ($name -eq 'pattern') { $patternStructure = ConvertFrom-RulePatternExpression $valueText }
+    $semantic.Add($name)
+    foreach ($literal in $literals) { $allLiterals.Add($literal); $semantic.Add($literal) }
+  }
+  [pscustomobject]@{
+    Complete = $arguments.ContainsKey('pattern') -and $patternStructure -and $patternStructure.Complete
+    PatternLiterals = if ($arguments.ContainsKey('pattern')) { @($arguments['pattern']) } else { @() }
+    PatternElements = if ($patternStructure -and $patternStructure.Complete) { @($patternStructure.Elements) } else { @() }
+    Decision = if ($arguments.ContainsKey('decision') -and @($arguments['decision']).Count -gt 0) {
+      ([string]@($arguments['decision'])[0]).Trim().ToLowerInvariant()
+    } else { 'unknown' }
+    AllLiterals = @($allLiterals)
+    SemanticText = @($semantic) -join "`n"
+  }
 }
 
 function Get-RuleHealth {
@@ -710,28 +1063,93 @@ function Get-RuleHealth {
       $trimmed = $block.Trim()
       $result.Count++
       $lengthTotal += $trimmed.Length
-      $literalMatches = @([regex]::Matches($trimmed, '"(?:\\.|[^"\\])*"'))
-      $literalLengths = @($literalMatches | ForEach-Object { [math]::Max(0, $_.Value.Length - 2) })
+      $structuredRule = ConvertFrom-PrefixRuleBlock $trimmed
+      if (-not $structuredRule.Complete) {
+        $result.ParseFailures++
+        $result.CoverageCapped = $true
+      }
+      $literalLengths = @($structuredRule.AllLiterals | ForEach-Object { ([string]$_).Length })
       $maxLiteral = if ($literalLengths.Count) { [int](@($literalLengths | Measure-Object -Maximum).Maximum) } else { 0 }
       if ($maxLiteral -gt $result.MaximumLiteralLength) { $result.MaximumLiteralLength = $maxLiteral }
       $isMonolithic = $maxLiteral -gt 256
       if ($isMonolithic) { $result.Monolithic++ }
 
-      $firstLiteral = if ($literalMatches.Count) {
-        $literalMatches[0].Value.Trim('"').Trim().ToLowerInvariant()
-      } else { "" }
-      $firstExecutable = [System.IO.Path]::GetFileNameWithoutExtension($firstLiteral)
-      $isBroad = $firstExecutable -in @("powershell", "pwsh", "bash", "python", "python3", "node", "curl") -and $literalMatches.Count -le 2
+      $patternLiterals = @($structuredRule.PatternLiterals)
+      $patternElements = @($structuredRule.PatternElements)
+      $firstExecutables = if ($patternElements.Count -gt 0) {
+        @($patternElements[0].Alternatives | ForEach-Object { Get-RuleExecutableName ([string]$_) })
+      } else { @() }
+      $interpreterNames = @(
+        "powershell", "pwsh", "cmd", "bash", "sh", "zsh", "dash", "ksh", "fish",
+        "wsl", "python", "python3", "node", "cscript", "wscript", "curl"
+      )
+      $hasInterpreter = @($firstExecutables | Where-Object { $_ -in $interpreterNames }).Count -gt 0
+      $subsequentElements = if ($patternElements.Count -gt 1) {
+        @($patternElements | Select-Object -Skip 1)
+      } else { @() }
+      $subsequentAlternatives = @($subsequentElements | ForEach-Object {
+          $_.Alternatives | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }
+        })
+      $arbitraryCodePrefix = $false
+      foreach ($executable in $firstExecutables) {
+        $arbitraryFlags = switch ($executable) {
+          { $_ -in @("powershell", "pwsh") } { @("-command", "-c", "-encodedcommand", "-enc"); break }
+          "cmd" { @("/c", "/k"); break }
+          { $_ -in @("bash", "sh", "zsh", "dash", "ksh", "fish") } { @("-c"); break }
+          { $_ -in @("python", "python3") } { @("-c"); break }
+          "node" { @("-e", "--eval"); break }
+          "wsl" { @("-e", "--exec"); break }
+          default { @() }
+        }
+        if (@($subsequentAlternatives | Where-Object { $_ -in $arbitraryFlags }).Count -gt 0) {
+          $arbitraryCodePrefix = $true
+          break
+        }
+      }
+      $fixedOperandGuaranteed = $false
+      foreach ($subsequentElement in $subsequentElements) {
+        $elementValues = @($subsequentElement.Alternatives | ForEach-Object {
+            ([string]$_).Trim().ToLowerInvariant()
+          })
+        if ($elementValues.Count -gt 0 -and
+            @($elementValues | Where-Object { -not $_ -or $_ -match '^[-/]' }).Count -eq 0) {
+          $fixedOperandGuaranteed = $true
+          break
+        }
+      }
+      $optionOnlyPrefix = $patternElements.Count -gt 1 -and -not $fixedOperandGuaranteed
+      $missingFileOperand = $false
+      if (@($firstExecutables | Where-Object { $_ -in @('powershell', 'pwsh') }).Count -gt 0) {
+        for ($position = 1; $position -lt $patternElements.Count; $position++) {
+          $positionValues = @($patternElements[$position].Alternatives | ForEach-Object {
+              ([string]$_).Trim().ToLowerInvariant()
+            })
+          if ($positionValues -contains '-file') {
+            $followingValues = if ($position + 1 -lt $patternElements.Count) {
+              @($patternElements[$position + 1].Alternatives | ForEach-Object {
+                  ([string]$_).Trim().ToLowerInvariant()
+                })
+            } else { @() }
+            $hasFollowingOperand = $followingValues.Count -gt 0 -and
+              @($followingValues | Where-Object { -not $_ -or $_ -match '^[-/]' }).Count -eq 0
+            if (-not $hasFollowingOperand) { $missingFileOperand = $true }
+          }
+        }
+      }
+      $decisionCanGrant = $structuredRule.Decision -in @("allow", "allowed", "approve", "approved", "unknown")
+      $isBroad = $structuredRule.Complete -and $decisionCanGrant -and $hasInterpreter -and
+        ($patternElements.Count -eq 1 -or $arbitraryCodePrefix -or $optionOnlyPrefix -or $missingFileOperand)
       if ($isBroad) { $result.BroadInterpreter++ }
-      if (-not $isMonolithic -and -not $isBroad) { $result.ReusableNarrow++ }
+      if ($structuredRule.Complete -and -not $isMonolithic -and -not $isBroad) { $result.ReusableNarrow++ }
 
-      $secretShape = $trimmed -match '(?i)(token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)\s*[=:]' -or
-        $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+      $semanticText = $structuredRule.SemanticText
+      $secretShape = $semanticText -match '(?i)(token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)\s*[=:]' -or
+        $semanticText -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
       if ($secretShape) {
         $result.CredentialShaped++
         $ordinal = $result.Count
-        $placeholderLike = $trimmed -match '(?i)placeholder|example|synthetic|dummy|redacted|test[_-]?only|your[_-]'
-        $providerToken = $trimmed -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
+        $placeholderLike = $semanticText -match '(?i)placeholder|example|synthetic|dummy|redacted|test[_-]?only|your[_-]'
+        $providerToken = $semanticText -match '(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|nfp_[a-z0-9]{20,}|AKIA[0-9A-Z]{16})'
         $category = if ($placeholderLike) { "placeholder-like" } elseif ($providerToken) {
           "provider-token"
         } else { "named-assignment" }
@@ -889,6 +1307,9 @@ function Get-ApprovalRequestClass {
     BoundaryCause = if ($boundaryCause) { $boundaryCause } else { "unknown" }
     State = if ($state) { $state } else { "unknown" }
     CorrelationFingerprint = if ($correlation) { Get-TextFingerprint $correlation } else { $null }
+    EquivalenceSignature = $source + "|operation:" +
+      $(if ($operationClass) { $operationClass } else { "unknown" }) + "|prefix:" +
+      $(if ($prefixFingerprint) { $prefixFingerprint } else { "unavailable" })
     Signature = if ($dimensions.Count -gt 0 -or $prefixFingerprint) {
       $payloadType + "|" + (@($dimensions | Sort-Object) -join "|") +
         $(if ($prefixFingerprint) { "|prefix:" + $prefixFingerprint } else { "|prefix:unavailable" })
@@ -937,8 +1358,23 @@ function Get-FunctionCallApprovalRequestClass {
     BoundaryCause = "sandbox_escalation"
     State = "pending"
     CorrelationFingerprint = $correlation
+    EquivalenceSignature = $source + "|operation:" +
+      $(if ($operationClass) { $operationClass } else { "unknown" }) + "|prefix:" +
+      $(if ($prefixFingerprint) { $prefixFingerprint } else { "unavailable" })
     Signature = $signatureParts -join "|"
   }
+}
+
+function Register-ResolvedAllowedApproval {
+  param($State, $ApprovalResolvedAllowedEquivalences)
+  if (-not $State -or $State.resolved_allowed_counted -or
+      $State.decision -ne "allowed" -or -not $State.resolved -or
+      -not $State.equivalence -or -not $State.rule_miss_eligible) { return }
+  $key = [string]$State.equivalence
+  if ($ApprovalResolvedAllowedEquivalences.ContainsKey($key)) {
+    $ApprovalResolvedAllowedEquivalences[$key]++
+  } else { $ApprovalResolvedAllowedEquivalences[$key] = 1 }
+  $State.resolved_allowed_counted = $true
 }
 
 function Add-ApprovalRequestObservation {
@@ -946,10 +1382,21 @@ function Add-ApprovalRequestObservation {
     $ApprovalBoundaryCauses, $ApprovalSources, $ApprovalStates, $ApprovalRequestCorrelations,
     $ApprovalSchemas)
   if (-not $ApprovalClass) { return }
-  if ($ApprovalClass.CorrelationFingerprint -and
-      $ApprovalRequestCorrelations.ContainsKey($ApprovalClass.CorrelationFingerprint)) { return }
   if ($ApprovalClass.CorrelationFingerprint) {
-    $ApprovalRequestCorrelations[$ApprovalClass.CorrelationFingerprint] = $true
+    $priorCorrelation = if ($ApprovalRequestCorrelations.ContainsKey($ApprovalClass.CorrelationFingerprint)) {
+      $ApprovalRequestCorrelations[$ApprovalClass.CorrelationFingerprint]
+    } else { $null }
+    $isCrossSchemaMirror = $priorCorrelation -and
+      $priorCorrelation.schema -ne $ApprovalClass.Schema -and
+      $priorCorrelation.equivalence -eq $ApprovalClass.EquivalenceSignature -and
+      $priorCorrelation.timestamp -and $RecordTimestamp -and
+      $priorCorrelation.timestamp -eq $RecordTimestamp
+    if ($isCrossSchemaMirror) { return }
+    $ApprovalRequestCorrelations[$ApprovalClass.CorrelationFingerprint] = @{
+      schema = $ApprovalClass.Schema
+      equivalence = $ApprovalClass.EquivalenceSignature
+      timestamp = $RecordTimestamp
+    }
   }
   if ($ApprovalClass.Schema) { $null = $ApprovalSchemas.Add([string]$ApprovalClass.Schema) }
   $Health.ApprovalRequestsObserved++
@@ -972,14 +1419,20 @@ function Add-ApprovalRequestObservation {
   } elseif ($ApprovalClass.Signature -and $ApprovalStates.ContainsKey($ApprovalClass.Signature)) {
     $ApprovalStates[$ApprovalClass.Signature]
   } else { $null }
-  if ($prior -and $prior.decision -eq "allowed" -and
-      $ApprovalClass.State -eq "pending" -and -not $prior.resolved) {
+  $priorUnresolvedAllow = $prior -and -not $prior.resolved -and (
+    $prior.decision -eq "allowed" -or $prior.prior_unresolved_allowed
+  )
+  if ($priorUnresolvedAllow -and $ApprovalClass.State -eq "pending") {
     $Health.ApprovalPersistenceRetries++
   }
   $state = @{
-    decision = if ($prior) { $prior.decision } else { "unknown" }
+    decision = "unknown"
     resolved = $false
     requested_at = $RecordTimestamp
+    equivalence = $ApprovalClass.EquivalenceSignature
+    rule_miss_eligible = [bool]$ApprovalClass.PrefixFingerprint
+    prior_unresolved_allowed = [bool]$priorUnresolvedAllow
+    resolved_allowed_counted = $false
   }
   $ApprovalStates[$stateKey] = $state
   if ($ApprovalClass.Signature) { $ApprovalStates[$ApprovalClass.Signature] = $state }
@@ -987,12 +1440,14 @@ function Add-ApprovalRequestObservation {
 
 function Resolve-ApprovalObservation {
   param($Health, [string]$CorrelationFingerprint, $RecordTimestamp, $ApprovalStates,
-    $ApprovalResolutionLatencies)
+    $ApprovalResolutionLatencies, $ApprovalResolvedAllowedEquivalences)
   if (-not $CorrelationFingerprint -or -not $ApprovalStates.ContainsKey($CorrelationFingerprint)) { return }
   $state = $ApprovalStates[$CorrelationFingerprint]
   if ($state.resolved) { return }
   $state.resolved = $true
+  $state.prior_unresolved_allowed = $false
   $Health.ApprovalResolvedRequests++
+  Register-ResolvedAllowedApproval $state $ApprovalResolvedAllowedEquivalences
   if ($RecordTimestamp -and $state.requested_at) {
     $latency = ($RecordTimestamp - $state.requested_at).TotalMilliseconds
     if ($latency -ge 0 -and $latency -le 86400000) { $ApprovalResolutionLatencies.Add([double]$latency) }
@@ -1100,6 +1555,7 @@ function Get-QuotaHealth {
     ApprovalDeniedObserved = 0
     ApprovalDecisionsObserved = 0
     ApprovalAllowedObserved = 0
+    ApprovalUnknownDecisions = 0
     ApprovalAllowPercent = $null
     ApprovalDeniedObservation = "unavailable"
     ApprovalPersistenceRetries = 0
@@ -1107,6 +1563,8 @@ function Get-QuotaHealth {
     ApprovalPersistenceDiagnosis = "not_observed"
     ApprovalRepeatedPrefixRequests = 0
     ApprovalLargestPrefixRepeat = 0
+    ApprovalResolvedAllowedEquivalences = 0
+    ApprovalLargestResolvedAllowedRepeat = 0
     ApprovalRuleMissDiagnosis = "not_observed"
     InspectionShapedApprovalRequests = 0
     InspectionShapedApprovalPercent = $null
@@ -1145,6 +1603,7 @@ function Get-QuotaHealth {
     RolloutNearSizeClusterFiles = 0
     RolloutMaxTaskAgeDays = $null
     RolloutAgeObservation = "unavailable"
+    RolloutAgeFilesystemFallbackFiles = 0
     HeadTruncatedFiles = 0
     HeadMetadataUnavailableFiles = 0
     RolloutTop1ReviewShare = $null
@@ -1198,6 +1657,9 @@ function Get-QuotaHealth {
     RuleSecretDiagnosis = "not_observed"
     RuleBroadInterpreterDiagnosis = "not_observed"
     ApprovalProblemClass = "unavailable"
+    InventoryEntries = 0
+    InventoryEntryLimit = 20000
+    InventoryEntryLimitHit = $false
   }
 
   $inputTokens = 0L
@@ -1229,6 +1691,9 @@ function Get-QuotaHealth {
   $health.FilesSelected = $sessionSelection.SelectedCount
   $health.CoverageCapped = $sessionSelection.Capped
   $health.InventoryTimedOut = $sessionSelection.InventoryTimedOut
+  $health.InventoryEntries = $sessionSelection.InventoryEntries
+  $health.InventoryEntryLimit = $sessionSelection.InventoryEntryLimit
+  $health.InventoryEntryLimitHit = $sessionSelection.InventoryEntryLimitHit
   $multiAgentV2Seen = $false
   $crossFileRecords = @{}
   $crossFileCompactions = @{}
@@ -1238,6 +1703,7 @@ function Get-QuotaHealth {
   $approvalBoundaryCauses = @{}
   $approvalStates = @{}
   $approvalRequestCorrelations = @{}
+  $approvalResolvedAllowedEquivalences = @{}
   $approvalSources = @{}
   $approvalSchemas = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   $approvalResolutionLatencies = [System.Collections.Generic.List[double]]::new()
@@ -1353,6 +1819,10 @@ function Get-QuotaHealth {
         try { $headRecord = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if ($headRecord.type -ne "session_meta") { continue }
         $headMetadataFound = $true
+        $headTimestamp = Get-RecordTimestamp $headRecord
+        if ($headTimestamp -and $headTimestamp -lt $fileFirstRecordTimestamp) {
+          $fileFirstRecordTimestamp = $headTimestamp
+        }
         $sessionIdentifier = Get-SafeCategory $headRecord.payload @("thread_id", "session_id", "id")
         if ($sessionIdentifier) { $fileSessionKey = Get-TextFingerprint $sessionIdentifier }
         $versionProperty = if ($headRecord.payload) { $headRecord.payload.PSObject.Properties["multi_agent_version"] } else { $null }
@@ -1536,16 +2006,23 @@ function Get-QuotaHealth {
         if ($approvalDecision) {
           $health.ApprovalDecisionsObserved++
           if ($approvalDecision.Decision -eq "allowed") { $health.ApprovalAllowedObserved++ }
-          if ($approvalDecision.Decision -eq "denied") { $health.ApprovalDeniedObserved++ }
+          elseif ($approvalDecision.Decision -eq "denied") { $health.ApprovalDeniedObserved++ }
+          else { $health.ApprovalUnknownDecisions++ }
           if ($approvalDecision.CorrelationFingerprint -and $approvalStates.ContainsKey($approvalDecision.CorrelationFingerprint)) {
-            $approvalStates[$approvalDecision.CorrelationFingerprint].decision = $approvalDecision.Decision
+            $decisionState = $approvalStates[$approvalDecision.CorrelationFingerprint]
+            $decisionState.decision = $approvalDecision.Decision
+            if ($approvalDecision.Decision -eq "denied") {
+              $decisionState.prior_unresolved_allowed = $false
+            }
+            Register-ResolvedAllowedApproval $decisionState $approvalResolvedAllowedEquivalences
           }
         }
         $payloadType = Get-SafeCategory $record.payload @("type")
         if ($payloadType -in @("approval_resolved", "approval_state_applied")) {
           $resolvedId = Get-SafeCategory $record.payload @("approval_id", "request_id", "call_id")
           $resolvedKey = if ($resolvedId) { Get-TextFingerprint $resolvedId } else { $null }
-          Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates $approvalResolutionLatencies
+          Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates `
+            $approvalResolutionLatencies $approvalResolvedAllowedEquivalences
         } elseif ($payloadType -in @("approval_state_persistence_error", "approval_persistence_error")) {
           $health.ApprovalPersistenceFailures++
         }
@@ -1637,8 +2114,13 @@ function Get-QuotaHealth {
             ([string]$forkProperty.Value).Trim().ToLowerInvariant()
           } else { "unknown" }
           if (-not $forkProperty -and $fileMultiAgentSchema -eq "v1") {
-            $forkValue = "all"
-            $health.SpawnForkAllDefaulted++
+            $legacyForkProperty = if ($arguments) { $arguments.PSObject.Properties["fork_context"] } else { $null }
+            if ($legacyForkProperty -and $legacyForkProperty.Value -is [bool]) {
+              $forkValue = if ([bool]$legacyForkProperty.Value) { "all" } else { "none" }
+            } else {
+              $forkValue = "unknown"
+              $health.SpawnForkUnknown++
+            }
           } elseif (-not $forkProperty) {
             $health.SpawnForkUnknown++
           }
@@ -1664,7 +2146,8 @@ function Get-QuotaHealth {
         $callProperty = $record.payload.PSObject.Properties["call_id"]
         $callId = if ($callProperty -and $null -ne $callProperty.Value) { [string]$callProperty.Value } else { $null }
         $resolvedKey = if ($callId -and $callId.Length -le 512) { Get-TextFingerprint $callId } else { $null }
-        Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates $approvalResolutionLatencies
+        Resolve-ApprovalObservation $health $resolvedKey $recordTimestamp $approvalStates `
+          $approvalResolutionLatencies $approvalResolvedAllowedEquivalences
       }
     }
 
@@ -1677,6 +2160,8 @@ function Get-QuotaHealth {
     ) {
       $reviewerIntervals.Add([pscustomobject]@{ Start = $reviewerFileFirst; End = $reviewerFileLast })
     }
+    $ageUsesFilesystemFallback = $fileFirstRecordTimestamp -eq [DateTimeOffset]::MaxValue
+    if ($ageUsesFilesystemFallback) { $health.RolloutAgeFilesystemFallbackFiles++ }
     $fileStats.Add([pscustomobject]@{
         SessionKey = $fileSessionKey
         ParentKey = $fileParentKey
@@ -1687,7 +2172,7 @@ function Get-QuotaHealth {
         Spawns = $fileSpawns
         AgeDays = [math]::Max(0.0, (
             (Get-Date).ToUniversalTime() -
-            $(if ($fileFirstRecordTimestamp -ne [DateTimeOffset]::MaxValue) {
+            $(if (-not $ageUsesFilesystemFallback) {
                 $fileFirstRecordTimestamp.UtcDateTime
               } else { $file.CreationTimeUtc })
           ).TotalDays)
@@ -1820,9 +2305,10 @@ function Get-QuotaHealth {
   if ($comparableTurns -gt 0) {
     $health.ApprovalReviewTurnShare = [math]::Round(100.0 * $health.ReviewerTurnsObserved / $comparableTurns, 1)
   }
-  if ($health.ApprovalDecisionsObserved -gt 0) {
+  $knownApprovalDecisions = $health.ApprovalAllowedObserved + $health.ApprovalDeniedObserved
+  if ($knownApprovalDecisions -gt 0) {
     $health.ApprovalAllowPercent = [math]::Round(
-      100.0 * $health.ApprovalAllowedObserved / $health.ApprovalDecisionsObserved, 2
+      100.0 * $health.ApprovalAllowedObserved / $knownApprovalDecisions, 2
     )
   }
   if ($health.ApprovalRequestsObserved -gt 0) {
@@ -1847,7 +2333,14 @@ function Get-QuotaHealth {
           [math]::Max(0, [int]$_ - 1)
         } | Measure-Object -Sum).Sum)
     $health.ApprovalLargestPrefixRepeat = [int](@($approvalPrefixes.Values | Measure-Object -Maximum).Maximum)
-    if ($health.ApprovalRepeatedPrefixRequests -gt 0 -and $health.ApprovalPersistenceDiagnosis -eq "not_observed") {
+  }
+  if ($approvalResolvedAllowedEquivalences.Count -gt 0) {
+    $health.ApprovalResolvedAllowedEquivalences = $approvalResolvedAllowedEquivalences.Count
+    $health.ApprovalLargestResolvedAllowedRepeat = [int](@(
+        $approvalResolvedAllowedEquivalences.Values | Measure-Object -Maximum
+      ).Maximum)
+    if ($health.ApprovalLargestResolvedAllowedRepeat -ge 2 -and
+        $health.ApprovalPersistenceDiagnosis -eq "not_observed") {
       $health.ApprovalRuleMissDiagnosis = "repeated_rule_miss_candidate"
       $health.ApprovalProblemClass = "rule_miss_amplification"
     }
@@ -1882,6 +2375,8 @@ function Get-QuotaHealth {
     )
     $health.RolloutAgeObservation = if ($health.HeadMetadataUnavailableFiles -gt 0) {
       "partial_head_metadata"
+    } elseif ($health.RolloutAgeFilesystemFallbackFiles -gt 0) {
+      "observed_with_filesystem_creation_fallback"
     } else { "observed" }
     $lineageReviews = @{}
     foreach ($stat in $fileStats) {
@@ -1953,7 +2448,11 @@ function Get-QuotaHealth {
     0, $health.ApprovalRequestsObserved - $health.ApprovalResolvedRequests
   )
   if ($health.ApprovalRequestsObserved -gt 0) {
-    $health.ApprovalResolutionObservation = if ($health.ApprovalResolvedRequests -gt 0) {
+    $health.ApprovalResolutionObservation = if (
+      $health.ApprovalResolvedRequests -eq $health.ApprovalRequestsObserved
+    ) {
+      "observed_complete_outcomes"
+    } elseif ($health.ApprovalResolvedRequests -gt 0) {
       "observed_partial_outcomes"
     } else { "requests_observed_no_structured_outcome" }
   }
@@ -2068,9 +2567,7 @@ function Get-QuotaHealth {
   }
   $health.ApprovalOptimization = if ($health.ApprovalPersistenceDiagnosis -eq "approval_state_persistence_runaway") {
     "repair_persistence_before_cost_optimization"
-  } elseif ($health.ApprovalRepeatedPrefixRequests -gt 0) {
-    "manual_narrow_rule_review"
-  } elseif ($health.ApprovalRepeatedRequests -gt 0) {
+  } elseif ($health.ApprovalRuleMissDiagnosis -eq "repeated_rule_miss_candidate") {
     "manual_narrow_rule_review"
   } elseif ($health.ApprovalRequestsObserved -gt 0) {
     "no_change_recommended"
@@ -2161,25 +2658,62 @@ function Get-QuotaHealth {
 }
 
 function Get-CodexFamily {
-  @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.ProcessName.Equals("Codex", [System.StringComparison]::Ordinal) -or
-    $_.ProcessName.Equals("codex", [System.StringComparison]::Ordinal) -or
-    $_.ProcessName.Equals("node_repl", [System.StringComparison]::Ordinal) -or
-    $_.ProcessName -like "codex-command-runner-*"
-  })
+  $family = [System.Collections.Generic.List[object]]::new()
+  foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
+    try { $name = [string]$process.ProcessName } catch { continue }
+    if ($name.Equals("Codex", [System.StringComparison]::Ordinal) -or
+        $name.Equals("codex", [System.StringComparison]::Ordinal) -or
+        $name.Equals("node_repl", [System.StringComparison]::Ordinal) -or
+        $name -like "codex-command-runner-*") { $family.Add($process) }
+  }
+  @($family)
 }
 
 function Get-CpuBaseline($processes) {
   $baseline = @{}
   foreach ($process in $processes) {
-    if ($null -ne $process.CPU) { $baseline[$process.Id] = [double]$process.CPU }
+    try {
+      $id = [int]$process.Id
+      $cpu = $process.CPU
+      if ($null -ne $cpu) { $baseline[$id] = [double]$cpu }
+    } catch { continue }
   }
   $baseline
 }
 
 function Get-CpuDelta($process, $baseline) {
-  if (-not $baseline.ContainsKey($process.Id) -or $null -eq $process.CPU) { return 0 }
-  [math]::Max(0.0, [double]$process.CPU - $baseline[$process.Id])
+  try {
+    $id = [int]$process.Id
+    $cpu = $process.CPU
+    if (-not $baseline.ContainsKey($id) -or $null -eq $cpu) { return 0 }
+    [math]::Max(0.0, [double]$cpu - $baseline[$id])
+  } catch { 0 }
+}
+
+function Get-SafeProcessSample($process, $baseline) {
+  $complete = $true
+  try { $id = [int]$process.Id } catch { return $null }
+  try { $name = [string]$process.ProcessName } catch { return $null }
+  try { $privateBytes = [long]$process.PrivateMemorySize64 } catch { $privateBytes = 0L; $complete = $false }
+  try { $handles = [int]$process.HandleCount } catch { $handles = 0; $complete = $false }
+  try { $threads = [int]$process.Threads.Count } catch { $threads = 0; $complete = $false }
+  try { $startTime = $process.StartTime } catch { $startTime = $null; $complete = $false }
+  try {
+    $cpu = $process.CPU
+    $cpuDelta = if ($null -ne $cpu -and $baseline.ContainsKey($id)) {
+      [math]::Max(0.0, [double]$cpu - $baseline[$id])
+    } else { 0.0 }
+  } catch { $cpuDelta = 0.0; $complete = $false }
+  [pscustomobject]@{
+    Id = $id
+    ProcessName = $name
+    PrivateMemorySize64 = $privateBytes
+    HandleCount = $handles
+    ThreadCount = $threads
+    StartTime = $startTime
+    CpuDelta = $cpuDelta
+    Complete = $complete
+  }
 }
 
 function Get-FreeDiskGB($path) {
@@ -2198,25 +2732,34 @@ function Get-Snapshot {
   $baseline = Get-CpuBaseline $initial
   Start-Sleep -Seconds $SampleSeconds
   $family = Get-CodexFamily
-
-  $privateMB = [math]::Round((($family | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB), 1)
-  $handles = [int](($family | Measure-Object HandleCount -Sum).Sum)
-  $threads = [int](($family | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum)
-  $cpuDelta = [math]::Round((($family | ForEach-Object { Get-CpuDelta $_ $baseline } | Measure-Object -Sum).Sum), 2)
+  $samples = [System.Collections.Generic.List[object]]::new()
+  $inaccessible = 0
+  foreach ($process in $family) {
+    $sample = Get-SafeProcessSample $process $baseline
+    if (-not $sample) { $inaccessible++; continue }
+    if (-not $sample.Complete) { $inaccessible++ }
+    $samples.Add($sample)
+  }
+  $privateMB = [math]::Round((($samples | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB), 1)
+  $handles = [int](($samples | Measure-Object HandleCount -Sum).Sum)
+  $threads = [int](($samples | Measure-Object ThreadCount -Sum).Sum)
+  $cpuDelta = [math]::Round((($samples | Measure-Object CpuDelta -Sum).Sum), 2)
 
   [pscustomobject]@{
     Family = $family
-    Count = $family.Count
-    Desktop = @($family | Where-Object { $_.ProcessName.Equals("Codex", [System.StringComparison]::Ordinal) }).Count
-    Helpers = @($family | Where-Object { $_.ProcessName.Equals("codex", [System.StringComparison]::Ordinal) }).Count
-    NodeRepl = @($family | Where-Object { $_.ProcessName.Equals("node_repl", [System.StringComparison]::Ordinal) }).Count
-    Runners = @($family | Where-Object ProcessName -like "codex-command-runner-*").Count
+    Count = $samples.Count
+    Desktop = @($samples | Where-Object { $_.ProcessName.Equals("Codex", [System.StringComparison]::Ordinal) }).Count
+    Helpers = @($samples | Where-Object { $_.ProcessName.Equals("codex", [System.StringComparison]::Ordinal) }).Count
+    NodeRepl = @($samples | Where-Object { $_.ProcessName.Equals("node_repl", [System.StringComparison]::Ordinal) }).Count
+    Runners = @($samples | Where-Object ProcessName -like "codex-command-runner-*").Count
     PrivateMB = $privateMB
     Handles = $handles
     Threads = $threads
     CpuCores = [math]::Round($cpuDelta / $SampleSeconds, 2)
     DiskFreeGB = Get-FreeDiskGB $CodexHome
     Baseline = $baseline
+    InaccessibleProcesses = $inaccessible
+    ProcessSampleObservation = if ($inaccessible -gt 0) { "partial" } else { "complete" }
   }
 }
 
@@ -2321,25 +2864,28 @@ function Format-Metric($value) {
 
 function Get-Candidates($snapshot) {
   $now = Get-Date
-  @($snapshot.Family | Where-Object {
-    if ($ProcessId -gt 0 -and $_.Id -ne $ProcessId) { return $false }
-    $isEligibleName = $_.ProcessName -eq "node_repl" -or $_.ProcessName -like "codex-command-runner-*"
-    if (-not $isEligibleName) { return $false }
+  $candidates = [System.Collections.Generic.List[object]]::new()
+  foreach ($process in @($snapshot.Family)) {
     try {
-      $ageMinutes = ($now - $_.StartTime).TotalMinutes
+      $id = [int]$process.Id
+      if ($ProcessId -gt 0 -and $id -ne $ProcessId) { continue }
+      $name = [string]$process.ProcessName
+      if ($name -ne "node_repl" -and $name -notlike "codex-command-runner-*") { continue }
+      $startTime = $process.StartTime
+      $ageMinutes = ($now - $startTime).TotalMinutes
+      $cpuDelta = Get-CpuDelta $process $snapshot.Baseline
+      if ($ageMinutes -lt $MinAgeMinutes -or $cpuDelta -gt 0.02) { continue }
+      $candidates.Add([pscustomobject]@{
+          PID = $id
+          Name = $name
+          AgeMinutes = [math]::Floor($ageMinutes)
+          StartTime = $startTime
+        })
     } catch {
-      return $false
+      continue
     }
-    $cpuDelta = Get-CpuDelta $_ $snapshot.Baseline
-    $ageMinutes -ge $MinAgeMinutes -and $cpuDelta -le 0.02
-  } | ForEach-Object {
-    [pscustomobject]@{
-      PID = $_.Id
-      Name = $_.ProcessName
-      AgeMinutes = [math]::Floor(((Get-Date) - $_.StartTime).TotalMinutes)
-      StartTime = $_.StartTime
-    }
-  })
+  }
+  @($candidates)
 }
 
 $logBefore = if ($Action -eq "inspect") { Get-LogDbSample } else { $null }
@@ -2364,7 +2910,7 @@ if ($Action -eq "inspect") {
   $quotaLevel = if ($quotaHealth.Level -eq 'HIGH') { 'CRITICAL' } elseif ($quotaHealth.Level -eq 'ELEVATED') { 'WARNING' } elseif ($quotaHealth.Level -eq 'LOW') { 'HEALTHY' } else { 'UNAVAILABLE' }
   $overallLevel = Get-WorseLevel (Get-WorseLevel $resourceLevel $quotaLevel) $quotaHealth.RuleStatus
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
-  Write-Output ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} machineHealth={41} tokenCoverageWindowHours={42} tokenCoverageStartUtc={43} tokenCoverageEndUtc={44} tokenFilesEligible={45} tokenFilesSelected={46} tokenCoverageCapped={47} tokenTailTruncatedFiles={48} tokenUnreadableFiles={49} tokenCoverageContinuity={50} tokenSpawnObservation={51} tokenCompactionObservation={52} approvalReviewTurnsObserved={53} approvalReviewerSessionsObserved={54} approvalReviewerModels={55} approvalReviewObservation={56} approvalReviewCoverage={57} approvalReviewsPerHour={58} approvalReviewerInputM={59} approvalPrimaryInputM={60} approvalReviewerMainInputRatio={61} approvalRequestObservation={62} approvalOptimization={63} rolloutSelectedMiB={64} rolloutGrowthMiBPerHour={65} rolloutCrossFileDuplicateRecords={66} rolloutCrossFileDuplicateCompactions={67} tokenUsageScope={68} approvalAverageIntervalSeconds={69} approvalPeakPerMinute={70} approvalConcurrentPeak={71} approvalParentLinksObserved={72} approvalRequestsObserved={73} approvalUniqueClasses={74} approvalRepeatedRequests={75} approvalRepeatPct={76} approvalSources={77} approvalDeniedObserved={78} approvalDeniedObservation={79} rolloutCrossFileDuplicateBytes={80} rolloutReplayPct={81} compactionUniqueSnapshots={82} compactionDuplicateBytes={83} rolloutGrowthObservation={84} rolloutProjected24hMiB={85} rolloutLineageLinksObserved={86} rolloutForkFilesObserved={87} rolloutNearSizeClusterFiles={88} codexVersionsObserved={89} authProvidersObserved={90} tokenInheritedSnapshots={91} tokenLineageDeltaFiles={92} logDbReasons={93} logDbPerformanceImpact={94} quotaRiskScope={95} tokenAdviceReason={96} approvalModesObserved={97} reviewerControlCapability={98} reviewerCompatibility={99} tokenQuotaContributors={100} tokenAdvice={101}" -f `
+  $headline = ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} machineHealth={41} tokenCoverageWindowHours={42} tokenCoverageStartUtc={43} tokenCoverageEndUtc={44} tokenFilesEligible={45} tokenFilesSelected={46} tokenCoverageCapped={47} tokenTailTruncatedFiles={48} tokenUnreadableFiles={49} tokenCoverageContinuity={50} tokenSpawnObservation={51} tokenCompactionObservation={52} approvalReviewTurnsObserved={53} approvalReviewerSessionsObserved={54} approvalReviewerModels={55} approvalReviewObservation={56} approvalReviewCoverage={57} approvalReviewsPerHour={58} approvalReviewerInputM={59} approvalPrimaryInputM={60} approvalReviewerMainInputRatio={61} approvalRequestObservation={62} approvalOptimization={63} rolloutSelectedMiB={64} rolloutGrowthMiBPerHour={65} rolloutCrossFileDuplicateRecords={66} rolloutCrossFileDuplicateCompactions={67} tokenUsageScope={68} approvalAverageIntervalSeconds={69} approvalPeakPerMinute={70} approvalConcurrentPeak={71} approvalParentLinksObserved={72} approvalRequestsObserved={73} approvalUniqueClasses={74} approvalRepeatedRequests={75} approvalRepeatPct={76} approvalSources={77} approvalDeniedObserved={78} approvalDeniedObservation={79} rolloutCrossFileDuplicateBytes={80} rolloutReplayPct={81} compactionUniqueSnapshots={82} compactionDuplicateBytes={83} rolloutGrowthObservation={84} rolloutProjected24hMiB={85} rolloutLineageLinksObserved={86} rolloutForkFilesObserved={87} rolloutNearSizeClusterFiles={88} codexVersionsObserved={89} authProvidersObserved={90} tokenInheritedSnapshots={91} tokenLineageDeltaFiles={92} logDbReasons={93} logDbPerformanceImpact={94} quotaRiskScope={95} tokenAdviceReason={96} approvalModesObserved={97} reviewerControlCapability={98} reviewerCompatibility={99} tokenQuotaContributors={100} tokenAdvice={101}" -f `
     $machineLevel, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
@@ -2418,14 +2964,19 @@ if ($Action -eq "inspect") {
     $quotaHealth.ReviewerCompatibility,
     $quotaHealth.QuotaContributors,
     $quotaHealth.Advice)
+  Write-Output $headline
   $efficiencyFields = [ordered]@{
     pluginVersion = $script:ChronosPluginVersion
     headlineScope = 'machine_health'
     processDiagnosticLevel = $processLevel
     machineHealthContributors = $machineContributorText
-    machineHealthConfidence = 'threshold_observation_only'
+    machineHealthConfidence = if ($snapshot.InaccessibleProcesses -gt 0) {
+      'threshold_observation_partial_process_sample'
+    } else { 'threshold_observation_only' }
     responsivenessObservation = 'not_measured'
     processSampleSeconds = $SampleSeconds
+    processInaccessible = $snapshot.InaccessibleProcesses
+    processSampleObservation = $snapshot.ProcessSampleObservation
     processOwnershipObservation = 'executable_name_only_unverified'
     filesystemHelperObservation = 'known_markers_15m'
     resourceDiagnosticLevel = $resourceLevel
@@ -2435,11 +2986,18 @@ if ($Action -eq "inspect") {
     logDbPageMetricsOk = $logMetrics.PageMetricsOk
     logDbSequenceOk = $logMetrics.SequenceOk
     logDbLevelRowsOk = $logMetrics.LevelRowsOk
+    sqliteOpenMode = $logMetrics.SqliteOpenMode
+    sqliteJournalMode = $logMetrics.SqliteJournalMode
+    sqliteSidecarMutationPossible = $logMetrics.SqliteSidecarMutationPossible
+    sqliteSidecarMutationObserved = $logMetrics.SqliteSidecarMutationObserved
     cacheWriteObservation = $quotaHealth.CacheWriteObservation
     cacheWriteAvailableFiles = $quotaHealth.CacheWriteAvailableFiles
     cacheWriteSelectedFiles = $quotaHealth.CacheWriteSelectedFiles
     rolloutRateSemantics = 'file_lifetime_average_not_measured_delta'
     rolloutInventoryTimedOut = $quotaHealth.InventoryTimedOut
+    rolloutInventoryEntries = $quotaHealth.InventoryEntries
+    rolloutInventoryEntryLimit = $quotaHealth.InventoryEntryLimit
+    rolloutInventoryEntryLimitHit = $quotaHealth.InventoryEntryLimitHit
     reviewerConcurrencySemantics = 'file_activity_span_estimate'
     metricSource = $quotaHealth.ApprovalMetricSource
     dashboardEquivalence = $quotaHealth.DashboardEquivalence
@@ -2465,6 +3023,7 @@ if ($Action -eq "inspect") {
     approvalDecisionsObserved = $quotaHealth.ApprovalDecisionsObserved
     approvalAllowedObserved = $quotaHealth.ApprovalAllowedObserved
     approvalDeniedObserved = $quotaHealth.ApprovalDeniedObserved
+    approvalUnknownDecisions = $quotaHealth.ApprovalUnknownDecisions
     approvalAllowPct = $quotaHealth.ApprovalAllowPercent
     approvalRequestSchemas = $quotaHealth.ApprovalRequestSchemas
     approvalResolvedRequests = $quotaHealth.ApprovalResolvedRequests
@@ -2478,6 +3037,8 @@ if ($Action -eq "inspect") {
     approvalPersistenceDiagnosis = $quotaHealth.ApprovalPersistenceDiagnosis
     approvalRepeatedPrefixRequests = $quotaHealth.ApprovalRepeatedPrefixRequests
     approvalLargestPrefixRepeat = $quotaHealth.ApprovalLargestPrefixRepeat
+    approvalResolvedAllowedEquivalences = $quotaHealth.ApprovalResolvedAllowedEquivalences
+    approvalLargestResolvedAllowedRepeat = $quotaHealth.ApprovalLargestResolvedAllowedRepeat
     approvalRuleMissDiagnosis = $quotaHealth.ApprovalRuleMissDiagnosis
     approvalProblemClass = $quotaHealth.ApprovalProblemClass
     inspectionShapedApprovalRequests = $quotaHealth.InspectionShapedApprovalRequests
@@ -2518,6 +3079,7 @@ if ($Action -eq "inspect") {
     ruleBroadInterpreterDiagnosis = $quotaHealth.RuleBroadInterpreterDiagnosis
     rolloutMaxTaskAgeDays = $quotaHealth.RolloutMaxTaskAgeDays
     rolloutAgeObservation = $quotaHealth.RolloutAgeObservation
+    rolloutAgeFilesystemFallbackFiles = $quotaHealth.RolloutAgeFilesystemFallbackFiles
     rolloutHeadTruncatedFiles = $quotaHealth.HeadTruncatedFiles
     rolloutHeadMetadataUnavailableFiles = $quotaHealth.HeadMetadataUnavailableFiles
     rolloutTop1ReviewShare = $quotaHealth.RolloutTop1ReviewShare

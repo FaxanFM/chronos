@@ -12,6 +12,15 @@ The builder packages only tracked plugin files, rejects untracked plugin input
 and reparse ancestors, sorts entries, assigns a fixed ZIP timestamp, and writes
 the ZIP, SHA-256 checksum, and a per-file hash/size manifest to `dist`.
 `tests/release.tests.ps1` builds twice and requires identical artifact hashes.
+This proves same-environment reproducibility for the tested Windows runtime. It
+does not claim byte identity across arbitrary ZIP implementations or operating
+systems.
+
+The authoritative immutable v0.7.6 ZIP SHA-256 is
+`e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
+Different hashes recorded for attempted or pre-publication packages are not the
+v0.7.6 release artifact. Do not rewrite its tag or immutable release to correct
+an earlier working note; record the distinction as an erratum.
 
 ## Published Release
 
@@ -30,7 +39,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.7.6
+git verify-tag v0.7.7
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -51,16 +60,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.7.6.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.7.6.zip -R FaxanFM/chronos
-gh release verify v0.7.6 -R FaxanFM/chronos
-gh release verify-asset v0.7.6 .\chronos-v0.7.6.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.7.7.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.7.7.zip -R FaxanFM/chronos
+gh release verify v0.7.7 -R FaxanFM/chronos
+gh release verify-asset v0.7.7 .\chronos-v0.7.7.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.7.6.sha256`. These controls prove
+Compare the first command with `chronos-v0.7.7.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -84,7 +93,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.7.6 retains disabled shared-folder write delegation. Inactive Governor
+v0.7.7 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the

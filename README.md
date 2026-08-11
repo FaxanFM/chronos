@@ -14,6 +14,15 @@ creating an autonomous agent loop.
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
 
+**[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
+
+The currently approved directory package is live. Chronos is available to eligible users
+across plans, including Free, subject to region, supported surface, workspace
+controls, and role. Directory publication permits distribution; it is not an
+OpenAI endorsement or support commitment.
+
+Manual marketplace fallback:
+
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
@@ -68,8 +77,12 @@ paths, identifiers, prompts, commands, credentials, or private source.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
   attempt budgets, Git-visible read-mutation checks, and final coordinator verification.
 
-Chronos mitigates local symptoms; it does not modify the Codex application or
-its SQLite databases, terminate processes, or block active work.
+Chronos mitigates local symptoms. It does not change SQLite rows or schemas,
+terminate Codex or unrelated user processes, or block active work. Governor can
+stop only the bounded Git subprocess it started when fingerprinting exceeds its
+time or byte limit. Its logical read-only SQLite
+connection can create or update SQLite `-wal` or `-shm` coordination sidecars;
+the result reports whether that activity was observed.
 
 ## Install in Codex
 
@@ -90,10 +103,11 @@ may therefore advertise a cache path removed by the upgrade even though the new
 version is installed correctly. Do not copy or link new plugin files into an
 old version directory; use a fresh task and verify the installed version.
 
-Official OpenAI Plugin Directory listing is pending. The public marketplace
-commands above install the same public plugin without waiting for directory
-review. See the [directory submission packet](docs/PLUGIN-DIRECTORY-SUBMISSION.md)
-for current status and reviewer instructions.
+Chronos is published in the shared OpenAI Plugins Directory for ChatGPT and
+Codex. The marketplace commands are a fallback for environments where the
+directory listing is not available. See the
+[published listing record](docs/PLUGIN-DIRECTORY-SUBMISSION.md) for the verified
+and unknown publication facts.
 
 ## Use
 
@@ -134,18 +148,8 @@ See [v0.7.0 Audit Response](docs/AUDIT-RESPONSE-2026-08-09.md) for the sanitized
 fixed, contained, and deferred finding disposition.
 See [v0.7.1 Delta Audit Response](docs/V0.7.1-DELTA-AUDIT-RESPONSE.md) for the
 follow-up security, parser, release, and discovery fixes.
-
-## Planned self-service agents
-
-Poe and Apify builds are planned as independently callable self-service agents:
-
-- Poe provides a guided session-health assessment.
-- Apify provides session analysis, sanitized incident reports, and Codex
-  public-fix compatibility checks.
-
-When published, each agent will be invoked and paid for directly through its platform. Chronos does
-not require a managed engagement or contacting FaxanFM. Public runner links
-will be added here as each agent is published.
+See [v0.7.6 Final Audit Response](docs/V0.7.6-FINAL-AUDIT-RESPONSE.md) for the
+focused v0.7.7 correctness repairs and validation boundary.
 
 ## Safety and privacy
 
@@ -153,9 +157,13 @@ will be added here as each agent is published.
 - Does not collect, transmit, or retain prompts, responses, source, diffs,
   commands, tool output, credentials, usernames, absolute paths, or personal data.
 - Never blocks, pauses, or ends a Codex task.
-- Never terminates a process or deletes user files.
-- Opens the known Codex diagnostic database read-only and never installs
-  triggers, deletes rows, checkpoints, or vacuums it.
+- Never terminates Codex or unrelated user processes and never deletes user
+  files. Governor can stop only its own bounded Git fingerprint subprocess.
+- Opens the known Codex diagnostic database in logical read-only mode and never
+  installs triggers, deletes rows, checkpoints, or vacuums it. SQLite can still
+  create or update `-wal` or `-shm` coordination sidecars; Chronos reports the
+  open mode, journal mode, whether sidecar mutation was possible, and whether it
+  was observed.
 - Reads bounded 2 MiB tails of up to eight recently active rollout files selected by modification time for
   structured aggregate token, effort, automatic-review, compaction, subagent,
   rollout-duplication, and parser-integrity

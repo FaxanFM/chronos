@@ -8,6 +8,13 @@ churn, and Windows process degradation. Chronos keeps machine health separate
 from workflow diagnostics and coordinates bounded read tasks without
 creating an autonomous agent loop.
 
+**[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
+
+Published by Dravara, LLC. The currently approved directory package is live for eligible
+users, subject to region, supported surface, workspace controls, and role.
+Directory publication is not an OpenAI endorsement. Use the public marketplace
+commands below only as a fallback.
+
 ## What it does
 
 - Reports machine health separately from resource, quota, rule, and overall diagnostic levels.
@@ -33,8 +40,12 @@ creating an autonomous agent loop.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
   attempt budgets, Git-visible read-mutation checks, and final coordinator verification.
 
-Chronos mitigates local symptoms; it does not modify the Codex application or
-its SQLite databases, terminate processes, or block active work.
+Chronos mitigates local symptoms. It does not change SQLite rows or schemas,
+terminate Codex or unrelated user processes, or block active work. Governor can
+stop only the bounded Git subprocess it started when fingerprinting exceeds its
+time or byte limit. Its logical read-only SQLite
+connection can create or update SQLite `-wal` or `-shm` coordination sidecars;
+the result reports whether that activity was observed.
 
 ## Install in Codex
 
@@ -86,18 +97,8 @@ and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/
 describe the v0.7.1 engineering controls.
 The public [v0.7.0 audit response](https://github.com/FaxanFM/chronos/blob/main/docs/AUDIT-RESPONSE-2026-08-09.md)
 separates fixed, contained, and deferred findings.
-
-## Planned self-service agents
-
-Poe and Apify builds are planned as independently callable self-service agents:
-
-- Poe provides a guided session-health assessment.
-- Apify provides session analysis, sanitized incident reports, and Codex
-  public-fix compatibility checks.
-
-When published, each agent will be invoked and paid for directly through its platform. Chronos does
-not require a managed engagement or contacting FaxanFM. Public runner links
-will be added here as each agent is published.
+The public [v0.7.6 final audit response](https://github.com/FaxanFM/chronos/blob/main/docs/V0.7.6-FINAL-AUDIT-RESPONSE.md)
+maps the focused v0.7.7 correctness repairs and validation boundary.
 
 ## Safety and privacy
 
@@ -105,9 +106,11 @@ will be added here as each agent is published.
 - Does not collect, transmit, or retain prompts, responses, source, diffs,
   commands, tool output, credentials, usernames, absolute paths, or personal data.
 - Never blocks, pauses, or ends a Codex task.
-- Never terminates a process or deletes user files.
-- Opens the known Codex diagnostic database read-only and never installs
-  triggers, deletes rows, checkpoints, or vacuums it.
+- Never terminates Codex or unrelated user processes and never deletes user
+  files. Governor can stop only its own bounded Git fingerprint subprocess.
+- Opens the known Codex diagnostic database in logical read-only mode and never
+  installs triggers, deletes rows, checkpoints, or vacuums it. SQLite can still
+  create or update `-wal` or `-shm` coordination sidecars, which Chronos reports.
 - Reads bounded 2 MiB tails of up to eight recently active rollout files selected by modification time for
   structured aggregate token, effort, automatic-review, compaction, subagent,
   rollout-duplication, and parser-integrity
