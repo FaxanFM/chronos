@@ -211,3 +211,10 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   boundary.
 - This entry is sanitized. It records no machine, user, workspace, repository,
   task, session, or account identifier.
+- Signed candidate source is public at commit `1540101ba1b2732bff5a6dfc36bfbdc653d8a652`.
+  The local Codex marketplace refreshed to that source and installed manifest
+  v0.8.1. All 13 installed package files matched the release inventory; the
+  cache added only its local `.gitignore` marker. Installed supervision status
+  and one real headless lifecycle-hook stdin invocation passed with no hook
+  output. This is local installation evidence, not the required external
+  validation.
