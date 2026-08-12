@@ -5,6 +5,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $module = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\session-registry.ps1'
 $wrapper = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\chronos.ps1'
 $hooksPath = Join-Path $repo 'plugins\chronos\hooks\hooks.json'
+$governorSkillPath = Join-Path $repo 'plugins\chronos\skills\chronos-governor\SKILL.md'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('chronos-supervision-tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 
@@ -113,6 +114,17 @@ try {
   Assert-True ($hookText.Contains('"async": true')) 'Non-ending lifecycle hooks must be asynchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
   Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
+  $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath
+  foreach ($requiredConvergenceControl in @(
+    'chronos-supervision-v1',
+    'at most three',
+    'creation time ascending',
+    'cycles zero and one',
+    'zero active duplicates',
+    'one machine and state root'
+  )) {
+    Assert-True ($governorSkillText.Contains($requiredConvergenceControl)) "Governor skill omitted host convergence control: $requiredConvergenceControl"
+  }
 
   $bomState = Join-Path $root 'bom-registry.json'
   $bomStart = Complete-HookProcess (Start-HookProcess $bomState (@{
@@ -132,6 +144,8 @@ try {
   $emptyData = Get-Payload $empty
   Assert-True ($emptyData.activeTasks -eq 0 -and $emptyData.activeAgents -eq 0 -and -not $emptyData.governorClaimed) 'Empty status was not quiescent.'
   Assert-True ($emptyData.recommendedCadenceMinutes -eq 360 -and $emptyData.maximumModelCallsPerDay -eq 4 -and $emptyData.workerRecurrence -eq 'disabled') 'Idle cadence, cost bound, or worker recurrence regressed.'
+  Assert-True ($emptyData.hostEquivalenceKey -eq 'chronos-supervision-v1' -and $emptyData.hostReconcileAttemptLimit -eq 3 -and $emptyData.hostRecheckThroughCycle -eq 2) 'Host convergence identity, retry budget, or bounded recheck regressed.'
+  Assert-True ($emptyData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates' -and $emptyData.localMutexScope -eq 'machine_state_root') 'Host postcondition or local-lock scope regressed.'
 
   $task = 'thread-test-governor'
   $worker = '/root/read_probe'
@@ -187,6 +201,7 @@ try {
   Assert-True ($discoveryData.activeTasks -eq 0 -and $discoveryData.activeAgents -eq 1) 'Discovery did not exclude Governor or include active agent.'
   Assert-True ($discoveryData.agents[0].taskId -eq $worker -and $discoveryData.agents[0].model -eq 'gpt-5.6-luna') 'Discovery did not recover the runtime agent identity.'
   Assert-True ($discoveryData.recommendedCadenceMinutes -eq 60 -and $discoveryData.maximumModelCallsPerDay -eq 24 -and $discoveryData.modelCalls -eq 'governor_only') 'Active cadence or model-call ownership regressed.'
+  Assert-True ($discoveryData.hostEquivalenceKey -eq 'chronos-supervision-v1' -and $discoveryData.hostReconcileAttemptLimit -eq 3 -and $discoveryData.hostRecheckThroughCycle -eq 2 -and $discoveryData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Discovery omitted deterministic host convergence controls.'
   Assert-True (@($discoveryData.checkBatch).Count -eq 1 -and $discoveryData.checkBatch[0].taskId -eq $worker) 'Governor check batch did not contain the active worker.'
 
   $cursor = [long]$discoveryData.revision

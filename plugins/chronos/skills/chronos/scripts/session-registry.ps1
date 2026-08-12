@@ -27,6 +27,9 @@ $script:GovernorActiveCadenceMinutes = 60
 $script:GovernorIdleCadenceMinutes = 360
 $script:GovernorMaximumCycles = 336
 $script:GovernorMaximumAgeDays = 14
+$script:GovernorEquivalenceKey = 'chronos-supervision-v1'
+$script:HostReconcileAttemptLimit = 3
+$script:HostRecheckThroughCycle = 2
 $script:Entropy = [Text.Encoding]::UTF8.GetBytes('Chronos.Supervision.Registry.v1')
 $script:InvocationObservedAtUtc = [DateTimeOffset]::UtcNow
 
@@ -642,6 +645,11 @@ function Get-DiscoveryPayload {
     registryCoverage = 'lifecycle_hooks'
     livenessAuthority = 'host_task_tools'
     taskTransport = 'host_required'
+    hostEquivalenceKey = $script:GovernorEquivalenceKey
+    hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
+    hostRecheckThroughCycle = $script:HostRecheckThroughCycle
+    hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
+    localMutexScope = 'machine_state_root'
     workerRecurrence = 'disabled'
     modelCalls = 'governor_only'
     recommendedCadenceMinutes = if ($activeCount -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
@@ -739,6 +747,11 @@ try {
       registryCapacity = if ([long]$state.health.droppedEntries -gt 0) { 'exhausted' } else { 'available' }
       registryCoverage = 'lifecycle_hooks'
       taskTransport = 'host_required'
+      hostEquivalenceKey = $script:GovernorEquivalenceKey
+      hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
+      hostRecheckThroughCycle = $script:HostRecheckThroughCycle
+      hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
+      localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }

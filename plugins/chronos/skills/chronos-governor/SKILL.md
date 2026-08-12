@@ -19,34 +19,56 @@ unbounded model use. Tell the user before creation that the default cadence is
 at most one Governor turn per hour while work is active and one every six hours
 while idle. Worker tasks receive no recurring turns.
 
+Use `chronos-supervision-v1` as the host equivalence key for the dedicated task,
+its compact assignment, and the matching automation. The exact name alone is
+not an equivalence key.
+
 1. Reconcile host state before trusting local state. Inspect every host
-   automation named exactly `Chronos Governor pulse` and its target task. Also
-   run `chronos.ps1 -Action supervise -SupervisionAction status`.
-2. Prefer the live target of an existing matching automation when its title and
-   compact assignment confirm that it is a Chronos Governor. Otherwise reuse a
-   locally claimed Governor only after the host task list confirms it is live,
-   dedicated to this role, and not carrying unrelated work. A name alone is not
-   proof of role compatibility.
+   automation named exactly `Chronos Governor pulse`, its immutable automation
+   ID, creation time when available, target task, and equivalence key. Also run
+   `chronos.ps1 -Action supervise -SupervisionAction status`.
+2. Build one host candidate set. Keep only live targets whose compact assignment
+   contains `chronos-supervision-v1` and confirms the dedicated role. Sort valid
+   automation candidates by creation time ascending, then immutable automation
+   ID and target task ID using ordinal comparison; a missing creation time sorts
+   after a present time. Every installer must select the first candidate. If no
+   valid automation exists, apply the same creation-time and immutable-ID order
+   to role-verified claimed Governor tasks. A name alone or a local claim alone
+   is not proof of role compatibility. If several candidates exist and stable
+   host IDs are unavailable, stop without creating another candidate and request
+   one user decision.
 3. If no valid Governor exists and the host exposes `create_thread`, create one
    fresh task titled `Chronos Governor`. Do not fork the current task or copy its
    history. Request `gpt-5.6-luna` with Medium reasoning only when the host
    advertises that exact task-model choice. Never silently substitute a more
    expensive model.
 4. Have the selected task run `-SupervisionAction initialize`. The registry
-   mutex is the ownership fence. If another task already won, the loser must
-   stop, create no automation, and may be archived after host verification. Use
-   `-Force` only after host task status proves the recorded owner is not live.
-5. Reconcile all matching automations after the claim succeeds. Update one
-   existing automation in place when possible, or create one when none exists.
-   Attach it to the claimed task, pause or delete every duplicate, and re-list
-   host state to verify exactly one active automation targets exactly one live
-   Governor. Never rely on a create call alone as proof.
-6. Use the cadence returned by supervision: 60 minutes with active monitored
+   mutex fences only one machine and state root. If another local task already
+   won, the loser must stop, create no automation, and may be archived after host
+   verification. Use `-Force` only after host task status proves the recorded
+   owner is not live.
+5. Reconcile all matching automations after the claim succeeds. Update the
+   deterministic winner in place when possible, or create one when none exists.
+   Attach it to the selected task, pause or delete every non-winner, then re-list
+   host state. Recompute the same winner after every mutation. Use at most three
+   reconciliation attempts in one setup turn. Success requires this exact
+   postcondition: one live dedicated Governor, one active automation carrying
+   `chronos-supervision-v1`, and zero active duplicates. On the third failure,
+   stop all further setup retries and issue one compact user action; never rely
+   on a create or allow result alone as proof.
+6. Before `discover` on Governor cycles zero and one, repeat the host candidate
+   scan and exact postcondition check. This catches a concurrently created
+   recurrence that was not visible during setup. A non-winning Governor must
+   pause or delete its own recurrence, verify that the deterministic winner
+   remains active, and stand down. After cycle one, do not rescan all host
+   automations during normal cycles unless claim loss, rotation, or recovery
+   requires reconciliation.
+7. Use the cadence returned by supervision: 60 minutes with active monitored
    work and 360 minutes while idle. The setup is an explicit opt-in to those
    recurring model turns. A Governor is bounded to 336 cycles or 14 days. At the
    bound, perform a verified fresh-task handoff when host tools support it;
    otherwise pause the recurrence and send one action request.
-7. If task creation is unavailable, use the current task only when the user's
+8. If task creation is unavailable, use the current task only when the user's
    setup request is explicit. State that it is the fallback and do not duplicate
    the current conversation through `fork_thread`.
 
@@ -54,11 +76,14 @@ This order is also the recovery protocol. It converges after a crash between
 task creation, claim, or automation creation; after a stale local claim; and
 after local registry loss. Unclaimed extra tasks do not get a recurrence.
 Duplicate recurrences are paused or removed before setup is reported complete.
+The host equivalence key and stable ordering are the cross-install ownership
+fence; the local mutex is not.
 
 The dedicated task should receive this compact, self-contained assignment:
 
 ```text
-Act as the single Chronos Governor. Claim local Chronos supervision. Reconcile
+Chronos equivalence key: chronos-supervision-v1. Act as the single Chronos
+Governor. Claim local Chronos supervision. Reconcile
 the passive lifecycle registry with host task status, monitor active tasks from
 this one inbox, and emit or forward only actionable transitions. Use compact
 batched task waits when available. Do not edit repositories, read transcripts,
@@ -72,8 +97,9 @@ and require the normal one-time Codex hook trust review. If hooks are disabled
 or untrusted, continue with host task-list discovery and label registry coverage
 unavailable. Never bypass hook trust.
 
-For each Governor cycle, run `-SupervisionAction discover`, then treat host task
-tools as liveness authority. Prefer one `list_threads` call and compact
+For each Governor cycle, apply the bounded cycle-zero/one host convergence check
+when required, run `-SupervisionAction discover`, then treat host task tools as
+liveness authority. Prefer one `list_threads` call and compact
 `wait_threads` snapshots from the rotating `checkBatch`, which contains at most
 eight entries. If an ended registry entry is confirmed live by the host, use
 `-SupervisionAction confirm-active -SupervisionSubjectId <id>`; an async start

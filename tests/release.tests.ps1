@@ -52,7 +52,10 @@ try {
   $supervisionContract = Get-Content -Raw -LiteralPath $supervisionPath
   foreach ($required in @(
     'exactly one active',
-    'recurrence targets exactly one claimed, live Governor',
+    'chronos-supervision-v1',
+    'at most three attempts',
+    'cycles zero and one',
+    'zero active duplicates',
     '60 minutes while monitored work is active and 360 minutes while idle',
     '336 cycles or 14 days',
     '-SupervisionConfirmRecurrenceStopped',
@@ -216,6 +219,14 @@ try {
     -SupervisionStatePath $installedSupervisionState 2>&1)
   if ($LASTEXITCODE -ne 0 -or ($installedSupervisionOutput -join "`n") -notmatch 'CHRONOS SUPERVISION .*"engine":"healthy"') {
     throw "Extracted package supervision status smoke test failed.`n$($installedSupervisionOutput -join "`n")"
+  }
+  $installedSupervisionLine = @($installedSupervisionOutput | Where-Object { $_ -like 'CHRONOS SUPERVISION *' } | Select-Object -Last 1)
+  $installedSupervisionData = $installedSupervisionLine[0].Substring('CHRONOS SUPERVISION '.Length) | ConvertFrom-Json
+  if ($installedSupervisionData.hostEquivalenceKey -ne 'chronos-supervision-v1' -or
+      $installedSupervisionData.hostReconcileAttemptLimit -ne 3 -or
+      $installedSupervisionData.hostRecheckThroughCycle -ne 2 -or
+      $installedSupervisionData.hostPostcondition -ne 'one_live_governor_one_active_recurrence_zero_duplicates') {
+    throw 'Extracted package omitted deterministic host convergence controls.'
   }
   $installedRegistry = Join-Path $installRoot "skills\chronos\scripts\session-registry.ps1"
   $hookInfo = New-Object Diagnostics.ProcessStartInfo

@@ -144,7 +144,11 @@ Review and trust the packaged lifecycle hook once through Codex `/hooks`.
 Worker tasks need no script or prompt and can use Luna, Terra, Sol, or another
 runtime model. Setup explicitly enables at most one Governor turn per hour
 while work is active and one every six hours while idle. The Governor rotates
-or pauses after 336 cycles or 14 days. Only that task owns host recurrence. It discovers
+or pauses after 336 cycles or 14 days. A stable `chronos-supervision-v1`
+equivalence key, deterministic winner order, and three-attempt reconciliation
+budget keep simultaneous installers converged on one task and one recurrence.
+Only the first two Governor pulses repeat that check; normal cycles do not.
+Only that task owns host recurrence. It discovers
 task and subagent starts or stops from a small encrypted local registry, then
 uses host task status as the liveness authority. If hooks are disabled, it
 falls back to host task discovery without blocking work. See

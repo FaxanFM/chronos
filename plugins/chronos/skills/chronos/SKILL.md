@@ -19,7 +19,12 @@ routine wakes. Their model choice is independent of Governor. The host should
 reconcile an existing matching host recurrence, reuse a verified Governor, or
 create one fresh task with no inherited history; never automatically fork a
 working task. The default is at most one Governor turn per active hour or one
-per six idle hours, with a 336-cycle or 14-day rotation bound.
+per six idle hours, with a 336-cycle or 14-day rotation bound. Host reconciliation
+uses equivalence key `chronos-supervision-v1`, deterministic immutable-ID winner
+ordering, at most three attempts, and the exact postcondition one live Governor,
+one active recurrence, and zero active duplicates. Only Governor cycles zero and
+one repeat the host-global convergence check; normal cycles do not rescan host
+automations.
 
 ```powershell
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action supervise -SupervisionAction status

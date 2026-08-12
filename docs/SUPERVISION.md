@@ -43,18 +43,31 @@ leaves prior state unchanged and exits zero.
 The host uses this reconciliation order:
 
 1. Inspect every host automation named exactly `Chronos Governor pulse`, its
-   target task, and compact local supervision status.
-2. Reuse the live automation target when its title and assignment verify the
-   dedicated Governor role. Otherwise reuse a claimed Governor only after host
-   liveness and role checks pass.
+   immutable ID, creation time when available, target task, equivalence key,
+   and compact local supervision status.
+2. Accept only candidates whose task assignment carries
+   `chronos-supervision-v1` and verifies the dedicated role. Sort existing
+   automation candidates by creation time ascending, then immutable automation
+   ID and target task ID using ordinal comparison. Missing creation times sort
+   after present times. Every installer selects the first candidate. With no
+   valid automation, apply the same order to role-verified claimed tasks.
 3. Otherwise create one fresh `Chronos Governor` task with no inherited chat
-   history.
-4. Let that task claim the mutex-protected registry. Any concurrent loser must
-   stop and must not create a recurrence.
-5. Update or create one matching automation, pause or remove every duplicate,
-   and re-list host state. Setup is complete only when exactly one active
-   recurrence targets exactly one claimed, live Governor.
-6. Use the current task only when task creation is unavailable and the user
+   history and include `chronos-supervision-v1` in its compact assignment.
+4. Let that task claim the mutex-protected registry. This mutex fences one
+   machine and state root only. Any concurrent local loser must stop and must
+   not create a recurrence.
+5. Update or create the deterministic winning automation, pause or remove every
+   non-winner, and re-list host state. Recompute the winner after each mutation
+   for at most three attempts. Setup is complete only when exactly one active
+   recurrence carrying `chronos-supervision-v1` targets exactly one claimed,
+   live Governor and zero active duplicates remain. After three failed attempts,
+   stop retrying and request one user action.
+6. Repeat the same host-global winner and postcondition check before discovery
+   on Governor cycles zero and one. This catches concurrently created state that
+   was not yet visible during setup. A loser stops its own recurrence and stands
+   down. Normal cycles after that do not rescan all automations unless claim
+   loss, rotation, or recovery requires it.
+7. Use the current task only when task creation is unavailable and the user
    explicitly requested setup.
 
 Chronos never automatically forks a working task. A fork can duplicate a large
@@ -65,7 +78,12 @@ status proves that the recorded Governor is no longer live.
 The same order is used after a partial setup, stale claim, process failure, or
 local registry loss. A host scan is authoritative for recurrence identity, so
 clearing local state cannot justify creating a duplicate. A title alone is not
-role verification.
+role verification. The equivalence key and deterministic host ordering are the
+cross-install ownership fence. If competing candidates lack stable host IDs,
+Chronos does not create another candidate automatically.
+
+The two initial convergence rechecks are bounded host reads inside the existing
+Governor turns. They create no worker turn and no permanent per-cycle scan.
 
 The host requests `gpt-5.6-luna` with Medium reasoning when that exact choice is
 available. Chronos cannot change a task's model itself and does not silently

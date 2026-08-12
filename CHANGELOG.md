@@ -15,6 +15,11 @@
 - Define deterministic Governor bootstrap order: reuse a host-verified
   Governor, otherwise create one fresh history-free task, and use the current
   task only as an explicit fallback. Never fork a working task automatically.
+- Add a stable host equivalence key, ordinal winner selection, a three-attempt
+  reconciliation budget, and an exact one-Governor/one-recurrence/zero-duplicate
+  postcondition for concurrent installers and recovery.
+- Recheck host-global convergence only during the first two Governor pulses so
+  eventually visible concurrent candidates converge without a permanent scan.
 - Make the dedicated Governor the only recurring model task. Request Luna
   Medium when the host offers it, leave monitored task models unchanged, use
   fair rotating host task batches, and end normal cycles silently. Default to

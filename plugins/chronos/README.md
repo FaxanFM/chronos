@@ -85,7 +85,11 @@ fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
 need no Chronos prompt and can use any runtime model. Setup explicitly enables
 at most one Governor turn per hour while work is active and one every six hours
-while idle. The Governor rotates or pauses after 336 cycles or 14 days. See the
+while idle. A stable `chronos-supervision-v1` equivalence key, deterministic
+winner order, and three-attempt reconciliation budget keep concurrent setups on
+one Governor and one recurrence. Only its first two pulses repeat that global
+check; normal cycles add no automation scan. The Governor rotates or pauses after 336 cycles
+or 14 days. See the
 public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
 For long-running or asynchronous work, ask:
