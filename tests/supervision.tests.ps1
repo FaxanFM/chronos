@@ -121,6 +121,10 @@ try {
     permission_mode = 'default'
   }
   Assert-True ($start.ExitCode -eq 0 -and -not $start.Output -and -not $start.Error) 'SessionStart must be silent and non-blocking.'
+  if (-not (Test-Path -LiteralPath $state -PathType Leaf)) {
+    $diagnostic = Invoke-Supervision $state
+    throw "SessionStart did not create registry state. Diagnostic: $($diagnostic.Text)"
+  }
   $raw = [IO.File]::ReadAllText($state)
   foreach ($private in @($task, $cwd, 'private-rollout.jsonl')) {
     Assert-True (-not $raw.Contains($private)) "Registry persisted private input: $private"
@@ -356,6 +360,7 @@ try {
   $sourceText = Get-Content -Raw -LiteralPath $module
   Assert-True ($sourceText.Contains('SpecialFolder]::LocalApplicationData')) 'Default supervision state must use LocalAppData, not volatile temp storage.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
+  Assert-True ($sourceText.Contains("@('Global', 'Local')")) 'Registry mutex must fall back to the same-user Local namespace when Global is unavailable.'
   foreach ($forbidden in @('Register-ScheduledTask', 'New-ScheduledTask', 'Start-Job', 'Start-Process', 'Invoke-WebRequest', 'Invoke-RestMethod', 'HttpClient', 'WebClient')) {
     Assert-True (-not $sourceText.Contains($forbidden)) "Supervision module contains a prohibited host or network primitive: $forbidden"
   }

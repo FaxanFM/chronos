@@ -418,15 +418,24 @@ function Write-State {
 
 function New-RegistryMutex {
   param([string]$Path)
-  $name = 'Global\ChronosSupervision-' + (Get-TextHash ([IO.Path]::GetFullPath($Path).ToUpperInvariant())).Substring(0, 24)
+  $suffix = 'ChronosSupervision-' + (Get-TextHash ([IO.Path]::GetFullPath($Path).ToUpperInvariant())).Substring(0, 24)
+  $sid = $null
+  $security = $null
   try {
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
     $security = New-Object Security.AccessControl.MutexSecurity
     $rule = New-Object Security.AccessControl.MutexAccessRule($sid, [Security.AccessControl.MutexRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
     $security.AddAccessRule($rule)
-    $created = $false
-    return New-Object Threading.Mutex($false, $name, [ref]$created, $security)
   } catch { throw 'supervision_mutex_unavailable' }
+  foreach ($scope in @('Global', 'Local')) {
+    try {
+      $created = $false
+      return New-Object Threading.Mutex($false, ($scope + '\' + $suffix), [ref]$created, $security)
+    } catch {
+      if ($scope -eq 'Local') { throw 'supervision_mutex_unavailable' }
+    }
+  }
+  throw 'supervision_mutex_unavailable'
 }
 
 function Remove-ExpiredRecords {

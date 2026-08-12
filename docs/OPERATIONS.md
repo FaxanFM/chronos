@@ -34,7 +34,7 @@ Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
 The v0.8.1 release-candidate ZIP SHA-256 is
-`19eb9aa1368c875858958db4b7b2f18f89e96ccd8085e37e071b64accc874477`.
+`a61ee7f359796e05d4a92b5bc8d5971b5a3928dd7ec633a52f8ee850eadd8e82`.
 It packages the passive supervision hooks and registry. Treat this value as
 provisional until the signed release workflow publishes and verifies the
 immutable asset.
