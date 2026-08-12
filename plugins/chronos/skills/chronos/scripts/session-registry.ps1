@@ -8,6 +8,7 @@ param(
   [ValidateRange(0, [long]::MaxValue)]
   [long]$SinceRevision = 0,
   [switch]$ConfirmRecurrenceStopped,
+  [switch]$Diagnostic,
   [switch]$Force
 )
 
@@ -811,9 +812,15 @@ try {
   }
   throw 'supervision_action_invalid'
 } catch {
-  if ($Action -eq 'hook') { exit 0 }
   $code = [string]$_.Exception.Message
   if ($code -notmatch '^supervision_[a-z_]+$') { $code = 'supervision_internal_error' }
+  if ($Action -eq 'hook') {
+    if ($Diagnostic) {
+      Write-SafeError $code 'hook'
+      exit 1
+    }
+    exit 0
+  }
   Write-SafeError $code $Action
   exit 1
 } finally {

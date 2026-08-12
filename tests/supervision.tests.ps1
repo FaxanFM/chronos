@@ -44,11 +44,12 @@ function Invoke-Supervision {
 }
 
 function Start-HookProcess {
-  param([string]$State, [string]$Json, [string]$ObservedAtUtc = '')
+  param([string]$State, [string]$Json, [string]$ObservedAtUtc = '', [switch]$Diagnostic)
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action hook -StatePath "{1}"' -f $module, $State
   if ($ObservedAtUtc) { $info.Arguments += ' -ObservedAtUtc "{0}"' -f $ObservedAtUtc }
+  if ($Diagnostic) { $info.Arguments += ' -Diagnostic' }
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -99,6 +100,7 @@ try {
   Assert-True ($hookText.Contains('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')) 'Windows hooks must use the system PowerShell path.'
   Assert-True ($hookText.Contains('"async": true')) 'Non-ending lifecycle hooks must be asynchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
+  Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
 
   $state = Join-Path $root 'registry.json'
   $empty = Invoke-Supervision $state
@@ -122,8 +124,14 @@ try {
   }
   Assert-True ($start.ExitCode -eq 0 -and -not $start.Output -and -not $start.Error) 'SessionStart must be silent and non-blocking.'
   if (-not (Test-Path -LiteralPath $state -PathType Leaf)) {
-    $diagnostic = Invoke-Supervision $state
-    throw "SessionStart did not create registry state. Diagnostic: $($diagnostic.Text)"
+    $diagnostic = Complete-HookProcess (Start-HookProcess $state (@{
+      session_id = $task
+      cwd = $cwd
+      hook_event_name = 'SessionStart'
+      source = 'startup'
+      model = 'gpt-5.6-sol'
+    } | ConvertTo-Json -Compress) '' -Diagnostic)
+    throw "SessionStart did not create registry state. Diagnostic: $($diagnostic.Output) $($diagnostic.Error)"
   }
   $raw = [IO.File]::ReadAllText($state)
   foreach ($private in @($task, $cwd, 'private-rollout.jsonl')) {
