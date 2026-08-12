@@ -29,6 +29,8 @@
   paths. They emit no model context and start no worker recurrence.
 - Retain the empty bounded fallback directory after reconciliation so a
   concurrent lifecycle writer cannot lose an event to a parent-delete race.
+- Run the complete Heartbeat suite against the built package in CI and make its
+  validation-order boundary independent of the package extraction directory.
 - Add one native `chronos.ps1 -Action supervise` command surface for compact
   status, Governor claim, active-task discovery, and release.
 - Store task and agent identifiers with current-user Windows DPAPI, retain only

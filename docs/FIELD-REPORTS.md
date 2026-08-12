@@ -221,6 +221,22 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   required for resolution. It must also verify silent normal cycles, bounded
   cadence, partial-failure recovery, two-phase release, and the rotation or pause
   boundary.
+- The first full external autonomy canary correctly failed closed. Direct
+  affected-task delivery, target isolation, intervention coalescing, retry
+  limits, stale-reply rejection, independent resolution, normal-cycle silence,
+  and one-Governor recurrence containment passed. The packaged full Heartbeat
+  suite then found a release-blocking test portability defect: its supposed
+  outside-root state path was derived from the repository root, but a package
+  extracted below `%TEMP%` is inside an approved state root. The test therefore
+  observed `heartbeat_input_invalid` from its deliberately malformed input
+  instead of the expected `heartbeat_state_path_invalid`. The candidate was
+  withheld, the one Governor was preserved with its recurrence paused, and no
+  worker or duplicate recurrence remained. The corrected suite uses a genuinely
+  forbidden state path, asserts validation order separately, and runs against
+  the built ZIP in CI.
+- The canary's attempted report delivery to a development task absent from that
+  host registry was definitely rejected. It correctly performed no retry and
+  did not convert the transport failure into a user-relay request.
 - This entry is sanitized. It records no machine, user, workspace, repository,
   task, session, or account identifier.
 - Signed candidate source is public on the `main` branch pending the final canary tag.

@@ -46,7 +46,12 @@ approval aggregates remain unsupported as account billing evidence.
 ## Heartbeats
 
 `tests/heartbeat.tests.ps1` exercises the native Heartbeat action through the
-installed `chronos.ps1` command surface. It covers normal and actionable paths
+installed `chronos.ps1` command surface. Both Windows CI jobs build and extract
+the release ZIP, then run this complete suite against that package. The same
+suite accepts a source plugin root for local development. State-containment
+cases use a path outside both approved roots and separately verify that
+state-path rejection precedes malformed-input parsing regardless of the package
+extraction folder. It covers normal and actionable paths
 for all eight families, first observation and current-versus-previous deltas,
 deduplication, material escalation, resolution, Governor-only routing with
 preserved owner hints, silent normal cycles, recursion

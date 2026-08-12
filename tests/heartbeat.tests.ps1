@@ -1,8 +1,12 @@
+param([string]$PluginRoot = '')
+
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
-$wrapper = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\chronos.ps1'
-$module = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\heartbeat.ps1'
+if ([string]::IsNullOrWhiteSpace($PluginRoot)) { $PluginRoot = Join-Path $repo 'plugins\chronos' }
+$PluginRoot = [IO.Path]::GetFullPath($PluginRoot)
+$wrapper = Join-Path $PluginRoot 'skills\chronos\scripts\chronos.ps1'
+$module = Join-Path $PluginRoot 'skills\chronos\scripts\heartbeat.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('chronos-heartbeat-tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 
@@ -239,7 +243,7 @@ try {
   $parseErrors = $null
   [void][Management.Automation.Language.Parser]::ParseFile($module, [ref]$null, [ref]$parseErrors)
   Assert-Equal @($parseErrors).Count 0 'Heartbeat module must parse on Windows PowerShell.'
-  $governorSkill = Get-Content -Raw -LiteralPath (Join-Path $repo 'plugins\chronos\skills\chronos-governor\SKILL.md')
+  $governorSkill = Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'skills\chronos-governor\SKILL.md')
   $compactGovernorSkill = $governorSkill -replace '\s+', ' '
   foreach ($required in @(
     'send_message_to_thread',
@@ -407,8 +411,16 @@ try {
   $oversized = Join-Path $boundaries.Path 'oversized.json'
   [IO.File]::WriteAllText($oversized, ('x' * 262145), [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $oversized, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Oversized input.'
-  $outsideState = Join-Path $repo 'heartbeat-state-must-not-write.json'
-  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', $outsideState)) 'heartbeat_state_path_invalid' 'State path outside approved roots.'
+  $outsideState = Join-Path ([Environment]::GetFolderPath('UserProfile')) ('heartbeat-state-must-not-write-' + [guid]::NewGuid().ToString('N') + '.json')
+  $outsideStateFull = [IO.Path]::GetFullPath($outsideState)
+  foreach ($approvedRoot in @([IO.Path]::GetTempPath(), (Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'))) {
+    $approvedRootFull = [IO.Path]::GetFullPath($approvedRoot).TrimEnd('\')
+    Assert-True (-not $outsideStateFull.Equals($approvedRootFull, [StringComparison]::OrdinalIgnoreCase) -and -not $outsideStateFull.StartsWith($approvedRootFull + '\', [StringComparison]::OrdinalIgnoreCase)) 'Outside-root test fixture unexpectedly fell inside an approved state root.'
+  }
+  $validForPath = Join-Path $boundaries.Path 'valid-for-state-path.json'
+  [IO.File]::WriteAllText($validForPath, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"path-test","sourceSequence":1,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $validForPath, '-StatePath', $outsideState)) 'heartbeat_state_path_invalid' 'State path outside approved roots.'
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', $outsideState)) 'heartbeat_state_path_invalid' 'State-path validation must precede malformed-input validation.'
   Assert-True (-not (Test-Path -LiteralPath $outsideState)) 'Rejected state path was written.'
 
   # State corruption, replacement, interrupted temp files, and out-of-order samples fail safely.

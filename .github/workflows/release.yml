@@ -39,9 +39,15 @@ jobs:
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python
-      - name: Test Chronos Heartbeats
+      - name: Test packaged Chronos Heartbeats
         shell: powershell
-        run: .\tests\heartbeat.tests.ps1
+        run: |
+          $version = [string](Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json).version
+          $build = Join-Path $env:RUNNER_TEMP 'chronos-heartbeat-build'
+          $package = Join-Path $env:RUNNER_TEMP 'chronos-heartbeat-package'
+          .\scripts\build-release.ps1 -Version $version -OutputDirectory $build
+          Expand-Archive -LiteralPath (Join-Path $build "chronos-v$version.zip") -DestinationPath $package
+          .\tests\heartbeat.tests.ps1 -PluginRoot $package
       - name: Test Chronos Supervision
         shell: powershell
         run: .\tests\supervision.tests.ps1

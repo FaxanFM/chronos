@@ -118,7 +118,9 @@ try {
     'timeout-minutes: 25',
     'Parse PowerShell sources',
     'Parse JSON manifests',
-    'Test Chronos Heartbeats',
+    'Test packaged Chronos Heartbeats',
+    'Expand-Archive',
+    '-PluginRoot $package',
     'Test Chronos Supervision'
   )) {
     if (-not $testWorkflow.Contains($required)) {
@@ -131,7 +133,9 @@ try {
     'commit.commit.verification.verified',
     'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
     'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
-    'Test Chronos Heartbeats',
+    'Test packaged Chronos Heartbeats',
+    'Expand-Archive',
+    '-PluginRoot $package',
     'Test Chronos Supervision',
     'timeout-minutes:',
     'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
