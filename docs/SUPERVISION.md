@@ -214,8 +214,9 @@ entry is at most 4 KiB and contains only an event category, DPAPI-protected task
 or agent identifiers, a workspace hash, safe labels, and a timestamp. The queue
 is capped at 256 entries. Chronos merges valid entries and removes them during
 the next hook or Governor status. It removes malformed entries and records a
-degraded counter. The queue is not a transcript, diagnostic log, or telemetry
-transport.
+degraded counter. The empty directory remains so a concurrent fallback writer
+cannot lose an event while the registry is merging earlier entries. The queue
+is not a transcript, diagnostic log, or telemetry transport.
 
 ## Usage Boundary
 

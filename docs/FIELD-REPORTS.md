@@ -190,7 +190,7 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 ## v0.8.1 Candidate Evidence
 
 - Candidate ZIP SHA-256:
-  `f1fcd912ce1ddd31fe2d807e8345eeeed7f36d00ab63e0dda5c7a741e55a25cd`.
+  `e64552de2295b3658d7f60986c34492c1c1c3fe62351141abc4fe8a41e1be745`.
   The deterministic package contains 13 files.
 - Local Windows PowerShell 5.1 validation passed the Inspector suite, Heartbeat
   suite, 42-scenario Governor suite, hardened supervision suite, and two-build

@@ -434,7 +434,7 @@ try {
     Assert-True ($result.ExitCode -eq 0 -and -not $result.Output -and -not $result.Error) 'Concurrent hook was not silent.'
   }
   $raceStatus = Get-Payload (Invoke-Supervision $raceState)
-  Assert-True ($raceStatus.engine -eq 'healthy' -and $raceStatus.activeTasks -eq 8 -and $raceStatus.retainedRecords -eq 8) 'Concurrent lifecycle writes were lost or corrupted.'
+  Assert-True ($raceStatus.engine -eq 'healthy' -and $raceStatus.activeTasks -eq 8 -and $raceStatus.retainedRecords -eq 8) "Concurrent lifecycle writes were lost or corrupted: $($raceStatus | ConvertTo-Json -Compress -Depth 8)"
 
   $mutexState = Join-Path $root 'mutex-deadline.json'
   [void](Invoke-Hook $mutexState @{ session_id = 'thread-mutex'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
@@ -463,7 +463,7 @@ try {
   Assert-True ($pendingText -notmatch 'thread-mutex|[A-Za-z]:\\') 'Fallback queue persisted a raw task ID or workspace path.'
   $reconciledMutexStatus = Get-Payload (Invoke-Supervision $mutexState)
   Assert-True ($reconciledMutexStatus.activeTasks -eq 0 -and $reconciledMutexStatus.hookRuns -eq 2) 'Governor status did not merge the contended SessionEnd.'
-  Assert-True (-not (Test-Path -LiteralPath $pendingDirectory)) 'Merged fallback queue was not removed.'
+  Assert-True (@(Get-ChildItem -LiteralPath $pendingDirectory -File -Force).Count -eq 0) 'Merged fallback queue entries were not removed.'
 
   $sourceText = Get-Content -Raw -LiteralPath $module
   Assert-True ($sourceText.Contains('SpecialFolder]::LocalApplicationData')) 'Default supervision state must use LocalAppData, not volatile temp storage.'

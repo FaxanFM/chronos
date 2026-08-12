@@ -27,6 +27,8 @@
   `SubagentStart`, and `SubagentStop` through reviewed plugin hooks.
 - Keep lifecycle hooks headless and off the turn, prompt, tool, and approval
   paths. They emit no model context and start no worker recurrence.
+- Retain the empty bounded fallback directory after reconciliation so a
+  concurrent lifecycle writer cannot lose an event to a parent-delete race.
 - Add one native `chronos.ps1 -Action supervise` command surface for compact
   status, Governor claim, active-task discovery, and release.
 - Store task and agent identifiers with current-user Windows DPAPI, retain only

@@ -613,13 +613,9 @@ function Merge-PendingHookEvents {
 
 function Remove-PendingHookEvents {
   param([string[]]$Paths, [string]$ResolvedStatePath)
+  # Keep the empty parent directory. Fallback writers do not hold the registry
+  # mutex, so deleting it here can race a writer between its path check and write.
   foreach ($path in @($Paths)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
-  $directory = Get-PendingEventDirectory $ResolvedStatePath
-  if (Test-Path -LiteralPath $directory) {
-    try {
-      if (@(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop).Count -eq 0) { Remove-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue }
-    } catch {}
-  }
 }
 
 function New-RegistryMutex {

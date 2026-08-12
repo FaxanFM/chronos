@@ -93,7 +93,8 @@ duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, delayed starts after terminal
 events, host-confirmed reactivation, two-phase release, live mutex contention,
 bounded fallback creation, protected fallback contents, reconciliation and
-removal after contention, full 256-record capacity behavior, silent hook output,
+entry removal after contention, prevention of fallback parent-directory races,
+full 256-record capacity behavior, silent hook output,
 headless Windows commands, lifecycle-only event coverage, and absence of
 scheduler, process-launch, and network primitives.
 

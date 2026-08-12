@@ -160,7 +160,8 @@ reparse containment, size limits, and retention limits protect the write path.
 If the mutex is briefly busy, the hook writes one bounded fallback event beside
 the registry. It contains the same protected or hashed metadata and no raw path
 or transcript. The next hook or Governor status merges and removes it under the
-mutex.
+mutex. Chronos retains the empty fallback directory to prevent a parent-delete
+race with lifecycle writers that intentionally do not wait on the registry mutex.
 
 A separate minimal `installation-scope.json` anchor stores a random 128-bit
 opaque ID. It contains no machine-derived value and is not a credential. The
