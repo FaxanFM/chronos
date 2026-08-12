@@ -540,7 +540,7 @@ function Invoke-HookEvent {
   switch ($event) {
     'SessionStart' {
       $source = [string](Get-Value $HookData 'source' 'startup')
-      if ($source -notin @('startup', 'resume', 'clear', 'compact')) { throw 'supervision_hook_input_invalid' }
+      if ($source -notin @('startup', 'resume', 'clear', 'compact')) { throw 'supervision_hook_source_invalid' }
       [void](Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'active' $source $Now $EventObservedAt 1)
     }
     'SessionEnd' {
@@ -671,14 +671,29 @@ $hookData = $null
 $eventObservedAt = $script:InvocationObservedAtUtc
 try {
   if ($Action -eq 'hook') {
-    $raw = [Console]::In.ReadToEnd()
-    if ([string]::IsNullOrWhiteSpace($raw)) { $raw = @($input) -join [Environment]::NewLine }
-    if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt $script:HookInputByteLimit) { throw 'supervision_hook_input_invalid' }
-    Assert-StrictJson $raw 'supervision_hook_input_invalid'
-    $hookData = ConvertTo-Hashtable ($raw | ConvertFrom-Json -ErrorAction Stop)
-    if (-not ($hookData -is [Collections.IDictionary])) { throw 'supervision_hook_input_invalid' }
+    $reader = $null
+    try {
+      $reader = [IO.StreamReader]::new(
+        [Console]::OpenStandardInput(),
+        [Text.UTF8Encoding]::new($false, $true),
+        $true,
+        4096,
+        $false
+      )
+      $raw = $reader.ReadToEnd()
+    } catch {
+      throw 'supervision_hook_input_encoding_invalid'
+    } finally {
+      if ($reader) { $reader.Dispose() }
+    }
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw 'supervision_hook_input_empty' }
+    if ($raw.Length -gt 0 -and [int][char]$raw[0] -eq 0xFEFF) { $raw = $raw.Substring(1) }
+    if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt $script:HookInputByteLimit) { throw 'supervision_hook_input_oversize' }
+    Assert-StrictJson $raw 'supervision_hook_json_invalid'
+    try { $hookData = ConvertTo-Hashtable ($raw | ConvertFrom-Json -ErrorAction Stop) } catch { throw 'supervision_hook_json_invalid' }
+    if (-not ($hookData -is [Collections.IDictionary])) { throw 'supervision_hook_shape_invalid' }
     if (-not [string]::IsNullOrWhiteSpace($ObservedAtUtc)) {
-      try { $eventObservedAt = ConvertTo-UtcTimestamp $ObservedAtUtc } catch { throw 'supervision_hook_input_invalid' }
+      try { $eventObservedAt = ConvertTo-UtcTimestamp $ObservedAtUtc } catch { throw 'supervision_hook_timestamp_invalid' }
     }
   }
   $resolved = Resolve-StatePath $StatePath

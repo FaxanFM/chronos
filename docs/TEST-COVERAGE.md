@@ -72,6 +72,7 @@ remains partial or unsupported.
 
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native
 `chronos.ps1 -Action supervise` wrapper, empty status, lifecycle start and end,
+strict UTF-8 and BOM-framed hook input,
 Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
 cadence, cycle and age limits, current-user protected identifiers, transcript

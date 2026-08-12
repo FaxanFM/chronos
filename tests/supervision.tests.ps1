@@ -44,7 +44,13 @@ function Invoke-Supervision {
 }
 
 function Start-HookProcess {
-  param([string]$State, [string]$Json, [string]$ObservedAtUtc = '', [switch]$Diagnostic)
+  param(
+    [string]$State,
+    [string]$Json,
+    [string]$ObservedAtUtc = '',
+    [switch]$Diagnostic,
+    [switch]$Utf8Bom
+  )
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action hook -StatePath "{1}"' -f $module, $State
@@ -57,8 +63,14 @@ function Start-HookProcess {
   $info.RedirectStandardOutput = $true
   $info.RedirectStandardError = $true
   $process = [Diagnostics.Process]::Start($info)
-  $process.StandardInput.Write($Json)
-  $process.StandardInput.Close()
+  if ($Utf8Bom) {
+    $bytes = [Text.Encoding]::UTF8.GetPreamble() + [Text.Encoding]::UTF8.GetBytes($Json)
+    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $process.StandardInput.BaseStream.Close()
+  } else {
+    $process.StandardInput.Write($Json)
+    $process.StandardInput.Close()
+  }
   [pscustomobject]@{ Process = $process; State = $State }
 }
 
@@ -101,6 +113,18 @@ try {
   Assert-True ($hookText.Contains('"async": true')) 'Non-ending lifecycle hooks must be asynchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
   Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
+
+  $bomState = Join-Path $root 'bom-registry.json'
+  $bomStart = Complete-HookProcess (Start-HookProcess $bomState (@{
+    session_id = 'thread-bom-probe'
+    cwd = $root
+    hook_event_name = 'SessionStart'
+    source = 'startup'
+    model = 'gpt-5.6-luna'
+  } | ConvertTo-Json -Compress) '' -Utf8Bom)
+  Assert-True ($bomStart.ExitCode -eq 0 -and (Test-Path -LiteralPath $bomState -PathType Leaf)) 'A UTF-8 BOM must not suppress lifecycle registration.'
+  $bomStatus = Get-Payload (Invoke-Supervision $bomState)
+  Assert-True ($bomStatus.activeTasks -eq 1) 'The BOM-framed lifecycle event was not registered.'
 
   $state = Join-Path $root 'registry.json'
   $empty = Invoke-Supervision $state

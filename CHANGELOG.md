@@ -25,6 +25,9 @@
   handling, host-confirmed reactivation, visible capacity pressure, two-phase
   release, crash-reconciling bootstrap instructions, and deterministic Windows
   supervision tests.
+- Decode hook standard input as strict UTF-8 with optional BOM detection so
+  lifecycle registration behaves consistently in interactive Codex and hosted
+  Windows process environments.
 
 Existing Inspector thresholds, quota scoring, predictive claims, Heartbeat
 detectors, shared-folder write policy, and no-publisher-telemetry behavior are
