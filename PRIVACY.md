@@ -2,7 +2,9 @@
 
 Effective August 11, 2026
 
-Chronos is an on-demand plugin that runs locally on the user's Windows computer.
+Chronos is a local Windows plugin. Health inspection and Heartbeat evaluation
+run on demand. Four reviewed lifecycle hooks can record bounded task and
+subagent start or end hints after the user trusts their exact definition.
 Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
 
 ## Data handling
@@ -60,6 +62,24 @@ usernames, or absolute paths. It is not transmitted by Chronos.
 Governor verification may return repository-relative changed paths when its
 advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
+When the user trusts the packaged Chronos lifecycle hooks, they run only when a
+Codex task or subagent starts or ends. The hook receives the host event object
+but does not read or retain its transcript path. It stores task and agent
+identifiers protected with Windows DPAPI for the current user, SHA-256 indexes,
+workspace hashes, safe model slugs, lifecycle state, counters, and timestamps
+in a bounded file beneath the user's local application-data directory. DPAPI
+protects the ciphertext for that Windows user; it is not a defense against a
+different process already running as the same user. It does not store raw
+workspace paths, prompts, responses, source code, diffs, commands, tool
+arguments, tool output, credentials, or usernames. The local Governor can
+decrypt an identifier for host task routing, so that ID can enter the Governor
+task or host-tool context; Chronos does not transmit it to its publisher.
+
+Lifecycle hooks do not run for every turn, prompt, tool call, or approval. They
+return no model-visible output and make no network request. If a hook is
+disabled, untrusted, malformed, busy, or unable to write, it exits without
+blocking the Codex task.
+
 When the user explicitly enables or runs Chronos Heartbeats, the Codex host can
 supply a bounded normalized snapshot containing safe counters, status values,
 timestamps, coverage labels, and opaque task, machine, agent, or route
@@ -112,11 +132,16 @@ it started when bounded fingerprinting exceeds its time or byte limit.
 ## Retention
 
 Chronos health inspection creates no persistent logs, user profiles, background
-services, or scheduled tasks. Governor metadata remains local until the user or
-Windows temporary-storage maintenance removes it. Heartbeat transition state
+services, or operating-system scheduled tasks. Governor and passive-supervision
+metadata remain local until the user removes them or local application-data
+maintenance does so. Heartbeat transition state
 remains local until the user removes it or local application-data maintenance
 does so. Chronos performs no automatic workspace cleanup. The plugin does not
 create or retain a host automation when Heartbeats are not explicitly enabled.
+When enabled, the Codex host reconciles one named Governor recurrence. The
+default is at most 24 Governor turns per active day or four per idle day. It is
+rotated or paused after 336 cycles or 14 days. Worker tasks receive no recurring
+turns. Release stops and verifies the recurrence before local ownership clears.
 
 ## Changes
 

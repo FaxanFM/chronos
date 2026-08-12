@@ -7,8 +7,86 @@ description: Coordinate bounded read tasks for low-complexity repository explora
 
 Delegate small read-only side tasks while the coordinator retains all edits,
 architecture, safety decisions, verification, and acceptance. Use Codex native
-workers only. Do not create a daemon, scheduler, external service, or autonomous
-loop.
+workers only. Do not create a daemon, operating-system scheduler, external
+service, or unbounded autonomous loop.
+
+## Automatic Supervision Bootstrap
+
+When the user asks to enable Chronos supervision, perform this setup once. The
+request authorizes one dedicated Governor task and one host-owned recurrence;
+it does not authorize an operating-system scheduler, service, worker loop, or
+unbounded model use. Tell the user before creation that the default cadence is
+at most one Governor turn per hour while work is active and one every six hours
+while idle. Worker tasks receive no recurring turns.
+
+1. Reconcile host state before trusting local state. Inspect every host
+   automation named exactly `Chronos Governor pulse` and its target task. Also
+   run `chronos.ps1 -Action supervise -SupervisionAction status`.
+2. Prefer the live target of an existing matching automation when its title and
+   compact assignment confirm that it is a Chronos Governor. Otherwise reuse a
+   locally claimed Governor only after the host task list confirms it is live,
+   dedicated to this role, and not carrying unrelated work. A name alone is not
+   proof of role compatibility.
+3. If no valid Governor exists and the host exposes `create_thread`, create one
+   fresh task titled `Chronos Governor`. Do not fork the current task or copy its
+   history. Request `gpt-5.6-luna` with Medium reasoning only when the host
+   advertises that exact task-model choice. Never silently substitute a more
+   expensive model.
+4. Have the selected task run `-SupervisionAction initialize`. The registry
+   mutex is the ownership fence. If another task already won, the loser must
+   stop, create no automation, and may be archived after host verification. Use
+   `-Force` only after host task status proves the recorded owner is not live.
+5. Reconcile all matching automations after the claim succeeds. Update one
+   existing automation in place when possible, or create one when none exists.
+   Attach it to the claimed task, pause or delete every duplicate, and re-list
+   host state to verify exactly one active automation targets exactly one live
+   Governor. Never rely on a create call alone as proof.
+6. Use the cadence returned by supervision: 60 minutes with active monitored
+   work and 360 minutes while idle. The setup is an explicit opt-in to those
+   recurring model turns. A Governor is bounded to 336 cycles or 14 days. At the
+   bound, perform a verified fresh-task handoff when host tools support it;
+   otherwise pause the recurrence and send one action request.
+7. If task creation is unavailable, use the current task only when the user's
+   setup request is explicit. State that it is the fallback and do not duplicate
+   the current conversation through `fork_thread`.
+
+This order is also the recovery protocol. It converges after a crash between
+task creation, claim, or automation creation; after a stale local claim; and
+after local registry loss. Unclaimed extra tasks do not get a recurrence.
+Duplicate recurrences are paused or removed before setup is reported complete.
+
+The dedicated task should receive this compact, self-contained assignment:
+
+```text
+Act as the single Chronos Governor. Claim local Chronos supervision. Reconcile
+the passive lifecycle registry with host task status, monitor active tasks from
+this one inbox, and emit or forward only actionable transitions. Use compact
+batched task waits when available. Do not edit repositories, read transcripts,
+run checks inside worker tasks, create another Governor, or broadcast routine
+status. Keep worker recurrence disabled.
+```
+
+Plugin lifecycle hooks register only `SessionStart`, `SessionEnd`,
+`SubagentStart`, and `SubagentStop`. They run headless, return no model context,
+and require the normal one-time Codex hook trust review. If hooks are disabled
+or untrusted, continue with host task-list discovery and label registry coverage
+unavailable. Never bypass hook trust.
+
+For each Governor cycle, run `-SupervisionAction discover`, then treat host task
+tools as liveness authority. Prefer one `list_threads` call and compact
+`wait_threads` snapshots from the rotating `checkBatch`, which contains at most
+eight entries. If an ended registry entry is confirmed live by the host, use
+`-SupervisionAction confirm-active -SupervisionSubjectId <id>`; an async start
+hook cannot revive terminal state by itself. Do not repeatedly read full tasks
+or transcripts. A normal cycle must end without messaging worker tasks. If
+`rotationRequired=true`, reconcile a fresh Governor or pause the recurrence
+before the current cycle ends. See the public
+[supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
+
+To disable supervision, first call `release` without confirmation and follow
+its host cleanup instruction. Pause or delete every matching recurrence, verify
+that none remains active, then call `release` again with
+`-SupervisionConfirmRecurrenceStopped`. Never clear the claim first.
 
 ## Boundary
 
@@ -27,6 +105,7 @@ Defaults:
 - Full parent history disabled with `fork_turns="none"` on Multi-Agent V2.
 - Final coordinator verification required.
 - Automatic merge, reset, cleanup, commit, and deletion disabled.
+- Worker-task recurrence and per-turn monitoring disabled.
 
 ## Keep With The Coordinator
 

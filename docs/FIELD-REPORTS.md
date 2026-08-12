@@ -186,3 +186,28 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   `engine=healthy`, eight active detector types, and exit code 0.
 - OpenAI Plugin Directory version 0.7.7 remains published. v0.8.0 has not been
   submitted to the Directory.
+
+## v0.8.1 Candidate Evidence
+
+- Candidate ZIP SHA-256:
+  `d49e281ed513869d4f27ac130d6102b7697ea91dd64882c68f39c281f2c08f47`.
+  The deterministic package contains 13 files.
+- Local Windows PowerShell 5.1 validation passed the Inspector suite, Heartbeat
+  suite, 42-scenario Governor suite, hardened supervision suite, and two-build
+  reproducibility and installed-package suite.
+- Supervision validation includes delayed lifecycle ordering, a live mutex held
+  beyond the synchronous deadline, eight concurrent hook processes, rotating
+  coverage of 17 active tasks, two-phase release, host-confirmed reactivation,
+  corrupt and ambiguous JSON, DPAPI validation, and a full 256-record capacity
+  fixture without eviction.
+- An independent Pro design audit changed its verdict from `HOLD` to
+  `SHIP-CONTINGENT-ON-EXTERNAL-CANARY`. It found no additional source or package
+  blocker in the supplied evidence.
+- v0.8.1 is not validated or released at this point. The remaining gate is an
+  external installed-package canary that verifies normal hook trust, exact
+  version and hash, host-global convergence to one Governor and one recurrence,
+  partial-failure recovery, two-phase release, Luna Medium selection without
+  fallback, bounded cadence, silent normal cycles, and the rotation or pause
+  boundary.
+- This entry is sanitized. It records no machine, user, workspace, repository,
+  task, session, or account identifier.

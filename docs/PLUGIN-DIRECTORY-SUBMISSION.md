@@ -8,15 +8,12 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-GitHub release status: v0.8.0 adds native Heartbeat transition detection and is
-published as an immutable GitHub release. It has not been submitted, approved,
-or published in the OpenAI Plugin Directory. The release artifact is
-`chronos-v0.8.0.zip` with SHA-256
-`d6d28a0e0af2e188d2e17e08711023725c1e31931432ede687ebd0b5f8844039`.
-The exact package passed independent source and archive audit with no release
-blockers. The signed tag, remote Windows package-install checks, release
-workflow, artifact attestation, and immutable asset verification also passed.
-Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.0.
+GitHub release candidate: v0.8.1 adds privacy-bounded passive task discovery and
+single-Governor bootstrap guidance. It has not been submitted, approved, or
+published in the OpenAI Plugin Directory. The release artifact is
+`chronos-v0.8.1.zip` with SHA-256
+`d49e281ed513869d4f27ac130d6102b7697ea91dd64882c68f39c281f2c08f47`.
+Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.1.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -37,7 +34,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.0.zip` release asset.
+   `chronos-v0.8.1.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -53,7 +50,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.0`
+- Version: `0.8.1`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -85,8 +82,10 @@ Long description:
 > other diagnostic conditions. It also marks missing or partial evidence.
 > Chronos recommends proportionate recovery, evaluates opt-in Heartbeat
 > transitions during long-running work, and coordinates bounded read tasks
-> through Governor. Heartbeat scheduling and event delivery remain with the
-> Codex host. Chronos installs no service and sends no telemetry. It does
+> through Governor. Four reviewed lifecycle hooks can supply one Governor with
+> bounded task and subagent start or end hints without running on each turn.
+> Heartbeat scheduling, task creation, and event delivery remain with the
+> Codex host. Chronos installs no service and sends no publisher telemetry. It does
 > not change SQLite rows or schemas, terminate Codex or unrelated user
 > processes, or stop tasks. Governor can stop only its own bounded Git
 > fingerprint subprocess. A
@@ -114,9 +113,10 @@ Supported platform: Windows with the Codex plugin runtime.
 
 1. `Use Chronos to inspect current Codex resource health.`
 2. `Use Chronos to explain current token and approval pressure.`
-3. `Use Chronos to check Heartbeat transitions for this long-running task.`
+3. `Enable Chronos supervision in one dedicated Governor task.`
+4. `Use Chronos to check Heartbeat transitions for this long-running task.`
 
-All three are unique, single-line, under 128 characters, and contain no app
+All four are unique, single-line, under 128 characters, and contain no app
 mention.
 
 ## Positive Reviewer Cases
@@ -171,7 +171,22 @@ mention.
 - Fixture: an ordinary local Git repository. No authentication or private test
   account is required.
 
-### 6. Evaluate a Heartbeat transition
+### 6. Set up one Governor
+
+- Prompt: `Enable Chronos supervision in one dedicated Governor task.`
+- Expected behavior: require normal hook trust review, reuse a host-verified
+  Governor or create one fresh task without inherited history, reconcile every
+  matching host recurrence, and keep worker tasks free of recurrence and routine
+  messages.
+- Expected result: exactly one verified Governor and one host-owned recurrence
+  only after the user's request. Default cadence is at most one Governor turn
+  per active hour or per six idle hours, with rotation or pause after 336 cycles
+  or 14 days. No automatic fork, operating-system scheduler, transcript read,
+  or worker-side model loop.
+- Fixture: Codex with task tools. If task creation is unavailable, the current
+  task is an explicit fallback and the limitation is stated.
+
+### 7. Evaluate a Heartbeat transition
 
 - Prompt: `Use Chronos to check Heartbeat transitions for this long-running task.`
 - Expected behavior: validate one bounded normalized snapshot, compare it with
@@ -226,16 +241,19 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.0 adds native Heartbeat transition detection for agent
-> stalls, runaway automatic review, unusual usage burn, session growth, test
-> regressions, machine drift, task dependencies, and Git or build-state changes.
-> It stores only bounded per-scope transition metadata, suppresses unchanged
-> conditions, and emits to one Governor inbox when action is useful. Monitored
-> tasks can use any model and are not woken by Chronos. The recommended Governor
-> uses GPT-5.6 Luna with Medium reasoning. The Codex host owns scheduling, model
-> selection, and delivery. Chronos installs no
-> service, makes no network request, and sends no telemetry. Existing Inspector
-> thresholds and read-only Governor policy are unchanged.
+> Chronos for Codex v0.8.1 adds passive task discovery through four reviewed
+> lifecycle hooks and a native supervision command. It reuses a host-verified
+> Governor or creates one fresh task without inherited history; it never
+> automatically forks a working task. Worker tasks can use any model and run no
+> Chronos recurrence. The recommended Governor uses GPT-5.6 Luna with Medium
+> reasoning when available. The host reconciles one recurrence, defaults to at
+> most 24 Governor turns per active day or four per idle day, and rotates or
+> pauses after 336 cycles or 14 days. Hooks are headless, run only at task or subagent
+> start or end, return no model context, and store only bounded local protected
+> identifiers and hashes. The Codex host owns task creation, scheduling, model
+> selection, and delivery. Chronos installs no service, makes no network
+> request, and sends no publisher telemetry. Existing Inspector thresholds,
+> Heartbeat detectors, and read-only Governor policy are unchanged.
 
 ## Assets and Evidence
 
@@ -272,7 +290,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.7.7 published; v0.8.0 not submitted**. Retained evidence
+Review status: **v0.7.7 published; v0.8.1 not submitted**. Retained evidence
 confirms that v0.7.7 is visible in the directory. It does not establish exact
 submission, approval, publication, or region values.
 

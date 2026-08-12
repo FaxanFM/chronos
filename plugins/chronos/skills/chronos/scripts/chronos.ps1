@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("inspect", "plan", "cleanup", "heartbeat")]
+  [ValidateSet("inspect", "plan", "cleanup", "heartbeat", "supervise")]
   [string]$Action = "inspect",
   [int]$MinAgeMinutes = 60,
   [int]$ProcessId = 0,
@@ -11,6 +11,14 @@ param(
   [string]$HeartbeatStatePath,
   [string]$HeartbeatScope,
   [string]$HeartbeatAcknowledgeEventId,
+  [ValidateSet("status", "initialize", "confirm-active", "discover", "release")]
+  [string]$SupervisionAction = "status",
+  [string]$SupervisionStatePath,
+  [string]$SupervisionSessionId,
+  [string]$SupervisionSubjectId,
+  [ValidateRange(0, [long]::MaxValue)]
+  [long]$SupervisionSinceRevision = 0,
+  [switch]$SupervisionConfirmRecurrenceStopped,
   [switch]$Force
 )
 
@@ -32,6 +40,24 @@ if ($Action -eq 'heartbeat') {
   } else {
     & $heartbeatScript -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -Scope $HeartbeatScope
   }
+  exit $LASTEXITCODE
+}
+
+# Supervision is passive local lifecycle discovery for one host-managed
+# Governor task. Worker tasks do not run model turns or recurring checks.
+if ($Action -eq 'supervise') {
+  $supervisionScript = Join-Path $PSScriptRoot 'session-registry.ps1'
+  if (-not (Test-Path -LiteralPath $supervisionScript)) { throw 'supervision_module_missing' }
+  $arguments = @{
+    Action = $SupervisionAction
+    SinceRevision = $SupervisionSinceRevision
+  }
+  if ($SupervisionStatePath) { $arguments.StatePath = $SupervisionStatePath }
+  if ($SupervisionSessionId) { $arguments.SessionId = $SupervisionSessionId }
+  if ($SupervisionSubjectId) { $arguments.SubjectId = $SupervisionSubjectId }
+  if ($SupervisionConfirmRecurrenceStopped) { $arguments.ConfirmRecurrenceStopped = $true }
+  if ($Force) { $arguments.Force = $true }
+  & $supervisionScript @arguments
   exit $LASTEXITCODE
 }
 

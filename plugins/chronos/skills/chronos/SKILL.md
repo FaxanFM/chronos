@@ -5,7 +5,30 @@ description: Detect and mitigate Codex process, CPU, memory, handle, disk, diagn
 
 # Chronos
 
-Keep this skill lean and on-demand. Do not create a scheduler, daemon, recurring automation, telemetry file, or persistent log.
+Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
+operating-system scheduler, daemon, service, telemetry file, or persistent log.
+After normal Codex hook trust review, the plugin's four lifecycle hooks update a
+bounded local supervision registry only when a task or subagent starts or ends.
+They do not run on turns, tools, or prompts and return no model context.
+
+## Supervision
+
+`-Action supervise` exposes compact status and discovery for one host-managed
+Governor task. Worker tasks do not invoke Chronos, run a recurrence, or receive
+routine wakes. Their model choice is independent of Governor. The host should
+reconcile an existing matching host recurrence, reuse a verified Governor, or
+create one fresh task with no inherited history; never automatically fork a
+working task. The default is at most one Governor turn per active hour or one
+per six idle hours, with a 336-cycle or 14-day rotation bound.
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action supervise -SupervisionAction status
+```
+
+Only the Governor task runs `-SupervisionAction initialize` and `discover`.
+Host task tools remain the authority for whether a task is live. The registry
+is a privacy-bounded discovery hint, not a task transport or security boundary.
+See the public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
 ## Heartbeats
 

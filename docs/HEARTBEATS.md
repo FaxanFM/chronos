@@ -15,7 +15,17 @@ to a higher severity. A normal cycle has no output.
 
 Run one host recurrence in a dedicated Governor task. That recurrence collects
 one normalized snapshot across the monitored task set and invokes Heartbeats
-once. Do not install or invoke Heartbeats inside every monitored task.
+once. Do not install or invoke Heartbeats inside every monitored task. The
+default supervision schedule is one Governor turn per active hour or per six
+idle hours, at most 24 or four turns per day. The host rotates or pauses the
+Governor after 336 cycles or 14 days so recurring context cannot grow without a
+bound.
+
+The optional reviewed lifecycle hooks provide a passive candidate list when a
+task or subagent starts or ends. The Governor reconciles that registry with
+host task status before collection. The registry does not supply progress,
+quota, test, Git, or machine evidence and cannot prove liveness. Worker tasks
+need no prompt or recurrence. See [Supervision](SUPERVISION.md).
 
 Monitored tasks can use different models and reasoning levels. The recommended
 Governor configuration is `gpt-5.6-luna` with Medium reasoning because the
@@ -63,6 +73,8 @@ normalized JSON snapshot when continuity is required.
 The host is responsible for:
 
 - Creating the recurrence after the user asks for it.
+- Reconciling one matching recurrence, stopping duplicates, and verifying the
+  target task before setup succeeds.
 - Collecting the normalized fields that the runtime exposes.
 - Assigning privacy-safe opaque IDs and ownership hints.
 - Running one Governor task for the monitored task set.
@@ -70,6 +82,8 @@ The host is responsible for:
 - Delivering emitted events to the Governor inbox.
 - Deduplicating delivery by `EventId` and acknowledging successful delivery.
 - Recording whether remediation occurred.
+- Rotating or pausing at the reported cycle or age bound and stopping the
+  recurrence before local release.
 
 Chronos does not contact another task. `OwningSolThread` is always `governor`.
 `Owner`, `Subject`, and supplied thread IDs are evidence for Governor triage;

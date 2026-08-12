@@ -21,6 +21,23 @@ The change is intentional. The previous design could coordinate writers but
 could not prove exact mutation scope, prevent temporary Git-object leakage, or
 protect its JSON state from a worker that could reach the same temporary path.
 
+## Single-Governor Supervision
+
+Chronos can use one dedicated Governor task as the inbox for passive lifecycle
+discovery and Heartbeat transitions. Bootstrap first reuses a host-verified
+Governor. If none exists, the host creates one fresh task without inherited
+history. Chronos does not automatically fork a working task because copied
+context can increase quota pressure and obscure ownership.
+
+The host requests Luna Medium for the dedicated Governor when available.
+Monitored tasks can use any runtime model and run no Chronos recurrence. Four
+reviewed lifecycle hooks record only task and subagent start or end hints; host
+task tools remain the liveness authority. Bootstrap reconciles matching host
+automations before creating anything, and a mutex-protected claim makes
+concurrent losers stand down. The default cadence is one Governor turn per
+active hour or per six idle hours, with a 336-cycle or 14-day rotation bound.
+See [Supervision](SUPERVISION.md).
+
 ## Read Coordination
 
 Eligible tasks include repository exploration, bounded review, documentation

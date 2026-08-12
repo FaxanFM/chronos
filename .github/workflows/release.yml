@@ -30,12 +30,21 @@ jobs:
             if ($errors) { $failures += @($errors | ForEach-Object { "$($file.FullName): $($_.Message)" }) }
           }
           if ($failures.Count) { throw ($failures -join "`n") }
+      - name: Parse JSON manifests
+        shell: powershell
+        run: |
+          Get-Content -Raw .agents/plugins/marketplace.json | ConvertFrom-Json | Out-Null
+          Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json | Out-Null
+          Get-Content -Raw plugins/chronos/hooks/hooks.json | ConvertFrom-Json | Out-Null
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python
       - name: Test Chronos Heartbeats
         shell: powershell
         run: .\tests\heartbeat.tests.ps1
+      - name: Test Chronos Supervision
+        shell: powershell
+        run: .\tests\supervision.tests.ps1
       - name: Test Chronos Governor
         shell: powershell
         run: .\tests\governor.tests.ps1

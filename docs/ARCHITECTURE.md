@@ -132,6 +132,34 @@ When the runtime exposes an effective worker model, binding and result reporting
 must match the model persisted by `plan`. A difference fails with
 `model_plan_mismatch`; absent runtime evidence remains `runtime_not_exposed`.
 
+## Passive Supervision
+
+The installed plugin bundles four lifecycle hooks: `SessionStart`,
+`SessionEnd`, `SubagentStart`, and `SubagentStop`. Codex applies its normal
+hash-based trust review before these non-managed hooks can run. Start and
+subagent hooks are asynchronous; the host requires `SessionEnd` to be
+synchronous. All return exit zero without output so they add no model context
+and never block work on a registry failure.
+
+The hooks invoke the internal `session-registry.ps1` module. It maintains a
+bounded local discovery index with current-user Windows DPAPI protected task
+and agent IDs, workspace hashes, safe model slugs, lifecycle state, counters,
+and timestamps. It does not read the transcript path supplied by the host and
+does not persist raw workspace paths. Atomic replacement, a named mutex,
+reparse containment, size limits, and retention limits protect the write path.
+
+`chronos.ps1 -Action supervise` exposes status, single-Governor claim,
+discovery, host-confirmed reactivation, and two-phase release. Registry liveness
+is advisory; host task status is authoritative. Terminal lifecycle state has
+precedence over delayed asynchronous starts. Bootstrap reconciles matching host
+automations first, reuses a role-verified Governor, otherwise creates one fresh
+task without inherited history, and uses a mutex-protected claim as the
+ownership fence. It does not automatically fork a working task. The host owns
+task creation, Luna Medium selection, one optional recurrence, compact rotating
+task batches, and delivery. Worker tasks run no Chronos model cycle. The
+recurrence is bounded to 336 cycles or 14 days. See
+[Supervision](SUPERVISION.md).
+
 ## Persistent Data
 
 The inspector persists nothing. Governor persists only coordination metadata
@@ -142,7 +170,16 @@ metadata plus a hashed, bounded delivery outbox beneath the user's local Chronos
 application-data directory. It does not persist the raw collector snapshot or
 raw route, subject, or owner IDs.
 
-No component sends telemetry, starts a service, creates a scheduled task,
+Passive supervision persists one bounded registry beneath the current user's
+local application-data directory. Raw task and agent IDs are DPAPI protected
+for that user; workspace identity is hashed. DPAPI does not defend against a
+different process already running as the same user. Decrypted IDs are returned
+only by local supervision status or Governor discovery for host routing and can enter that
+task or host-tool context. The registry contains no transcript path, prompt,
+response, source, command, tool argument, tool output, credential, username, or
+absolute workspace path.
+
+No component sends telemetry, starts a service, creates an operating-system scheduled task,
 changes Codex database rows or schemas, terminates Codex or unrelated user
 processes, or cleans worktrees. A user can separately ask the Codex host to
 schedule Heartbeat evaluation. Governor can stop only the Git subprocess it
@@ -151,7 +188,7 @@ started when fingerprinting exceeds its time or byte limit.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.8.0 does not change the existing inspector warning thresholds,
+of failure. v0.8.1 does not change the existing inspector warning thresholds,
 critical thresholds, scoring weights, or predictive claims. Heartbeat transition
 rules are a separate engineering subsystem and must retain explicit coverage and
 evidence. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

@@ -9,6 +9,7 @@ $testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
 $readmePath = Join-Path $repoRoot "README.md"
 $pluginReadmePath = Join-Path $repoRoot "plugins\chronos\README.md"
 $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
+$supervisionPath = Join-Path $repoRoot "docs\SUPERVISION.md"
 $supportPath = Join-Path $repoRoot "SUPPORT.md"
 $fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
 $submissionPacketPath = Join-Path $repoRoot "docs\PLUGIN-DIRECTORY-SUBMISSION.md"
@@ -19,8 +20,15 @@ $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugi
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
+$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
 try {
+  if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSEdition -ne 'Desktop') {
+    throw "Release validation must run under inbox Windows PowerShell 5.1."
+  }
+  if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+    throw "Inbox Windows PowerShell 5.1 was not found at its system path."
+  }
   if ([string]$manifest.interface.displayName -ne 'Chronos for Codex' -or
       [string]$manifest.interface.displayName.Length -gt 30) {
     throw "Directory display name must be specific and at most 30 characters."
@@ -39,6 +47,20 @@ try {
   foreach ($required in @('fresh task', 'versioned plugin skill locator', 'Do not copy', 'stale task catalog state')) {
     if (-not $upgradeBoundary.Contains($required)) {
       throw "Public upgrade guidance is missing the stale task-locator boundary: $required"
+    }
+  }
+  $supervisionContract = Get-Content -Raw -LiteralPath $supervisionPath
+  foreach ($required in @(
+    'exactly one active',
+    'recurrence targets exactly one claimed, live Governor',
+    '60 minutes while monitored work is active and 360 minutes while idle',
+    '336 cycles or 14 days',
+    '-SupervisionConfirmRecurrenceStopped',
+    '%LOCALAPPDATA%\Chronos\Supervision\session-registry.json',
+    'DPAPI does not protect against another process already running as that'
+  )) {
+    if (-not $supervisionContract.Contains($required)) {
+      throw "Public supervision contract is missing a release boundary: $required"
     }
   }
   $publicReadmes = @(
@@ -79,7 +101,8 @@ try {
     'timeout-minutes: 25',
     'Parse PowerShell sources',
     'Parse JSON manifests',
-    'Test Chronos Heartbeats'
+    'Test Chronos Heartbeats',
+    'Test Chronos Supervision'
   )) {
     if (-not $testWorkflow.Contains($required)) {
       throw "Ordinary CI is missing release-quality validation: $required"
@@ -92,6 +115,7 @@ try {
     'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
     'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
     'Test Chronos Heartbeats',
+    'Test Chronos Supervision',
     'timeout-minutes:',
     'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
     '--draft',
@@ -114,10 +138,10 @@ try {
     throw "Release workflow must verify the attestation, create a draft, publish it, and then verify the immutable release in that order."
   }
 
-  $firstOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  $firstOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $builder -Version $version -OutputDirectory $first 2>&1)
   if ($LASTEXITCODE -ne 0) { throw "First release build failed.`n$($firstOutput -join "`n")" }
-  $secondOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  $secondOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $builder -Version $version -OutputDirectory $second 2>&1)
   if ($LASTEXITCODE -ne 0) { throw "Second release build failed.`n$($secondOutput -join "`n")" }
 
@@ -145,7 +169,7 @@ try {
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
       }
     }
-    foreach ($required in @('.codex-plugin/plugin.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos-governor/SKILL.md')) {
+    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
       if ($names -notcontains $required) { throw "Release is missing $required." }
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {
@@ -173,13 +197,45 @@ try {
   if (($installedSkills -join "`n") -ne "chronos`nchronos-governor") {
     throw "Extracted package must contain exactly the chronos and chronos-governor skills."
   }
+  foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
+    $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseFile($installedScript.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+    if ($parseErrors) { throw "Packaged script failed Windows PowerShell 5.1 parsing: $($installedScript.FullName)" }
+  }
   $installedHeartbeat = Join-Path $installRoot "skills\chronos\scripts\chronos.ps1"
   $installedState = Join-Path $testRoot "installed-heartbeat-state.json"
-  $installedOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  $installedOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action heartbeat -HeartbeatStatePath $installedState `
     -HeartbeatScope "release-install-smoke" 2>&1)
   if ($LASTEXITCODE -ne 0 -or ($installedOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
     throw "Extracted package Heartbeat status smoke test failed.`n$($installedOutput -join "`n")"
+  }
+  $installedSupervisionState = Join-Path $testRoot "installed-supervision-state.json"
+  $installedSupervisionOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File $installedHeartbeat -Action supervise -SupervisionAction status `
+    -SupervisionStatePath $installedSupervisionState 2>&1)
+  if ($LASTEXITCODE -ne 0 -or ($installedSupervisionOutput -join "`n") -notmatch 'CHRONOS SUPERVISION .*"engine":"healthy"') {
+    throw "Extracted package supervision status smoke test failed.`n$($installedSupervisionOutput -join "`n")"
+  }
+  $installedRegistry = Join-Path $installRoot "skills\chronos\scripts\session-registry.ps1"
+  $hookInfo = New-Object Diagnostics.ProcessStartInfo
+  $hookInfo.FileName = $windowsPowerShell
+  $hookInfo.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Action hook -StatePath "{1}"' -f $installedRegistry, $installedSupervisionState
+  $hookInfo.UseShellExecute = $false
+  $hookInfo.CreateNoWindow = $true
+  $hookInfo.RedirectStandardInput = $true
+  $hookInfo.RedirectStandardOutput = $true
+  $hookInfo.RedirectStandardError = $true
+  $hookProcess = [Diagnostics.Process]::Start($hookInfo)
+  $hookProcess.StandardInput.Write('{"session_id":"release-package-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
+  $hookProcess.StandardInput.Close()
+  if (-not $hookProcess.WaitForExit(3000)) { try { $hookProcess.Kill() } catch {}; throw "Packaged lifecycle hook exceeded its host timeout." }
+  $hookStdout = $hookProcess.StandardOutput.ReadToEnd()
+  $hookStderr = $hookProcess.StandardError.ReadToEnd()
+  $hookExit = $hookProcess.ExitCode
+  $hookProcess.Dispose()
+  if ($hookExit -ne 0 -or $hookStdout -or $hookStderr) {
+    throw "Packaged lifecycle hook was not silent and successful."
   }
 
   $checksum = (Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.sha256")).Trim()

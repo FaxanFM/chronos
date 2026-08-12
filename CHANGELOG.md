@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.8.1
+
+- Add privacy-bounded lifecycle discovery for `SessionStart`, `SessionEnd`,
+  `SubagentStart`, and `SubagentStop` through reviewed plugin hooks.
+- Keep lifecycle hooks headless and off the turn, prompt, tool, and approval
+  paths. They emit no model context and start no worker recurrence.
+- Add one native `chronos.ps1 -Action supervise` command surface for compact
+  status, Governor claim, active-task discovery, and release.
+- Store task and agent identifiers with current-user Windows DPAPI, retain only
+  hashes, safe model labels, lifecycle state, counters, and timestamps around
+  them beneath local application data, and never persist transcript or workspace
+  paths.
+- Define deterministic Governor bootstrap order: reuse a host-verified
+  Governor, otherwise create one fresh history-free task, and use the current
+  task only as an explicit fallback. Never fork a working task automatically.
+- Make the dedicated Governor the only recurring model task. Request Luna
+  Medium when the host offers it, leave monitored task models unchanged, use
+  fair rotating host task batches, and end normal cycles silently. Default to
+  at most 24 Governor turns per active day or four per idle day, with a
+  336-cycle or 14-day rotation bound.
+- Add atomic registry replacement, bounded retention, named-mutex concurrency,
+  reparse containment, corrupt-state preservation, monotonic terminal lifecycle
+  handling, host-confirmed reactivation, visible capacity pressure, two-phase
+  release, crash-reconciling bootstrap instructions, and deterministic Windows
+  supervision tests.
+
+Existing Inspector thresholds, quota scoring, predictive claims, Heartbeat
+detectors, shared-folder write policy, and no-publisher-telemetry behavior are
+unchanged.
+
 ## v0.8.0
 
 - Add Heartbeats as a native action of the existing Chronos inspector skill.

@@ -68,6 +68,27 @@ They do not prove that the host collected complete evidence, delivered an
 event, or configured the recommended Luna Medium Governor. Missing host data
 remains partial or unsupported.
 
+## Passive Supervision
+
+`tests/supervision.tests.ps1` exercises the packaged hook schema, native
+`chronos.ps1 -Action supervise` wrapper, empty status, lifecycle start and end,
+Governor claim and conflict, revision cursors, duplicate events, active-agent
+discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
+cadence, cycle and age limits, current-user protected identifiers, transcript
+and workspace-path non-persistence, malformed and oversized hook input,
+duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
+containment, concurrent cross-process writes, delayed starts after terminal
+events, host-confirmed reactivation, two-phase release, live mutex contention,
+full 256-record capacity behavior, silent hook output, headless Windows commands,
+lifecycle-only event coverage, and absence of scheduler, process-launch, and
+network primitives.
+
+These tests validate local discovery and persistence. They do not prove that a
+user trusted the hook, that host task and automation tools are available, that
+a task remains live, that a host reconciled exactly one recurrence, or that the
+host selected Luna Medium. Those behaviors require an installed-package host
+canary. The registry remains advisory.
+
 ## Release
 
 `tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
@@ -75,9 +96,9 @@ tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
 per-file manifest hashes and sizes, pre-materialization package limits, required
 plugin files, repository-file exclusion, and a matching artifact checksum. It
 also extracts the exact ZIP as a fresh install, verifies the two-skill inventory
-and version, and runs the packaged Heartbeat status command.
+and version, and runs the packaged Heartbeat and supervision status commands.
 
-Tagged CI runs inspector, Heartbeat, Governor, and release tests on two Windows runner
+Tagged CI runs inspector, Heartbeat, supervision, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the
 artifact attestation is verified before a draft is created, and the immutable
 release and assets are verified again after publication.

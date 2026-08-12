@@ -1,9 +1,9 @@
-# Chronos for Codex - diagnostics, heartbeats, and read-task coordination
+# Chronos for Codex - diagnostics, supervision, and read-task coordination
 
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/FaxanFM/chronos)](LICENSE)
-![No telemetry](https://img.shields.io/badge/telemetry-none-4ed7a0)
+![No publisher telemetry](https://img.shields.io/badge/publisher_telemetry-none-4ed7a0)
 
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
@@ -37,10 +37,12 @@ task, repository, or session identifiers.
 
 ## Share safely
 
-Chronos has no install or usage telemetry. Public signals are always opt-in:
+Chronos sends no install, usage, or diagnostic telemetry to its publisher or a
+third party. Its bounded local state is described below. Public signals are
+always opt-in:
 
 - [Star Chronos for Codex](https://github.com/FaxanFM/chronos)
-- [Share the telemetry-free release on X](https://twitter.com/intent/tweet?text=Chronos%20for%20Codex%20diagnoses%20Windows%20slowdown%2C%20approval%20loops%2C%20quota%2Fcontext%20pressure%2C%20SQLite%20churn%2C%20and%20coordinates%20bounded%20read%20tasks.%20Local-only%2C%20on-demand%2C%20no%20telemetry.%20https%3A%2F%2Fgithub.com%2FFaxanFM%2Fchronos)
+- [Share the local-only release on X](https://twitter.com/intent/tweet?text=Chronos%20for%20Codex%20diagnoses%20Windows%20slowdown%2C%20approval%20loops%2C%20quota%2Fcontext%20pressure%2C%20SQLite%20churn%2C%20and%20coordinates%20bounded%20read%20tasks.%20Local-only%2C%20no%20publisher%20telemetry.%20https%3A%2F%2Fgithub.com%2FFaxanFM%2Fchronos)
 - [Share a sanitized result](https://github.com/FaxanFM/chronos/issues/new?template=sanitized-result.yml)
 
 Projects that use Chronos can link back with this optional badge:
@@ -79,6 +81,11 @@ paths, identifiers, prompts, commands, credentials, or private source.
   materially worse transitions to one Governor inbox. Monitored tasks remain
   model-agnostic and are not woken by Chronos. Stable event IDs and a bounded
   acknowledged outbox protect host delivery across restarts.
+- Passively registers task and subagent lifecycle changes through four reviewed,
+  headless hooks. No per-turn hook, worker recurrence, transcript read, or
+  model-visible hook output is used.
+- Reuses one host-verified Chronos Governor or creates a fresh history-free
+  Governor task. It never automatically forks a large working task.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
 - Discovers worker models from the active runtime instead of assuming a model.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
@@ -126,6 +133,23 @@ Use Chronos to inspect current Codex resource health.
 
 Chronos reports the current condition and recommends a proportionate response.
 
+To set up low-overhead monitoring, ask once:
+
+```text
+Enable Chronos supervision. Reuse a verified Chronos Governor or create one
+fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
+```
+
+Review and trust the packaged lifecycle hook once through Codex `/hooks`.
+Worker tasks need no script or prompt and can use Luna, Terra, Sol, or another
+runtime model. Setup explicitly enables at most one Governor turn per hour
+while work is active and one every six hours while idle. The Governor rotates
+or pauses after 336 cycles or 14 days. Only that task owns host recurrence. It discovers
+task and subagent starts or stops from a small encrypted local registry, then
+uses host task status as the liveness authority. If hooks are disabled, it
+falls back to host task discovery without blocking work. See
+[Supervision](docs/SUPERVISION.md) for setup, routing, usage, and privacy limits.
+
 For long-running or asynchronous work, ask:
 
 ```text
@@ -163,6 +187,8 @@ See [Builder Requirements](docs/BUILDER-REQUIREMENTS.md) for the consolidated
 handoff ledger and explicit unavailable and calibration boundaries.
 See [Chronos Governor](docs/CHRONOS-GOVERNOR.md) for routing, limits, contracts,
 state, and verification behavior.
+See [Supervision](docs/SUPERVISION.md) for passive task discovery and the
+single-Governor bootstrap contract.
 See [Architecture](docs/ARCHITECTURE.md), [Test Coverage](docs/TEST-COVERAGE.md),
 [Release Operations](docs/OPERATIONS.md), and
 [Calibration Methodology](docs/CALIBRATION-METHODOLOGY.md) for the current
@@ -196,9 +222,16 @@ focused v0.7.7 correctness repairs and validation boundary.
   assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
-- Creates no recurring task, service, publisher telemetry, or persistent log. A recurring
-  Codex automation exists only when the user explicitly enables it through the
-  host.
+- Creates no operating-system scheduled task, service, publisher telemetry, or
+  persistent log. Four reviewed plugin hooks store bounded task lifecycle hints
+  only at start and end. A recurring Codex automation exists only when the user
+  explicitly enables supervision or Heartbeats through the host. Setup
+  reconciles duplicates, and release stops the recurrence before clearing local
+  ownership.
+- Stores lifecycle task and agent IDs encrypted for the current Windows user;
+  raw transcripts and workspace paths are never stored. DPAPI does not isolate
+  data from another process already running as that user. Host task tools remain
+  the liveness authority.
 - An invoked Heartbeat cycle stores bounded per-scope transition, coverage,
   cadence, deduplication, hashed delivery/outbox, and health metadata in the user's local Chronos
   application-data directory. It does not persist raw snapshots, prompts,

@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
 
-# Chronos for Codex - diagnostics, heartbeats, and read-task coordination
+# Chronos for Codex - diagnostics, supervision, and read-task coordination
 
 Detect runaway Codex auto-review, approval loops, quota and context
 amplification, broken permission rules, rollout duplication, diagnostic SQLite
@@ -38,6 +38,10 @@ commands below only as a fallback.
 - Evaluates eight opt-in Heartbeat families and emits an event only for an
   actionable transition or material worsening. Stable event IDs and a bounded
   acknowledged outbox protect host delivery across restarts.
+- Passively registers task and subagent lifecycle changes through four reviewed,
+  headless hooks with no per-turn output or worker recurrence.
+- Reuses one host-verified Governor or creates one fresh history-free Governor
+  task instead of automatically forking a working task.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
 - Discovers worker models from the active runtime instead of assuming a model.
 - Coordinates canonical workspace identity, fenced expiring advisory leases,
@@ -70,6 +74,19 @@ Use Chronos to inspect current Codex resource health.
 ```
 
 Chronos reports the current condition and recommends a proportionate response.
+
+To set up monitoring with one Governor task, ask:
+
+```text
+Enable Chronos supervision. Reuse a verified Chronos Governor or create one
+fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
+```
+
+Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
+need no Chronos prompt and can use any runtime model. Setup explicitly enables
+at most one Governor turn per hour while work is active and one every six hours
+while idle. The Governor rotates or pauses after 336 cycles or 14 days. See the
+public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
 For long-running or asynchronous work, ask:
 
@@ -121,7 +138,9 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
 
 ## Safety and privacy
 
-- Runs only when requested.
+- Inspector, Heartbeat, and Governor commands run when requested. After the
+  user trusts the packaged hooks, four silent lifecycle hooks also run only at
+  task or subagent start and end.
 - Does not collect, transmit, or retain prompts, responses, source, diffs,
   commands, tool output, credentials, usernames, absolute paths, or personal data.
 - Never blocks, pauses, or ends a Codex task.
@@ -139,8 +158,15 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
   assignments, and values are never returned.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
-- Creates no recurring task, service, publisher telemetry, or persistent log. The host
-  creates a recurring automation only after the user asks for one.
+- Creates no operating-system scheduled task, service, publisher telemetry, or
+  persistent log. Four reviewed hooks write bounded lifecycle hints only when a
+  task or subagent starts or ends. The host creates one recurring Governor
+  automation only after the user asks to enable supervision or Heartbeats.
+  Setup reconciles duplicates, and release stops the recurrence before clearing
+  local ownership.
+- Stores lifecycle identifiers protected with current-user Windows DPAPI and
+  does not store transcript or workspace paths. DPAPI does not isolate data from
+  another process already running as that user.
 - Heartbeat evaluation stores bounded per-scope transition, coverage, cadence,
   deduplication, hashed delivery/outbox, and health metadata. It does not persist raw snapshots,
   prompts, responses, commands, source, paths, credentials, or tool output.

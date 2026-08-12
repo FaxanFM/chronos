@@ -33,6 +33,12 @@ It matches the independently audited candidate. The signed tag, two remote
 Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
+The v0.8.1 release-candidate ZIP SHA-256 is
+`d49e281ed513869d4f27ac130d6102b7697ea91dd64882c68f39c281f2c08f47`.
+It packages the passive supervision hooks and registry. Treat this value as
+provisional until the signed release workflow publishes and verifies the
+immutable asset.
+
 ## Published Release
 
 A `vX.Y.Z` tag must exactly match `.codex-plugin/plugin.json`. Before creating a
@@ -71,16 +77,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.0.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.0.zip -R FaxanFM/chronos
-gh release verify v0.8.0 -R FaxanFM/chronos
-gh release verify-asset v0.8.0 .\chronos-v0.8.0.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.1.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.1.zip -R FaxanFM/chronos
+gh release verify v0.8.1 -R FaxanFM/chronos
+gh release verify-asset v0.8.1 .\chronos-v0.8.1.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.0.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.1.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -104,7 +110,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.7.7 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.1 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the
@@ -117,11 +123,50 @@ the compact result only. An `internal_error` now includes a privacy-safe
 `failure_stage` and exception class, but never the exception message, local
 path, or state content.
 
+## Supervision Recovery
+
+After upgrading, open a fresh task and review the exact Chronos lifecycle hook
+through `/hooks`. Hook trust is bound to the definition hash and cannot be
+bypassed by the plugin. Then ask Codex to enable Chronos supervision once.
+
+First inspect all host automations named `Chronos Governor pulse` and their
+targets. Reuse a live target only after its title and assignment confirm the
+dedicated role. Otherwise reuse a claimed Governor after the same check, or
+create one fresh task without inherited history. Do not automatically fork a
+working task. After the mutex-protected claim succeeds, reconcile one matching
+automation, stop every duplicate, and re-list host state before reporting
+success. Use `-Action supervise -SupervisionAction status` for compact registry
+health.
+
+`supervision_governor_conflict` means another record owns the role. Do not use
+`-Force` unless host task status proves that task is no longer live.
+`supervision_state_invalid`, `supervision_state_path_invalid`,
+`supervision_mutex_busy`, and `supervision_crypto_unavailable` preserve or skip
+local state and never justify deleting a task or workspace file. Worker tasks
+need no setup and must not receive a recurring automation.
+
+The default registry is `%LOCALAPPDATA%\Chronos\Supervision\session-registry.json`.
+Loss of the registry disables the discovery hint but does not affect Codex
+tasks. Reconcile existing host automations before recreating a claim so registry
+loss cannot justify a duplicate task or recurrence. `engine=degraded` with
+`registryCapacity=exhausted` means Chronos retained the existing 256 records and
+refused a new hint; use host task tools as authority.
+
+Delayed asynchronous starts cannot revive terminal records. After host task
+status proves that an ended task is active again, the Governor can use
+`-SupervisionAction confirm-active -SupervisionSubjectId <id>`. To disable
+supervision, call `release`, stop and verify all matching host recurrences, then
+call `release -SupervisionConfirmRecurrenceStopped`. Clearing local ownership
+first can orphan a recurrence and is prohibited. See [Supervision](SUPERVISION.md).
+
 ## Heartbeat Recovery
 
 Use one recurring Governor task for the monitored task set. Configure that task
-with `gpt-5.6-luna` and Medium reasoning when the host offers it. Do not create a
-recurrence in every monitored task. Monitored tasks can use any available model.
+with `gpt-5.6-luna` and Medium reasoning when the host offers it. The default is
+60 minutes while work is active and 360 minutes while idle, at most 24 or four
+Governor turns per day. Rotate or pause after 336 cycles or 14 days. Do not
+create a recurrence in every monitored task. Monitored tasks can use any
+available model.
 Chronos emits only to the Governor inbox; `Owner` and `Subject` are triage hints
 for an explicit host follow-up.
 
