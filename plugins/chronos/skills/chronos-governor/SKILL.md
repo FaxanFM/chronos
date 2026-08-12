@@ -62,7 +62,10 @@ name alone is not an equivalence key. Never copy a key from another machine.
    scan and exact postcondition check. This catches a concurrently created
    recurrence that was not visible during setup. A non-winning Governor must
    pause or delete its own recurrence, verify that the deterministic winner
-   remains active, and stand down. After cycle one, do not rescan all host
+   remains active, and stand down. If the losing task itself owns the local
+   claim, use the normal two-phase release only after its recurrence is proven
+   absent; otherwise do not mutate the local claim. Never clear another task's
+   claim. After cycle one, do not rescan all host
    automations during normal cycles unless claim loss, rotation, or recovery
    requires reconciliation.
 7. Use the cadence returned by supervision: 60 minutes with active monitored

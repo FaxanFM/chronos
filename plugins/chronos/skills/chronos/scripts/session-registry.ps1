@@ -232,8 +232,7 @@ function Resolve-InstallationScopePath {
   $candidate = if (Test-ContainedPath $ResolvedStatePath $localRoot) {
     Join-Path $localRoot 'installation-scope.json'
   } else {
-    $stem = [IO.Path]::GetFileNameWithoutExtension($ResolvedStatePath)
-    Join-Path $stateDirectory ($stem + '.installation-scope.json')
+    Join-Path $stateDirectory 'installation-scope.json'
   }
   if (-not (Test-NoReparseAncestors $candidate)) { throw 'supervision_install_scope_path_invalid' }
   return [IO.Path]::GetFullPath($candidate)
@@ -278,6 +277,8 @@ function Get-OrCreateInstallationScopeId {
       return $id
     } catch [IO.IOException] {
       if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
+      throw 'supervision_install_scope_unavailable'
+    } catch {
       throw 'supervision_install_scope_unavailable'
     }
   } finally {
@@ -709,6 +710,8 @@ function Get-DiscoveryPayload {
     livenessAuthority = 'host_task_tools'
     taskTransport = 'host_required'
     hostEquivalenceKey = $script:HostEquivalenceKey
+    equivalenceScope = 'installation'
+    installationScopePersistence = 'separate_local_anchor'
     hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
     hostRecheckThroughCycle = $script:HostRecheckThroughCycle
     hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
@@ -815,6 +818,8 @@ try {
       registryCoverage = 'lifecycle_hooks'
       taskTransport = 'host_required'
       hostEquivalenceKey = $script:HostEquivalenceKey
+      equivalenceScope = 'installation'
+      installationScopePersistence = 'separate_local_anchor'
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
       hostRecheckThroughCycle = $script:HostRecheckThroughCycle
       hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'

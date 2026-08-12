@@ -65,7 +65,9 @@ The host uses this reconciliation order:
 6. Repeat the same host-global winner and postcondition check before discovery
    on Governor cycles zero and one. This catches concurrently created state that
    was not yet visible during setup. A loser stops its own recurrence and stands
-   down. Normal cycles after that do not rescan all automations unless claim
+   down. A losing task clears only its own local claim, and only through
+   two-phase release after its recurrence is proven absent. It never clears a
+   winner's claim. Normal cycles after that do not rescan all automations unless claim
    loss, rotation, or recovery requires it.
 7. Use the current task only when task creation is unavailable and the user
    explicitly requested setup.

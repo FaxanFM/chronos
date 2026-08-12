@@ -223,6 +223,8 @@ try {
   $installedSupervisionLine = @($installedSupervisionOutput | Where-Object { $_ -like 'CHRONOS SUPERVISION *' } | Select-Object -Last 1)
   $installedSupervisionData = $installedSupervisionLine[0].Substring('CHRONOS SUPERVISION '.Length) | ConvertFrom-Json
   if ($installedSupervisionData.hostEquivalenceKey -notmatch '^chronos-supervision-v1:[a-f0-9]{32}$' -or
+      $installedSupervisionData.equivalenceScope -ne 'installation' -or
+      $installedSupervisionData.installationScopePersistence -ne 'separate_local_anchor' -or
       $installedSupervisionData.hostReconcileAttemptLimit -ne 3 -or
       $installedSupervisionData.hostRecheckThroughCycle -ne 2 -or
       $installedSupervisionData.hostPostcondition -ne 'one_live_governor_one_active_recurrence_zero_duplicates') {
