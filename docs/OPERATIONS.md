@@ -34,7 +34,7 @@ Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
 The v0.8.1 release-candidate ZIP SHA-256 is
-`51fed8f4fc3bf13f3f5503f1751b3b72b654e61e9cffddc10b62d453caf8df15`.
+`a8760e8bb36a491d840be5eab2d8f730779d4169b42678fa279b024b45dd388b`.
 It packages the passive supervision hooks and registry. Treat this value as
 provisional until the signed release workflow publishes and verifies the
 immutable asset.
@@ -146,6 +146,11 @@ local state and never justify deleting a task or workspace file. Worker tasks
 need no setup and must not receive a recurring automation.
 
 The default registry is `%LOCALAPPDATA%\Chronos\Supervision\session-registry.json`.
+The sibling `installation-scope.json` contains only a schema number and random
+opaque installation ID. Keep it during ordinary registry recovery so the host
+can match the existing Governor. Removing the entire supervision directory is
+a full identity reset and requires explicit host reconciliation before another
+Governor is created.
 Loss of the registry disables the discovery hint but does not affect Codex
 tasks. Reconcile existing host automations before recreating a claim so registry
 loss cannot justify a duplicate task or recurrence. `engine=degraded` with

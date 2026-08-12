@@ -27,7 +27,8 @@ $script:GovernorActiveCadenceMinutes = 60
 $script:GovernorIdleCadenceMinutes = 360
 $script:GovernorMaximumCycles = 336
 $script:GovernorMaximumAgeDays = 14
-$script:GovernorEquivalenceKey = 'chronos-supervision-v1'
+$script:GovernorEquivalencePrefix = 'chronos-supervision-v1'
+$script:HostEquivalenceKey = $script:GovernorEquivalencePrefix
 $script:HostReconcileAttemptLimit = 3
 $script:HostRecheckThroughCycle = 2
 $script:Entropy = [Text.Encoding]::UTF8.GetBytes('Chronos.Supervision.Registry.v1')
@@ -220,6 +221,68 @@ function Resolve-StatePath {
   }
   if (-not (Test-NoReparseAncestors $candidate)) { throw 'supervision_state_path_invalid' }
   return [IO.Path]::GetFullPath($candidate)
+}
+
+function Resolve-InstallationScopePath {
+  param([string]$ResolvedStatePath)
+  $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+  if ([string]::IsNullOrWhiteSpace($localAppData)) { throw 'supervision_install_scope_path_invalid' }
+  $localRoot = [IO.Path]::GetFullPath((Join-Path $localAppData 'Chronos\Supervision'))
+  $stateDirectory = Split-Path -Parent $ResolvedStatePath
+  $candidate = if (Test-ContainedPath $ResolvedStatePath $localRoot) {
+    Join-Path $localRoot 'installation-scope.json'
+  } else {
+    $stem = [IO.Path]::GetFileNameWithoutExtension($ResolvedStatePath)
+    Join-Path $stateDirectory ($stem + '.installation-scope.json')
+  }
+  if (-not (Test-NoReparseAncestors $candidate)) { throw 'supervision_install_scope_path_invalid' }
+  return [IO.Path]::GetFullPath($candidate)
+}
+
+function Read-InstallationScopeId {
+  param([string]$Path)
+  try {
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 256) { throw 'invalid' }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $text = $utf8.GetString($bytes)
+    Assert-StrictJson $text 'supervision_install_scope_invalid'
+    $scope = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+    Assert-ExactKeys $scope @('schema', 'id')
+    if (-not (Test-IsInteger $scope.schema) -or [int]$scope.schema -ne 1 -or [string]$scope.id -notmatch '^[a-f0-9]{32}$') { throw 'invalid' }
+    return [string]$scope.id
+  } catch {
+    if ([string]$_.Exception.Message -eq 'supervision_install_scope_path_invalid') { throw }
+    throw 'supervision_install_scope_invalid'
+  }
+}
+
+function Get-OrCreateInstallationScopeId {
+  param([string]$ResolvedStatePath)
+  $path = Resolve-InstallationScopePath $ResolvedStatePath
+  if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
+  $directory = Split-Path -Parent $path
+  if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+  if (-not (Test-NoReparseAncestors $directory)) { throw 'supervision_install_scope_path_invalid' }
+  $random = New-Object byte[] 16
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($random) } finally { $rng.Dispose() }
+  $id = ([BitConverter]::ToString($random)).Replace('-', '').ToLowerInvariant()
+  $json = ([ordered]@{ schema = 1; id = $id } | ConvertTo-Json -Compress)
+  $temporary = Join-Path $directory ('.supervision-scope-' + [guid]::NewGuid().ToString('N') + '.tmp')
+  try {
+    [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
+    try {
+      [IO.File]::Move($temporary, $path)
+      return $id
+    } catch [IO.IOException] {
+      if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
+      throw 'supervision_install_scope_unavailable'
+    }
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Normalize-OpaqueId {
@@ -645,7 +708,7 @@ function Get-DiscoveryPayload {
     registryCoverage = 'lifecycle_hooks'
     livenessAuthority = 'host_task_tools'
     taskTransport = 'host_required'
-    hostEquivalenceKey = $script:GovernorEquivalenceKey
+    hostEquivalenceKey = $script:HostEquivalenceKey
     hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
     hostRecheckThroughCycle = $script:HostRecheckThroughCycle
     hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
@@ -713,6 +776,10 @@ try {
   } else { 1000 }
   try { $acquired = $mutex.WaitOne($mutexWaitMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true }
   if (-not $acquired) { throw 'supervision_mutex_busy' }
+  if ($Action -ne 'hook') {
+    $installationScopeId = Get-OrCreateInstallationScopeId $resolved
+    $script:HostEquivalenceKey = $script:GovernorEquivalencePrefix + ':' + $installationScopeId
+  }
   $state = Read-State $resolved -ValidateProtectedIds:($Action -ne 'hook')
   $now = [DateTimeOffset]::UtcNow
 
@@ -747,7 +814,7 @@ try {
       registryCapacity = if ([long]$state.health.droppedEntries -gt 0) { 'exhausted' } else { 'available' }
       registryCoverage = 'lifecycle_hooks'
       taskTransport = 'host_required'
-      hostEquivalenceKey = $script:GovernorEquivalenceKey
+      hostEquivalenceKey = $script:HostEquivalenceKey
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
       hostRecheckThroughCycle = $script:HostRecheckThroughCycle
       hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'

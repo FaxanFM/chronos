@@ -45,21 +45,21 @@ The host uses this reconciliation order:
 1. Inspect every host automation named exactly `Chronos Governor pulse`, its
    immutable ID, creation time when available, target task, equivalence key,
    and compact local supervision status.
-2. Accept only candidates whose task assignment carries
-   `chronos-supervision-v1` and verifies the dedicated role. Sort existing
+2. Read `hostEquivalenceKey` from status. Accept only candidates whose task
+   assignment carries that complete value and verifies the dedicated role. Sort existing
    automation candidates by creation time ascending, then immutable automation
    ID and target task ID using ordinal comparison. Missing creation times sort
    after present times. Every installer selects the first candidate. With no
    valid automation, apply the same order to role-verified claimed tasks.
 3. Otherwise create one fresh `Chronos Governor` task with no inherited chat
-   history and include `chronos-supervision-v1` in its compact assignment.
+   history and include the complete returned equivalence key in its compact assignment.
 4. Let that task claim the mutex-protected registry. This mutex fences one
    machine and state root only. Any concurrent local loser must stop and must
    not create a recurrence.
 5. Update or create the deterministic winning automation, pause or remove every
    non-winner, and re-list host state. Recompute the winner after each mutation
    for at most three attempts. Setup is complete only when exactly one active
-   recurrence carrying `chronos-supervision-v1` targets exactly one claimed,
+   recurrence carrying the complete equivalence key targets exactly one claimed,
    live Governor and zero active duplicates remain. After three failed attempts,
    stop retrying and request one user action.
 6. Repeat the same host-global winner and postcondition check before discovery
@@ -79,11 +79,20 @@ The same order is used after a partial setup, stale claim, process failure, or
 local registry loss. A host scan is authoritative for recurrence identity, so
 clearing local state cannot justify creating a duplicate. A title alone is not
 role verification. The equivalence key and deterministic host ordering are the
-cross-install ownership fence. If competing candidates lack stable host IDs,
-Chronos does not create another candidate automatically.
+same-installation ownership fence. If competing candidates lack stable host IDs,
+Chronos does not create another candidate automatically. Each installation gets
+a random 128-bit opaque ID stored separately from the session registry. Deleting
+only `session-registry.json` therefore preserves recovery identity. Different
+PCs have different keys and separate Governors because one Governor cannot read
+another PC's local registry.
 
 The two initial convergence rechecks are bounded host reads inside the existing
 Governor turns. They create no worker turn and no permanent per-cycle scan.
+
+The status key has format `chronos-supervision-v1:<32 lowercase hexadecimal
+characters>`. It contains no hostname, username, path, machine GUID, task ID, or
+workspace data. It is a persistent random pseudonymous installation identifier,
+not a secret or authentication credential.
 
 The host requests `gpt-5.6-luna` with Medium reasoning when that exact choice is
 available. Chronos cannot change a task's model itself and does not silently

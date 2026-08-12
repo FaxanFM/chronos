@@ -12,7 +12,7 @@ GitHub release candidate: v0.8.1 adds privacy-bounded passive task discovery and
 single-Governor bootstrap guidance. It has not been submitted, approved, or
 published in the OpenAI Plugin Directory. The release artifact is
 `chronos-v0.8.1.zip` with SHA-256
-`51fed8f4fc3bf13f3f5503f1751b3b72b654e61e9cffddc10b62d453caf8df15`.
+`a8760e8bb36a491d840be5eab2d8f730779d4169b42678fa279b024b45dd388b`.
 Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.1.
 
 Direct listing:
@@ -176,10 +176,11 @@ mention.
 - Prompt: `Enable Chronos supervision in one dedicated Governor task.`
 - Expected behavior: require normal hook trust review, reuse a host-verified
   Governor or create one fresh task without inherited history, reconcile every
-  matching host recurrence, and keep worker tasks free of recurrence and routine
-  messages.
+  recurrence matching the random installation-scoped key, and keep worker tasks
+  free of recurrence and routine messages.
 - Expected result: exactly one verified Governor and one host-owned recurrence
-  only after the user's request. Default cadence is at most one Governor turn
+  for that installation only after the user's request. Separate PCs keep
+  separate Governors. Default cadence is at most one Governor turn
   per active hour or per six idle hours, with rotation or pause after 336 cycles
   or 14 days. No automatic fork, operating-system scheduler, transcript read,
   or worker-side model loop.

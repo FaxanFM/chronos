@@ -85,9 +85,10 @@ fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
 need no Chronos prompt and can use any runtime model. Setup explicitly enables
 at most one Governor turn per hour while work is active and one every six hours
-while idle. A stable `chronos-supervision-v1` equivalence key, deterministic
+while idle. A stable random installation-scoped equivalence key, deterministic
 winner order, and three-attempt reconciliation budget keep concurrent setups on
-one Governor and one recurrence. Only its first two pulses repeat that global
+one PC on one Governor and one recurrence. Different PCs retain separate
+Governors. Only its first two pulses repeat that scoped
 check; normal cycles add no automation scan. The Governor rotates or pauses after 336 cycles
 or 14 days. See the
 public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
@@ -171,6 +172,8 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
 - Stores lifecycle identifiers protected with current-user Windows DPAPI and
   does not store transcript or workspace paths. DPAPI does not isolate data from
   another process already running as that user.
+- Stores one random, non-secret 128-bit installation ID with no machine-derived
+  data so host reconciliation remains scoped to this PC after registry recovery.
 - Heartbeat evaluation stores bounded per-scope transition, coverage, cadence,
   deduplication, hashed delivery/outbox, and health metadata. It does not persist raw snapshots,
   prompts, responses, commands, source, paths, credentials, or tool output.

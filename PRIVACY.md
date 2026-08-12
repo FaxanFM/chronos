@@ -75,6 +75,15 @@ arguments, tool output, credentials, or usernames. The local Governor can
 decrypt an identifier for host task routing, so that ID can enter the Governor
 task or host-tool context; Chronos does not transmit it to its publisher.
 
+Supervision also stores `installation-scope.json`, containing only schema
+version `1` and one random 128-bit lowercase hexadecimal ID. The ID scopes one
+Governor to one local installation and survives deletion of the session
+registry. It is a persistent pseudonymous identifier, not a secret. It contains
+no hostname, username, Windows SID, machine GUID, path, task ID, or workspace
+data. The complete scoped key can enter the Governor assignment and host
+automation metadata so simultaneous setup attempts on that installation agree.
+Different installations generate different IDs.
+
 Lifecycle hooks do not run for every turn, prompt, tool call, or approval. They
 return no model-visible output and make no network request. If a hook is
 disabled, untrusted, malformed, busy, or unable to write, it exits without

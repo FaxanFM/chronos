@@ -190,7 +190,7 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 ## v0.8.1 Candidate Evidence
 
 - Candidate ZIP SHA-256:
-  `51fed8f4fc3bf13f3f5503f1751b3b72b654e61e9cffddc10b62d453caf8df15`.
+  `a8760e8bb36a491d840be5eab2d8f730779d4169b42678fa279b024b45dd388b`.
   The deterministic package contains 13 files.
 - Local Windows PowerShell 5.1 validation passed the Inspector suite, Heartbeat
   suite, 42-scenario Governor suite, hardened supervision suite, and two-build
@@ -205,13 +205,14 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   blocker in the supplied evidence.
 - v0.8.1 is not validated or released at this point. The remaining gate is an
   external installed-package canary that verifies normal hook trust, exact
-  version and hash, host-global convergence to one Governor and one recurrence,
+  version and hash, same-installation convergence to one Governor and one recurrence,
+  independence of Governors on separate PCs,
   partial-failure recovery, two-phase release, Luna Medium selection without
   fallback, bounded cadence, silent normal cycles, and the rotation or pause
   boundary.
 - This entry is sanitized. It records no machine, user, workspace, repository,
   task, session, or account identifier.
-- Signed candidate source is public at commit `1540101ba1b2732bff5a6dfc36bfbdc653d8a652`.
+- Signed candidate source is public on the `main` branch pending the final canary tag.
   The local Codex marketplace refreshed to that source and installed manifest
   v0.8.1. All 13 installed package files matched the release inventory; the
   cache added only its local `.gitignore` marker. Installed supervision status

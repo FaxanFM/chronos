@@ -144,8 +144,19 @@ try {
   $emptyData = Get-Payload $empty
   Assert-True ($emptyData.activeTasks -eq 0 -and $emptyData.activeAgents -eq 0 -and -not $emptyData.governorClaimed) 'Empty status was not quiescent.'
   Assert-True ($emptyData.recommendedCadenceMinutes -eq 360 -and $emptyData.maximumModelCallsPerDay -eq 4 -and $emptyData.workerRecurrence -eq 'disabled') 'Idle cadence, cost bound, or worker recurrence regressed.'
-  Assert-True ($emptyData.hostEquivalenceKey -eq 'chronos-supervision-v1' -and $emptyData.hostReconcileAttemptLimit -eq 3 -and $emptyData.hostRecheckThroughCycle -eq 2) 'Host convergence identity, retry budget, or bounded recheck regressed.'
+  Assert-True ($emptyData.hostEquivalenceKey -match '^chronos-supervision-v1:[a-f0-9]{32}$' -and $emptyData.hostReconcileAttemptLimit -eq 3 -and $emptyData.hostRecheckThroughCycle -eq 2) 'Host convergence identity, retry budget, or bounded recheck regressed.'
   Assert-True ($emptyData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates' -and $emptyData.localMutexScope -eq 'machine_state_root') 'Host postcondition or local-lock scope regressed.'
+  $scopePath = Join-Path (Split-Path -Parent $state) (([IO.Path]::GetFileNameWithoutExtension($state)) + '.installation-scope.json')
+  Assert-True (Test-Path -LiteralPath $scopePath -PathType Leaf) 'Status did not create a stable installation-scope anchor.'
+  $scopeText = Get-Content -Raw -LiteralPath $scopePath
+  Assert-True ($scopeText -match '^\{"schema":1,"id":"[a-f0-9]{32}"\}$') 'Installation-scope anchor was not minimal and opaque.'
+  $repeatEmptyData = Get-Payload (Invoke-Supervision $state)
+  Assert-True ($repeatEmptyData.hostEquivalenceKey -eq $emptyData.hostEquivalenceKey) 'Installation equivalence changed across status calls.'
+  $otherStateDirectory = Join-Path $root 'other-installation'
+  New-Item -ItemType Directory -Path $otherStateDirectory -Force | Out-Null
+  $otherState = Join-Path $otherStateDirectory 'registry.json'
+  $otherEmptyData = Get-Payload (Invoke-Supervision $otherState)
+  Assert-True ($otherEmptyData.hostEquivalenceKey -ne $emptyData.hostEquivalenceKey) 'Independent installation roots shared a Governor equivalence key.'
 
   $task = 'thread-test-governor'
   $worker = '/root/read_probe'
@@ -201,7 +212,7 @@ try {
   Assert-True ($discoveryData.activeTasks -eq 0 -and $discoveryData.activeAgents -eq 1) 'Discovery did not exclude Governor or include active agent.'
   Assert-True ($discoveryData.agents[0].taskId -eq $worker -and $discoveryData.agents[0].model -eq 'gpt-5.6-luna') 'Discovery did not recover the runtime agent identity.'
   Assert-True ($discoveryData.recommendedCadenceMinutes -eq 60 -and $discoveryData.maximumModelCallsPerDay -eq 24 -and $discoveryData.modelCalls -eq 'governor_only') 'Active cadence or model-call ownership regressed.'
-  Assert-True ($discoveryData.hostEquivalenceKey -eq 'chronos-supervision-v1' -and $discoveryData.hostReconcileAttemptLimit -eq 3 -and $discoveryData.hostRecheckThroughCycle -eq 2 -and $discoveryData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Discovery omitted deterministic host convergence controls.'
+  Assert-True ($discoveryData.hostEquivalenceKey -eq $emptyData.hostEquivalenceKey -and $discoveryData.hostReconcileAttemptLimit -eq 3 -and $discoveryData.hostRecheckThroughCycle -eq 2 -and $discoveryData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Discovery omitted deterministic host convergence controls.'
   Assert-True (@($discoveryData.checkBatch).Count -eq 1 -and $discoveryData.checkBatch[0].taskId -eq $worker) 'Governor check batch did not contain the active worker.'
 
   $cursor = [long]$discoveryData.revision
@@ -336,6 +347,14 @@ try {
   $corruptResult = Invoke-Supervision $corrupt
   Assert-True ($corruptResult.ExitCode -eq 1 -and (Get-Payload $corruptResult).error -eq 'supervision_state_invalid') 'Corrupt state did not fail safely.'
   Assert-True ([IO.File]::ReadAllText($corrupt) -eq '{bad') 'Corrupt state was overwritten.'
+  $badScopeDirectory = Join-Path $root 'bad-installation-scope'
+  New-Item -ItemType Directory -Path $badScopeDirectory -Force | Out-Null
+  $badScopeState = Join-Path $badScopeDirectory 'registry.json'
+  $badScopePath = Join-Path $badScopeDirectory 'registry.installation-scope.json'
+  [IO.File]::WriteAllText($badScopePath, '{"schema":1,"id":"not-an-opaque-id"}', [Text.UTF8Encoding]::new($false))
+  $badScopeResult = Invoke-Supervision $badScopeState
+  Assert-True ($badScopeResult.ExitCode -eq 1 -and (Get-Payload $badScopeResult).error -eq 'supervision_install_scope_invalid') 'Malformed installation scope produced healthy status.'
+  Assert-True ([IO.File]::ReadAllText($badScopePath) -eq '{"schema":1,"id":"not-an-opaque-id"}') 'Malformed installation scope was overwritten.'
   $duplicateState = Join-Path $root 'duplicate-state.json'
   $duplicateStateText = '{"schema":2,"schema":2,"revision":0,"governor":null,"sessions":{},"health":{"hookRuns":0,"droppedEntries":0,"ignoredStaleEvents":0,"scanOffset":0,"lastHookUtc":null}}'
   [IO.File]::WriteAllText($duplicateState, $duplicateStateText, [Text.UTF8Encoding]::new($false))

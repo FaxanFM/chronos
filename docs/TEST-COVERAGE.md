@@ -75,7 +75,8 @@ remains partial or unsupported.
 strict UTF-8 and BOM-framed hook input,
 Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
-cadence, host equivalence key, reconciliation retry budget and postcondition,
+cadence, stable and isolated opaque installation equivalence keys, malformed
+scope rejection, reconciliation retry budget and postcondition,
 cycle and age limits, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state

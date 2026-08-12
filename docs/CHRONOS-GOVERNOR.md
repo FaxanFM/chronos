@@ -33,8 +33,11 @@ The host requests Luna Medium for the dedicated Governor when available.
 Monitored tasks can use any runtime model and run no Chronos recurrence. Four
 reviewed lifecycle hooks record only task and subagent start or end hints; host
 task tools remain the liveness authority. Bootstrap reconciles matching host
-automations before creating anything, and a mutex-protected claim makes
-concurrent losers stand down. The default cadence is one Governor turn per
+automations for the random installation-scoped equivalence key before creating
+anything. Stable host ordering, a three-attempt budget, an exact postcondition,
+and two initial convergence rechecks make competing setup tasks agree; a
+mutex-protected claim makes same-machine losers stand down. Separate PCs keep
+separate Governors because their local registries and random keys differ. The default cadence is one Governor turn per
 active hour or per six idle hours, with a 336-cycle or 14-day rotation bound.
 See [Supervision](SUPERVISION.md).
 

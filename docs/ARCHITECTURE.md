@@ -148,13 +148,22 @@ and timestamps. It does not read the transcript path supplied by the host and
 does not persist raw workspace paths. Atomic replacement, a named mutex,
 reparse containment, size limits, and retention limits protect the write path.
 
+A separate minimal `installation-scope.json` anchor stores a random 128-bit
+opaque ID. It contains no machine-derived value and is not a credential. The
+host uses the resulting scoped equivalence key to reconcile one Governor per
+installation. This is necessary because a Governor on one PC cannot consume
+another PC's local registry. The anchor survives session-registry recovery.
+
 `chronos.ps1 -Action supervise` exposes status, single-Governor claim,
 discovery, host-confirmed reactivation, and two-phase release. Registry liveness
 is advisory; host task status is authoritative. Terminal lifecycle state has
 precedence over delayed asynchronous starts. Bootstrap reconciles matching host
 automations first, reuses a role-verified Governor, otherwise creates one fresh
 task without inherited history, and uses a mutex-protected claim as the
-ownership fence. It does not automatically fork a working task. The host owns
+same-machine ownership fence. A scoped host equivalence key, stable host-ID
+ordering, a three-attempt budget, an exact postcondition, and two initial
+convergence rechecks handle competing setup tasks. It does not automatically
+fork a working task. The host owns
 task creation, Luna Medium selection, one optional recurrence, compact rotating
 task batches, and delivery. Worker tasks run no Chronos model cycle. The
 recurrence is bounded to 336 cycles or 14 days. See

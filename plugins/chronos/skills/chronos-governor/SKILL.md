@@ -19,16 +19,18 @@ unbounded model use. Tell the user before creation that the default cadence is
 at most one Governor turn per hour while work is active and one every six hours
 while idle. Worker tasks receive no recurring turns.
 
-Use `chronos-supervision-v1` as the host equivalence key for the dedicated task,
-its compact assignment, and the matching automation. The exact name alone is
-not an equivalence key.
+Read `hostEquivalenceKey` from supervision status. It is
+`chronos-supervision-v1:<opaque-installation-id>` and scopes the dedicated task,
+its compact assignment, and the matching automation to one local Chronos
+installation. Use the complete returned value; the prefix or exact automation
+name alone is not an equivalence key. Never copy a key from another machine.
 
 1. Reconcile host state before trusting local state. Inspect every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
    ID, creation time when available, target task, and equivalence key. Also run
    `chronos.ps1 -Action supervise -SupervisionAction status`.
 2. Build one host candidate set. Keep only live targets whose compact assignment
-   contains `chronos-supervision-v1` and confirms the dedicated role. Sort valid
+   contains the complete current `hostEquivalenceKey` and confirms the dedicated role. Sort valid
    automation candidates by creation time ascending, then immutable automation
    ID and target task ID using ordinal comparison; a missing creation time sorts
    after a present time. Every installer must select the first candidate. If no
@@ -53,7 +55,7 @@ not an equivalence key.
    host state. Recompute the same winner after every mutation. Use at most three
    reconciliation attempts in one setup turn. Success requires this exact
    postcondition: one live dedicated Governor, one active automation carrying
-   `chronos-supervision-v1`, and zero active duplicates. On the third failure,
+   the complete current equivalence key, and zero active duplicates. On the third failure,
    stop all further setup retries and issue one compact user action; never rely
    on a create or allow result alone as proof.
 6. Before `discover` on Governor cycles zero and one, repeat the host candidate
@@ -76,13 +78,15 @@ This order is also the recovery protocol. It converges after a crash between
 task creation, claim, or automation creation; after a stale local claim; and
 after local registry loss. Unclaimed extra tasks do not get a recurrence.
 Duplicate recurrences are paused or removed before setup is reported complete.
-The host equivalence key and stable ordering are the cross-install ownership
-fence; the local mutex is not.
+The scoped host equivalence key and stable ordering are the same-installation
+ownership fence; the local mutex is not. Different machines have different
+opaque keys and therefore retain separate Governors for their separate local
+registries.
 
 The dedicated task should receive this compact, self-contained assignment:
 
 ```text
-Chronos equivalence key: chronos-supervision-v1. Act as the single Chronos
+Chronos equivalence key: <complete hostEquivalenceKey from status>. Act as the single Chronos
 Governor. Claim local Chronos supervision. Reconcile
 the passive lifecycle registry with host task status, monitor active tasks from
 this one inbox, and emit or forward only actionable transitions. Use compact

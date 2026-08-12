@@ -144,9 +144,10 @@ Review and trust the packaged lifecycle hook once through Codex `/hooks`.
 Worker tasks need no script or prompt and can use Luna, Terra, Sol, or another
 runtime model. Setup explicitly enables at most one Governor turn per hour
 while work is active and one every six hours while idle. The Governor rotates
-or pauses after 336 cycles or 14 days. A stable `chronos-supervision-v1`
+or pauses after 336 cycles or 14 days. A stable random installation-scoped
 equivalence key, deterministic winner order, and three-attempt reconciliation
-budget keep simultaneous installers converged on one task and one recurrence.
+budget keep simultaneous setup attempts on that PC converged on one task and one recurrence.
+Different PCs retain separate Governors for their separate local registries.
 Only the first two Governor pulses repeat that check; normal cycles do not.
 Only that task owns host recurrence. It discovers
 task and subagent starts or stops from a small encrypted local registry, then
@@ -236,6 +237,8 @@ focused v0.7.7 correctness repairs and validation boundary.
   raw transcripts and workspace paths are never stored. DPAPI does not isolate
   data from another process already running as that user. Host task tools remain
   the liveness authority.
+- Stores one random, non-secret 128-bit installation ID with no machine-derived
+  data so host reconciliation remains scoped to this PC after registry recovery.
 - An invoked Heartbeat cycle stores bounded per-scope transition, coverage,
   cadence, deduplication, hashed delivery/outbox, and health metadata in the user's local Chronos
   application-data directory. It does not persist raw snapshots, prompts,
