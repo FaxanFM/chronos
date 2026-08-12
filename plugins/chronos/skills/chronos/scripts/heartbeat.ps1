@@ -5,6 +5,23 @@ param(
   [string]$StatePath,
   [string]$Scope,
   [string]$EventId,
+  [string]$CorroboratingEventId,
+  [string]$InterventionId,
+  [int]$InterventionVersion = 0,
+  [string]$TargetId,
+  [string]$TargetGeneration,
+  [string]$GovernorId,
+  [string]$ClaimToken,
+  [ValidateSet('', 'accepted', 'definite_failure', 'unknown')]
+  [string]$TransportResult = '',
+  [ValidateSet('', 'acknowledged', 'outcome_reported', 'declined', 'user_authority_required', 'remediation_failed')]
+  [string]$TaskResponse = '',
+  [ValidateSet('', 'heartbeat_engine', 'host_inventory', 'host_test', 'host_git')]
+  [string]$VerificationSource = '',
+  [ValidateSet('', 'resolved', 'active', 'failed')]
+  [string]$VerificationResult = '',
+  [ValidateSet('', 'ambiguous_target', 'target_not_live', 'transport_unavailable', 'user_authority_required', 'unsupported_action')]
+  [string]$FailureReason = '',
   [ValidateRange(5, 1440)]
   [int]$StallMinutes = 20
 )
@@ -30,6 +47,8 @@ $script:EventLimit = 50
 $script:RunIdLimit = 32
 $script:OutboxLimit = 64
 $script:OutboxRetrySeconds = 900
+$script:OutboxMaxAttempts = 2
+$script:InterventionLimit = 64
 $script:InputByteLimit = 262144
 $script:InspectorByteLimit = 65536
 $script:StateByteLimit = 262144
@@ -832,13 +851,14 @@ function New-DefaultState {
     $previous[$family] = @{}
   }
   return [ordered]@{
-    schema = 4
+    schema = 5
     revision = 0
     scopeHash = $ScopeHash
     previous = $previous
     conditions = @{}
     events = @()
     outbox = @()
+    interventions = @()
     collectors = $collectors
     health = [ordered]@{
       runs = 0
@@ -872,13 +892,16 @@ function Assert-StateRecord {
   if (-not ($Record -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   $eventTypes = @('AGENT_STALL', 'GUARDIAN_RUNAWAY', 'USAGE_BURN', 'SESSION_EXPLOSION', 'TEST_REGRESSION', 'TEST_ENVIRONMENT_DRIFT', 'TEST_VALIDATION_MISSING', 'MACHINE_DRIFT', 'TASK_ACTIONABLE', 'ZOMBIE_TASK', 'TASK_HANDOFF_INCOMPLETE', 'GIT_BUILD_STATE', 'GIT_STATE_RISK', 'BUILD_ARTIFACT_DRIFT', 'HEARTBEAT_SELF_HEALTH')
   $statusValues = @('active', 'waiting', 'blocked', 'completed', 'failed', 'unknown', 'passed', 'skipped', 'not_run', 'unavailable', 'installed', 'pending', 'stale', 'todo', 'cancelled')
+  $interventionStates = @('queued', 'send_claimed', 'retry_queued', 'delivery_unknown', 'awaiting_task_ack', 'remediating', 'verification_pending', 'active_violation', 'verified_resolved', 'declined', 'user_authority_required', 'remediation_failed', 'undelivered', 'failed_closed', 'superseded')
+  $interventionTemplates = @('contain_agent_work', 'stop_review_amplification', 'contain_usage_growth', 'stop_recursive_workers_and_checkpoint', 'rerun_known_narrow_test_once', 'run_known_required_validation_once', 'resume_one_bounded_step', 'reconcile_owned_child', 'complete_existing_handoff', 'preserve_and_verify_handoff', 'stop_new_writes_and_verify_ownership', 'preserve_and_verify_artifact', 'governor_local_only')
+  $postconditions = @('agent_progress_or_terminal', 'review_activity_stable', 'usage_progress_stable', 'session_growth_stable', 'known_test_passed', 'required_validation_observed', 'task_progress_observed', 'ownership_reconciled', 'handoff_verified', 'git_state_stable', 'artifact_identity_stable', 'none')
   foreach ($key in $Record.Keys) {
     if ($Allowed -notcontains [string]$key -or -not (Test-PersistedScalar $Record[$key])) { throw 'heartbeat_state_invalid' }
     if ($null -eq $Record[$key] -or -not ($Record[$key] -is [string])) { continue }
     $text = [string]$Record[$key]
-    if ([string]$key -match 'Hash$' -or [string]$key -eq 'eventId') {
+    if ([string]$key -match 'Hash$' -or [string]$key -in @('eventId', 'interventionId')) {
       if ($text -notmatch '^[a-f0-9]{16,64}$') { throw 'heartbeat_state_invalid' }
-    } elseif ([string]$key -in @('lastAttempt', 'lastRun', 'lastSuccess', 'backoffUntilUtc', 'firstObserved', 'lastObserved', 'lastNotified', 'resolvedAt', 'detected', 'lastCycleUtc', 'lastSuccessUtc')) {
+    } elseif ([string]$key -in @('lastAttempt', 'lastRun', 'lastSuccess', 'backoffUntilUtc', 'firstObserved', 'lastObserved', 'lastNotified', 'resolvedAt', 'detected', 'lastCycleUtc', 'lastSuccessUtc', 'createdAt', 'updatedAt')) {
       [void](ConvertTo-UtcTimestamp $text 'heartbeat_state_invalid')
     } elseif ([string]$key -eq 'family') {
       if ($script:Families -notcontains $text) { throw 'heartbeat_state_invalid' }
@@ -892,6 +915,22 @@ function Assert-StateRecord {
       if ($text -notin @('governor', 'installer', 'development', 'owned')) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -eq 'coverage') {
       if ($text -notin @('observed', 'partial', 'unsupported')) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'state') {
+      if ($interventionStates -notcontains $text) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'template') {
+      if ($interventionTemplates -notcontains $text) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'postcondition') {
+      if ($postconditions -notcontains $text) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'failureReason') {
+      if ($text -notin @('none', 'ambiguous_target', 'target_not_live', 'target_policy_mismatch', 'transport_unavailable', 'user_authority_required', 'unsupported_action', 'self_target_forbidden', 'governor_usage_uncorroborated', 'retry_budget_exhausted')) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'transportResult') {
+      if ($text -notin @('none', 'accepted', 'definite_failure', 'unknown')) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'taskResponse') {
+      if ($text -notin @('none', 'acknowledged', 'outcome_reported', 'declined', 'user_authority_required', 'remediation_failed')) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'verificationSource') {
+      if ($text -notin @('none', 'heartbeat_engine', 'host_inventory', 'host_test', 'host_git')) { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'verificationResult') {
+      if ($text -notin @('none', 'resolved', 'active', 'failed')) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -in @('status', 'testStatus', 'installStatus', 'dependencyStatus', 'taskStatus', 'validationStatus', 'buildStatus')) {
       if ($statusValues -notcontains $text) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -eq 'lastError') {
@@ -905,11 +944,11 @@ function Assert-StateRecord {
 function Assert-State {
   param($State, [string]$ExpectedScopeHash)
   if (-not ($State -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
-  $top = @('schema', 'revision', 'scopeHash', 'previous', 'conditions', 'events', 'outbox', 'collectors', 'health', 'runIds')
+  $top = @('schema', 'revision', 'scopeHash', 'previous', 'conditions', 'events', 'outbox', 'interventions', 'collectors', 'health', 'runIds')
   foreach ($key in $State.Keys) { if ($top -notcontains [string]$key) { throw 'heartbeat_state_invalid' } }
-  if ([int]$State.schema -ne 4 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
+  if ([int]$State.schema -ne 5 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
   if (-not ($State.previous -is [System.Collections.IDictionary]) -or -not ($State.conditions -is [System.Collections.IDictionary]) -or -not ($State.collectors -is [System.Collections.IDictionary]) -or -not ($State.health -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
-  if ($State.conditions.Count -gt $script:ConditionLimit -or @($State.events).Count -gt $script:EventLimit -or @($State.outbox).Count -gt $script:OutboxLimit -or @($State.runIds).Count -gt $script:RunIdLimit) { throw 'heartbeat_state_invalid' }
+  if ($State.conditions.Count -gt $script:ConditionLimit -or @($State.events).Count -gt $script:EventLimit -or @($State.outbox).Count -gt $script:OutboxLimit -or @($State.interventions).Count -gt $script:InterventionLimit -or @($State.runIds).Count -gt $script:RunIdLimit) { throw 'heartbeat_state_invalid' }
   $snapshotFields = @('active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds')
   foreach ($family in $script:Families) {
     if (-not $State.previous.Contains($family) -or -not ($State.previous[$family] -is [System.Collections.IDictionary]) -or $State.previous[$family].Count -gt 128) { throw 'heartbeat_state_invalid' }
@@ -929,12 +968,33 @@ function Assert-State {
     Assert-StateRecord $event @('type', 'severity', 'routeClass', 'detected', 'dedupHash')
   }
   foreach ($item in @($State.outbox)) {
-    Assert-StateRecord $item @('eventId', 'event', 'type', 'severity', 'subjectHash', 'conditionHash', 'routeHash', 'routeClass', 'detected', 'attempts', 'lastAttempt')
+    Assert-StateRecord $item @('eventId', 'event', 'type', 'severity', 'subjectHash', 'ownerHash', 'conditionHash', 'routeHash', 'routeClass', 'detected', 'attempts', 'lastAttempt', 'governorOrigin')
     if ([string]$item.eventId -notmatch '^[a-f0-9]{64}$' -or [string]$item.conditionHash -notmatch '^[a-f0-9]{64}$' -or [string]$item.routeHash -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' }
     if ([string]$item.event -notin @('HEARTBEAT_EVENT', 'HEARTBEAT_RESOLVED')) { throw 'heartbeat_state_invalid' }
   }
+  foreach ($item in @($State.interventions)) {
+    Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'state', 'attempts', 'claimHash', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
+    if ([int]$item.version -lt 1 -or [int]$item.attempts -lt 0 -or [int]$item.attempts -gt 2 -or [int]$item.coalescedCount -lt 0) { throw 'heartbeat_state_invalid' }
+  }
   Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts')
   foreach ($runId in @($State.runIds)) { if ([string]$runId -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' } }
+}
+
+function Upgrade-State {
+  param($State)
+  if ([int](Get-Value $State 'schema' 0) -eq 4) {
+    if (-not (Has-Value $State 'interventions')) { $State['interventions'] = @() }
+    foreach ($item in @($State.outbox)) {
+      if (-not (Has-Value $item 'ownerHash')) { $item['ownerHash'] = Get-StableHash '' }
+      if (-not (Has-Value $item 'governorOrigin')) {
+        # Legacy usage delivery cannot prove a non-Governor owner. Require
+        # corroboration instead of permitting a worker wake after upgrade.
+        $item['governorOrigin'] = ([string]$item.type -eq 'USAGE_BURN')
+      }
+    }
+    $State.schema = 5
+  }
+  return $State
 }
 
 function Read-State {
@@ -944,7 +1004,7 @@ function Read-State {
     $item = Get-Item -LiteralPath $Path -Force
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt $script:StateByteLimit) { throw 'invalid' }
     $text = Read-StrictUtf8JsonFile $Path $script:StateByteLimit 'heartbeat_state_invalid'
-    $state = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+    $state = Upgrade-State (ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop))
     Assert-State $state $ScopeHash
     return $state
   } catch { throw 'heartbeat_state_invalid' }
@@ -1437,9 +1497,78 @@ function Get-RouteClass {
   return 'owned'
 }
 
+function Get-InterventionContract {
+  param([string]$Type)
+  $contract = switch ($Type) {
+    'AGENT_STALL' {
+      @('agent_stall', 'contain_agent_work', 'verified_subject_or_owner', 'agent_progress_or_terminal', $true, $true,
+        'Stop creating workers. Finish or checkpoint one bounded step, return completed workers, and report the categorical result.')
+    }
+    'GUARDIAN_RUNAWAY' {
+      @('review_amplification', 'stop_review_amplification', 'verified_subject_or_owner', 'review_activity_stable', $true, $true,
+        'Stop equivalent review and approval retries. Batch remaining inspection, checkpoint, and report the categorical result.')
+    }
+    'USAGE_BURN' {
+      @('usage_growth', 'contain_usage_growth', 'verified_non_governor_subject', 'usage_progress_stable', $true, $true,
+        'Stop creating workers, reduce task-controlled parallel work, checkpoint, and report the categorical result.')
+    }
+    'SESSION_EXPLOSION' {
+      @('context_growth', 'stop_recursive_workers_and_checkpoint', 'verified_subject', 'session_growth_stable', $true, $true,
+        'Stop recursive worker creation. Checkpoint the current work and prepare a fresh-task handoff without copying working history.')
+    }
+    'TEST_REGRESSION' {
+      @('test_regression', 'rerun_known_narrow_test_once', 'verified_owner', 'known_test_passed', $true, $false,
+        'Rerun the already identified narrow test once. Do not broaden the test scope. Report only the categorical result.')
+    }
+    'TEST_VALIDATION_MISSING' {
+      @('test_validation', 'run_known_required_validation_once', 'verified_owner', 'required_validation_observed', $true, $false,
+        'Run the already identified required validation once. Do not broaden the scope. Report only the categorical result.')
+    }
+    'TASK_ACTIONABLE' {
+      @('task_progress', 'resume_one_bounded_step', 'verified_subject', 'task_progress_observed', $true, $false,
+        'Resume one existing bounded step within the current assignment, checkpoint, and report the categorical result.')
+    }
+    'ZOMBIE_TASK' {
+      @('task_ownership', 'reconcile_owned_child', 'verified_owner', 'ownership_reconciled', $true, $false,
+        'Reconcile only the child task you already own. Return completed work or report the dependency state. Do not close unrelated tasks.')
+    }
+    'TASK_HANDOFF_INCOMPLETE' {
+      @('task_handoff', 'complete_existing_handoff', 'verified_owner', 'handoff_verified', $true, $false,
+        'Complete only the already authorized handoff step, verify it, and report the categorical result.')
+    }
+    'GIT_BUILD_STATE' {
+      @('git_handoff', 'preserve_and_verify_handoff', 'verified_owner', 'git_state_stable', $true, $false,
+        'Preserve current work and verify the existing bounded handoff scope. Do not reset, clean, merge, push, publish, or delete.')
+    }
+    'GIT_STATE_RISK' {
+      @('git_risk', 'stop_new_writes_and_verify_ownership', 'verified_owner', 'git_state_stable', $true, $true,
+        'Stop new writes. Preserve current work and verify ownership, branch, and intended commit. Do not reset, clean, merge, push, or delete.')
+    }
+    'BUILD_ARTIFACT_DRIFT' {
+      @('artifact_drift', 'preserve_and_verify_artifact', 'verified_owner', 'artifact_identity_stable', $true, $false,
+        'Preserve the current artifact and verify its source identity. Do not publish, replace, or delete artifacts.')
+    }
+    default {
+      @('governor_local', 'governor_local_only', 'none', 'none', $false, $false,
+        'Keep this condition in Governor-local state. Do not message a monitored task.')
+    }
+  }
+  return [pscustomobject]@{
+    Class = [string]$contract[0]
+    Template = [string]$contract[1]
+    TargetPolicy = [string]$contract[2]
+    Postcondition = [string]$contract[3]
+    Autonomous = [bool]$contract[4]
+    ResolutionNoticeRequired = [bool]$contract[5]
+    Instruction = [string]$contract[6]
+    SelfTargetAllowed = $false
+  }
+}
+
 function Convert-CandidateToEvent {
   param($Candidate, [string]$EventId)
   $route = Get-RouteTarget $Candidate
+  $intervention = Get-InterventionContract ([string]$Candidate.Type)
   return [ordered]@{
     Event = 'HEARTBEAT_EVENT'
     EventId = $EventId
@@ -1455,6 +1584,18 @@ function Convert-CandidateToEvent {
     LikelyCause = $Candidate.LikelyCause
     RecommendedAction = $Candidate.RecommendedAction
     DedupKey = $Candidate.DedupKey
+    InterventionClass = $intervention.Class
+    InterventionTemplate = $intervention.Template
+    TargetPolicy = $intervention.TargetPolicy
+    Postcondition = $intervention.Postcondition
+    Autonomous = $intervention.Autonomous
+    SelfTargetAllowed = $false
+    InterventionInstruction = $intervention.Instruction
+    CostImpact = if ([string]$Candidate.Type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
+    QuotaImpact = if ([string]$Candidate.Type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
+    GovernorOrigin = ([string]$Candidate.Owner -eq 'governor')
+    CorroborationRequired = ([string]$Candidate.Type -eq 'USAGE_BURN' -and [string]$Candidate.Owner -eq 'governor')
+    CorroborationScope = if ([string]$Candidate.Type -eq 'USAGE_BURN' -and [string]$Candidate.Owner -eq 'governor') { 'same_subject_and_window' } else { 'none' }
   }
 }
 
@@ -1462,6 +1603,7 @@ function New-ResolutionEvent {
   param($Condition, [string]$ConditionHash, $RouteHint, [DateTimeOffset]$Now, [string]$EventId)
   $owner = if ($RouteHint) { $RouteHint.Owner } else { $null }
   $subject = if ($RouteHint) { [string]$RouteHint.Subject } else { [string]$Condition.subjectHash }
+  $intervention = Get-InterventionContract ([string]$Condition.type)
   return [ordered]@{
     Event = 'HEARTBEAT_RESOLVED'
     EventId = $EventId
@@ -1477,6 +1619,15 @@ function New-ResolutionEvent {
     LikelyCause = 'The prior condition is no longer present in an observed, due collector result.'
     RecommendedAction = 'No action is required unless the condition returns.'
     DedupKey = 'resolved:' + $ConditionHash.Substring(0, 16)
+    InterventionClass = $intervention.Class
+    InterventionTemplate = 'release_if_active_restriction'
+    TargetPolicy = $intervention.TargetPolicy
+    Postcondition = $intervention.Postcondition
+    Autonomous = $false
+    SelfTargetAllowed = $false
+    InterventionInstruction = 'Close the Governor-local condition. Notify the target only when an acknowledged temporary restriction must be lifted.'
+    CostImpact = 'not_applicable'
+    QuotaImpact = 'not_applicable'
   }
 }
 
@@ -1488,17 +1639,20 @@ function New-OutboxRecord {
     type = [string]$Event.Type
     severity = [string]$Event.Severity
     subjectHash = Get-StableHash ([string]$Event.Subject)
+    ownerHash = Get-StableHash ([string]$Event.Owner)
     conditionHash = $ConditionHash
     routeHash = Get-StableHash ([string]$Event.OwningSolThread)
     routeClass = Get-RouteClass ([string]$Event.OwningSolThread)
     detected = [string]$Event.Detected
     attempts = 0
     lastAttempt = $null
+    governorOrigin = [bool]$Event.GovernorOrigin
   }
 }
 
 function Convert-OutboxToRetryEvent {
   param($Record)
+  $intervention = Get-InterventionContract ([string]$Record.type)
   return [ordered]@{
     Event = [string]$Record.event
     EventId = [string]$Record.eventId
@@ -1514,6 +1668,18 @@ function Convert-OutboxToRetryEvent {
     LikelyCause = 'A prior Heartbeat transition remains unacknowledged by the invoking host.'
     RecommendedAction = 'Deduplicate by EventId, deliver once, then acknowledge the event.'
     DedupKey = 'event:' + [string]$Record.eventId
+    InterventionClass = $intervention.Class
+    InterventionTemplate = $intervention.Template
+    TargetPolicy = $intervention.TargetPolicy
+    Postcondition = $intervention.Postcondition
+    Autonomous = $intervention.Autonomous
+    SelfTargetAllowed = $false
+    InterventionInstruction = $intervention.Instruction
+    CostImpact = if ([string]$Record.type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
+    QuotaImpact = if ([string]$Record.type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
+    GovernorOrigin = [bool]$Record.governorOrigin
+    CorroborationRequired = ([string]$Record.type -eq 'USAGE_BURN' -and [bool]$Record.governorOrigin)
+    CorroborationScope = if ([string]$Record.type -eq 'USAGE_BURN' -and [bool]$Record.governorOrigin) { 'same_subject_and_window' } else { 'none' }
   }
 }
 
@@ -1526,7 +1692,7 @@ function Get-DueOutboxEvents {
       $lastAttempt = ConvertTo-UtcTimestamp ([string]$record.lastAttempt) 'heartbeat_state_invalid'
       $due = ($Now - $lastAttempt).TotalSeconds -ge $script:OutboxRetrySeconds
     }
-    if ($due) { $result.Add((Convert-OutboxToRetryEvent $record)) | Out-Null }
+    if ($due -and [int]$record.attempts -lt $script:OutboxMaxAttempts) { $result.Add((Convert-OutboxToRetryEvent $record)) | Out-Null }
   }
   return @($result)
 }
@@ -1558,6 +1724,334 @@ function Acknowledge-OutboxEvent {
   return $acknowledged
 }
 
+function Get-InterventionRecord {
+  param($State, [string]$RequestedInterventionId)
+  return @($State.interventions | Where-Object { [string]$_.interventionId -eq $RequestedInterventionId } | Select-Object -First 1)[0]
+}
+
+function Get-PendingEventRecord {
+  param($State, [string]$RequestedEventId)
+  if ($RequestedEventId -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_event_id_invalid' }
+  return @($State.outbox | Where-Object { [string]$_.eventId -eq $RequestedEventId } | Select-Object -First 1)[0]
+}
+
+function Test-InterventionTerminal {
+  param([string]$StateName)
+  return $StateName -in @('verified_resolved', 'declined', 'user_authority_required', 'remediation_failed', 'undelivered', 'failed_closed', 'superseded')
+}
+
+function Assert-InterventionRuntimeId {
+  param([string]$Value)
+  try { Assert-Identifier $Value } catch { throw 'heartbeat_intervention_input_invalid' }
+}
+
+function Remove-PendingEvent {
+  param($State, [string]$RequestedEventId)
+  $State.outbox = @($State.outbox | Where-Object { [string]$_.eventId -ne $RequestedEventId })
+}
+
+function New-InterventionRecord {
+  param($EventRecord, [string]$TargetHash, [string]$GenerationHash, [int]$Version, [string]$StateName, [string]$Reason, [DateTimeOffset]$Now, [bool]$EscalationSent)
+  $contract = Get-InterventionContract ([string]$EventRecord.type)
+  $id = Get-StableHash ('chronos-intervention-v1|{0}|{1}|{2}|{3}' -f [string]$EventRecord.eventId, $Version, $TargetHash, $GenerationHash)
+  return [ordered]@{
+    interventionId = $id
+    eventId = [string]$EventRecord.eventId
+    conditionHash = [string]$EventRecord.conditionHash
+    type = [string]$EventRecord.type
+    severity = [string]$EventRecord.severity
+    version = $Version
+    targetHash = $TargetHash
+    targetGenerationHash = $GenerationHash
+    state = $StateName
+    attempts = 0
+    claimHash = $null
+    createdAt = $Now.ToString('o')
+    updatedAt = $Now.ToString('o')
+    template = $contract.Template
+    postcondition = $contract.Postcondition
+    resolutionNoticeRequired = [bool]$contract.ResolutionNoticeRequired
+    escalationSent = $EscalationSent
+    coalescedCount = 0
+    failureReason = $Reason
+    transportResult = 'none'
+    taskResponse = 'none'
+    verificationSource = 'none'
+    verificationResult = 'none'
+  }
+}
+
+function Get-InterventionPayload {
+  param($Record, [string]$ActionName, [string]$Decision, [string]$ClaimTokenValue = $null)
+  $contract = Get-InterventionContract ([string]$Record.type)
+  $payload = [ordered]@{
+    ok = $true
+    action = $ActionName
+    decision = $Decision
+    interventionId = [string]$Record.interventionId
+    eventId = [string]$Record.eventId
+    version = [int]$Record.version
+    state = [string]$Record.state
+    type = [string]$Record.type
+    severity = [string]$Record.severity
+    template = [string]$Record.template
+    postcondition = [string]$Record.postcondition
+    targetHash = ([string]$Record.targetHash).Substring(0, 16)
+    instruction = $contract.Instruction
+    selfTargetAllowed = $false
+    maxSendAttempts = 2
+    requiresIndependentVerification = $true
+    replyFormat = ('CHRONOS INTERVENTION RESULT id={0} version={1} state=<acknowledged|outcome_reported|declined|user_authority_required|remediation_failed>' -f [string]$Record.interventionId, [int]$Record.version)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ClaimTokenValue)) { $payload.claimToken = $ClaimTokenValue }
+  if ([string]$Record.failureReason -ne 'none') { $payload.reason = [string]$Record.failureReason }
+  return $payload
+}
+
+function Write-InterventionPayload {
+  param($Payload)
+  Write-Output ('CHRONOS INTERVENTION ' + ($Payload | ConvertTo-Json -Compress -Depth 6))
+}
+
+function Test-UsageCorroboration {
+  param($State, $UsageEvent, [string]$RequestedCorroboratingEventId)
+  if ([string]::IsNullOrWhiteSpace($RequestedCorroboratingEventId) -or $RequestedCorroboratingEventId -notmatch '^[a-f0-9]{64}$') { return $false }
+  $other = Get-PendingEventRecord $State $RequestedCorroboratingEventId
+  if ($null -eq $other -or [string]$other.event -ne 'HEARTBEAT_EVENT' -or [string]$other.eventId -eq [string]$UsageEvent.eventId) { return $false }
+  if ([string]$other.type -notin @('AGENT_STALL', 'GUARDIAN_RUNAWAY', 'MACHINE_DRIFT')) { return $false }
+  $sameSubject = [string]$other.subjectHash -eq [string]$UsageEvent.subjectHash -or [string]$other.ownerHash -eq [string]$UsageEvent.subjectHash
+  if (-not $sameSubject) { return $false }
+  try {
+    $usageTime = ConvertTo-UtcTimestamp ([string]$UsageEvent.detected) 'heartbeat_state_invalid'
+    $otherTime = ConvertTo-UtcTimestamp ([string]$other.detected) 'heartbeat_state_invalid'
+    return [math]::Abs(($usageTime - $otherTime).TotalSeconds) -le 900
+  } catch { return $false }
+}
+
+function Test-InterventionTargetPolicy {
+  param($EventRecord, [string]$TargetHash, [string]$Policy)
+  $subjectMatch = $TargetHash -eq [string]$EventRecord.subjectHash
+  $ownerMatch = $TargetHash -eq [string]$EventRecord.ownerHash
+  switch ($Policy) {
+    'verified_subject' { return $subjectMatch }
+    'verified_non_governor_subject' { return $subjectMatch }
+    'verified_owner' { return $ownerMatch }
+    'verified_subject_or_owner' { return $subjectMatch -or $ownerMatch }
+    default { return $false }
+  }
+}
+
+function Add-BoundedIntervention {
+  param($State, $Record)
+  if (@($State.interventions).Count -ge $script:InterventionLimit) {
+    $oldestTerminal = @($State.interventions | Where-Object { Test-InterventionTerminal ([string]$_.state) } | Sort-Object updatedAt | Select-Object -First 1)[0]
+    if ($oldestTerminal) {
+      $State.interventions = @($State.interventions | Where-Object { [string]$_.interventionId -ne [string]$oldestTerminal.interventionId })
+    }
+  }
+  if (@($State.interventions).Count -ge $script:InterventionLimit) { throw 'heartbeat_intervention_capacity' }
+  $State.interventions = @($State.interventions + $Record)
+}
+
+function Invoke-InterventionPlan {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedEventId, [string]$RequestedCorroboratingEventId, [string]$RequestedTargetId, [string]$RequestedGeneration, [string]$CurrentGovernorId, [DateTimeOffset]$Now)
+  Assert-InterventionRuntimeId $RequestedTargetId
+  Assert-InterventionRuntimeId $RequestedGeneration
+  Assert-InterventionRuntimeId $CurrentGovernorId
+  $eventRecord = Get-PendingEventRecord $State $RequestedEventId
+  if ($null -eq $eventRecord -or [string]$eventRecord.event -ne 'HEARTBEAT_EVENT') { throw 'heartbeat_intervention_event_unavailable' }
+  $targetHash = Get-StableHash $RequestedTargetId
+  $generationHash = Get-StableHash $RequestedGeneration
+  $governorHash = Get-StableHash $CurrentGovernorId
+  $contract = Get-InterventionContract ([string]$eventRecord.type)
+  $failure = $null
+  if ($targetHash -eq $governorHash) { $failure = 'self_target_forbidden' }
+  elseif (-not [bool]$contract.Autonomous) { $failure = 'unsupported_action' }
+  elseif ([string]$eventRecord.type -eq 'USAGE_BURN' -and [bool]$eventRecord.governorOrigin -and -not (Test-UsageCorroboration $State $eventRecord $RequestedCorroboratingEventId)) { $failure = 'governor_usage_uncorroborated' }
+  elseif (-not (Test-InterventionTargetPolicy $eventRecord $targetHash ([string]$contract.TargetPolicy))) { $failure = 'target_policy_mismatch' }
+  if ($failure) {
+    $reason = $failure
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash 1 'failed_closed' $reason $Now $false
+    Add-BoundedIntervention $State $record
+    Remove-PendingEvent $State $RequestedEventId
+    Trim-State $State
+    $State.revision = [int64]$State.revision + 1
+    Write-State $State $ResolvedStatePath
+    return Get-InterventionPayload $record 'plan' 'failed_closed'
+  }
+
+  $active = @($State.interventions | Where-Object { [string]$_.targetHash -eq $targetHash -and -not (Test-InterventionTerminal ([string]$_.state)) } | Sort-Object updatedAt -Descending | Select-Object -First 1)[0]
+  if ($active) {
+    $newRank = [int]$script:SeverityRank[[string]$eventRecord.severity]
+    $activeRank = [int]$script:SeverityRank[[string]$active.severity]
+    if ([string]$active.eventId -eq $RequestedEventId -or $newRank -le $activeRank -or ([bool]$active.escalationSent -and [int]$active.attempts -gt 0)) {
+      $active.coalescedCount = [int]$active.coalescedCount + 1
+      $active.updatedAt = $Now.ToString('o')
+      Remove-PendingEvent $State $RequestedEventId
+      $State.revision = [int64]$State.revision + 1
+      Write-State $State $ResolvedStatePath
+      return Get-InterventionPayload $active 'plan' 'coalesced'
+    }
+    $nextVersion = [int]$active.version + 1
+    $alreadySent = [int]$active.attempts -gt 0
+    $active.state = 'superseded'
+    $active.escalationSent = $alreadySent
+    $active.updatedAt = $Now.ToString('o')
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash $nextVersion 'queued' 'none' $Now $alreadySent
+  } else {
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash 1 'queued' 'none' $Now $false
+  }
+  Add-BoundedIntervention $State $record
+  Remove-PendingEvent $State $RequestedEventId
+  Trim-State $State
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'plan' 'send'
+}
+
+function Invoke-InterventionFailClosed {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedEventId, [string]$Reason, [DateTimeOffset]$Now)
+  if ($Reason -notin @('ambiguous_target', 'target_not_live', 'transport_unavailable', 'user_authority_required', 'unsupported_action')) { throw 'heartbeat_intervention_input_invalid' }
+  $eventRecord = Get-PendingEventRecord $State $RequestedEventId
+  if ($null -eq $eventRecord) { throw 'heartbeat_intervention_event_unavailable' }
+  $record = New-InterventionRecord $eventRecord (Get-StableHash 'unresolved-target') (Get-StableHash 'unresolved-generation') 1 'failed_closed' $Reason $Now $false
+  Add-BoundedIntervention $State $record
+  Remove-PendingEvent $State $RequestedEventId
+  Trim-State $State
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'fail-closed' 'failed_closed'
+}
+
+function Assert-CurrentTarget {
+  param($Record, [string]$RequestedTargetId, [string]$RequestedGeneration, [string]$CurrentGovernorId)
+  Assert-InterventionRuntimeId $RequestedTargetId
+  Assert-InterventionRuntimeId $RequestedGeneration
+  Assert-InterventionRuntimeId $CurrentGovernorId
+  $targetHash = Get-StableHash $RequestedTargetId
+  if ($targetHash -eq (Get-StableHash $CurrentGovernorId)) { throw 'heartbeat_intervention_self_target' }
+  if ($targetHash -ne [string]$Record.targetHash -or (Get-StableHash $RequestedGeneration) -ne [string]$Record.targetGenerationHash) { throw 'heartbeat_intervention_target_changed' }
+}
+
+function Invoke-InterventionClaim {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$RequestedTargetId, [string]$RequestedGeneration, [string]$CurrentGovernorId, [DateTimeOffset]$Now)
+  $record = Get-InterventionRecord $State $RequestedInterventionId
+  if ($null -eq $record -or [int]$record.version -ne $RequestedVersion) { throw 'heartbeat_intervention_not_found' }
+  Assert-CurrentTarget $record $RequestedTargetId $RequestedGeneration $CurrentGovernorId
+  if ([string]$record.state -notin @('queued', 'retry_queued')) { throw 'heartbeat_intervention_transition_invalid' }
+  if ([int]$record.attempts -ge 2) {
+    $record.state = 'undelivered'
+    $record.failureReason = 'retry_budget_exhausted'
+    $record.updatedAt = $Now.ToString('o')
+    $State.revision = [int64]$State.revision + 1
+    Write-State $State $ResolvedStatePath
+    return Get-InterventionPayload $record 'claim' 'undelivered'
+  }
+  $token = [guid]::NewGuid().ToString('N')
+  $record.claimHash = Get-StableHash $token
+  $record.attempts = [int]$record.attempts + 1
+  $record.state = 'send_claimed'
+  $record.updatedAt = $Now.ToString('o')
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'claim' 'send' $token
+}
+
+function Assert-InterventionClaim {
+  param($Record, [int]$RequestedVersion, [string]$RequestedClaimToken)
+  if ($RequestedVersion -ne [int]$Record.version -or [string]::IsNullOrWhiteSpace($RequestedClaimToken) -or (Get-StableHash $RequestedClaimToken) -ne [string]$Record.claimHash) { throw 'heartbeat_intervention_claim_invalid' }
+}
+
+function Invoke-InterventionTransport {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$RequestedClaimToken, [string]$Result, [DateTimeOffset]$Now)
+  $record = Get-InterventionRecord $State $RequestedInterventionId
+  if ($null -eq $record) { throw 'heartbeat_intervention_not_found' }
+  Assert-InterventionClaim $record $RequestedVersion $RequestedClaimToken
+  if ([string]$record.state -notin @('send_claimed', 'delivery_unknown')) { throw 'heartbeat_intervention_transition_invalid' }
+  if ([string]$record.state -eq 'delivery_unknown' -and $Result -ne 'accepted') { throw 'heartbeat_intervention_transition_invalid' }
+  $record.transportResult = $Result
+  switch ($Result) {
+    'accepted' { $record.state = 'awaiting_task_ack' }
+    'definite_failure' {
+      if ([int]$record.attempts -lt 2) { $record.state = 'retry_queued' }
+      else { $record.state = 'undelivered'; $record.failureReason = 'retry_budget_exhausted' }
+    }
+    'unknown' { $record.state = 'delivery_unknown' }
+    default { throw 'heartbeat_intervention_input_invalid' }
+  }
+  $record.updatedAt = $Now.ToString('o')
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'transport' ([string]$record.state)
+}
+
+function Invoke-InterventionResponse {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$ReportingTaskId, [string]$ReportingGeneration, [string]$Response, [DateTimeOffset]$Now)
+  $record = Get-InterventionRecord $State $RequestedInterventionId
+  if ($null -eq $record -or [int]$record.version -ne $RequestedVersion) { throw 'heartbeat_intervention_not_found' }
+  Assert-InterventionRuntimeId $ReportingTaskId
+  Assert-InterventionRuntimeId $ReportingGeneration
+  if ((Get-StableHash $ReportingTaskId) -ne [string]$record.targetHash -or (Get-StableHash $ReportingGeneration) -ne [string]$record.targetGenerationHash) { throw 'heartbeat_intervention_reporter_mismatch' }
+  if ([string]$record.state -notin @('awaiting_task_ack', 'remediating')) { throw 'heartbeat_intervention_transition_invalid' }
+  $record.taskResponse = $Response
+  switch ($Response) {
+    'acknowledged' { $record.state = 'remediating' }
+    'outcome_reported' { $record.state = 'verification_pending' }
+    'declined' { $record.state = 'declined' }
+    'user_authority_required' { $record.state = 'user_authority_required'; $record.failureReason = 'user_authority_required' }
+    'remediation_failed' { $record.state = 'remediation_failed' }
+    default { throw 'heartbeat_intervention_input_invalid' }
+  }
+  $record.updatedAt = $Now.ToString('o')
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'response' ([string]$record.state)
+}
+
+function Test-VerificationSourceAllowed {
+  param([string]$Type, [string]$Source)
+  if ($Source -eq 'heartbeat_engine') { return $true }
+  switch ($Type) {
+    { $_ -in @('AGENT_STALL', 'TASK_ACTIONABLE', 'ZOMBIE_TASK', 'TASK_HANDOFF_INCOMPLETE') } { return $Source -eq 'host_inventory' }
+    { $_ -in @('TEST_REGRESSION', 'TEST_VALIDATION_MISSING') } { return $Source -eq 'host_test' }
+    { $_ -in @('GIT_BUILD_STATE', 'GIT_STATE_RISK', 'BUILD_ARTIFACT_DRIFT') } { return $Source -eq 'host_git' }
+    default { return $false }
+  }
+}
+
+function Invoke-InterventionVerify {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$Source, [string]$Result, [DateTimeOffset]$Now)
+  $record = Get-InterventionRecord $State $RequestedInterventionId
+  if ($null -eq $record -or [int]$record.version -ne $RequestedVersion) { throw 'heartbeat_intervention_not_found' }
+  if (Test-InterventionTerminal ([string]$record.state)) { throw 'heartbeat_intervention_transition_invalid' }
+  if (-not (Test-VerificationSourceAllowed ([string]$record.type) $Source)) { throw 'heartbeat_intervention_verification_invalid' }
+  $record.verificationSource = $Source
+  $record.verificationResult = $Result
+  switch ($Result) {
+    'resolved' { $record.state = 'verified_resolved' }
+    'active' { $record.state = 'active_violation' }
+    'failed' { $record.state = 'remediation_failed' }
+    default { throw 'heartbeat_intervention_input_invalid' }
+  }
+  $record.updatedAt = $Now.ToString('o')
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'verify' ([string]$record.state)
+}
+
+function Resolve-ConditionInterventions {
+  param($State, [string]$ConditionHash, [DateTimeOffset]$Now)
+  $noticeEligible = $false
+  foreach ($record in @($State.interventions | Where-Object { [string]$_.conditionHash -eq $ConditionHash -and -not (Test-InterventionTerminal ([string]$_.state)) })) {
+    if ([bool]$record.resolutionNoticeRequired -and [string]$record.state -in @('awaiting_task_ack', 'remediating', 'verification_pending', 'active_violation')) { $noticeEligible = $true }
+    $record.state = 'verified_resolved'
+    $record.verificationSource = 'heartbeat_engine'
+    $record.verificationResult = 'resolved'
+    $record.updatedAt = $Now.ToString('o')
+  }
+  return $noticeEligible
+}
+
 function Test-FamilyCounterContinuity {
   param([string]$Family, $Previous, $Current)
   $monotonic = switch ($Family) {
@@ -1587,6 +2081,9 @@ function Trim-State {
     foreach ($key in @($State.conditions.Keys)) { if ($keep -notcontains $key) { $State.conditions.Remove($key) } }
   }
   $State.events = @($State.events | Select-Object -Last $script:EventLimit)
+  if (@($State.interventions).Count -gt $script:InterventionLimit) {
+    $State.interventions = @($State.interventions | Sort-Object @{Expression={ if (Test-InterventionTerminal ([string]$_.state)) { 0 } else { 1 } };Descending=$true}, @{Expression={$_.updatedAt};Descending=$true} | Select-Object -First $script:InterventionLimit)
+  }
   $State.runIds = @($State.runIds | Select-Object -Last $script:RunIdLimit)
 }
 
@@ -1705,10 +2202,12 @@ function Invoke-Cycle {
       if ([string]$condition.family -ne $family -or -not [bool]$condition.open -or $seen.ContainsKey($conditionHash) -or -not $counterContinuity -or -not $detector.Routes.ContainsKey($conditionHash) -or [string]::IsNullOrWhiteSpace([string]$condition.sourceEpochHash) -or [string]$condition.sourceEpochHash -ne $epochHash) { continue }
       $condition.open = $false
       $condition.resolvedAt = $EvidenceNow.ToString('o')
+      $releaseNoticeEligible = Resolve-ConditionInterventions $State $conditionHash $EvidenceNow
       if (-not [bool]$condition.resolutionNotified) {
         $hint = Get-Value $detector.Routes $conditionHash
         $resolutionEventId = Get-StableHash ('heartbeat-event-v1|{0}|{1}|resolved' -f $conditionHash, [int64](Get-Value $condition 'episode' 1))
         $resolutionEvent = New-ResolutionEvent $condition $conditionHash $hint $EvidenceNow $resolutionEventId
+        $resolutionEvent['ReleaseNoticeEligible'] = [bool]$releaseNoticeEligible
         $routed.Add($resolutionEvent) | Out-Null
         $newEvents.Add($resolutionEvent) | Out-Null
         $newOutbox.Add((New-OutboxRecord $resolutionEvent $conditionHash)) | Out-Null
@@ -1764,7 +2263,10 @@ function Write-Status {
     if ($coverageCounts.ContainsKey($value)) { $coverageCounts[$value]++ } else { $coverageCounts.unsupported++ }
   }
   $lastCycle = if ([string]::IsNullOrWhiteSpace([string]$State.health.lastCycleUtc)) { 'never' } else { [string]$State.health.lastCycleUtc }
-  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} coverageObserved={4} coveragePartial={5} coverageUnsupported={6} suppressed={7} routesEmitted={8} deliveryAttempts={9} lastCycle={10} durationMs={11}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs)
+  $activeInterventions = @($State.interventions | Where-Object { -not (Test-InterventionTerminal ([string]$_.state)) })
+  $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
+  $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
+  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs)
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }
@@ -1795,7 +2297,7 @@ function New-HeartbeatMutex {
 $mutex = $null
 $acquired = $false
 try {
-  if ($Action -notin @('cycle', 'status', 'acknowledge')) { throw 'heartbeat_action_invalid' }
+  if ($Action -notin @('cycle', 'status', 'acknowledge', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
   $resolved = Resolve-StatePath $StatePath $Scope
   if ($Action -eq 'status') {
     $state = Read-State $resolved.Path $resolved.ScopeHash
@@ -1827,6 +2329,30 @@ try {
     $acknowledged = Acknowledge-OutboxEvent $state $EventId $resolved.Path
     $payload = [ordered]@{ ok = $true; action = 'acknowledge'; eventId = $EventId; acknowledged = $acknowledged }
     Write-Output ('CHRONOS HEARTBEATS ' + ($payload | ConvertTo-Json -Compress))
+    exit 0
+  }
+  if ($Action -eq 'intervention-plan') {
+    Write-InterventionPayload (Invoke-InterventionPlan $state $resolved.Path $EventId $CorroboratingEventId $TargetId $TargetGeneration $GovernorId $deliveryNow)
+    exit 0
+  }
+  if ($Action -eq 'intervention-fail-closed') {
+    Write-InterventionPayload (Invoke-InterventionFailClosed $state $resolved.Path $EventId $FailureReason $deliveryNow)
+    exit 0
+  }
+  if ($Action -eq 'intervention-claim') {
+    Write-InterventionPayload (Invoke-InterventionClaim $state $resolved.Path $InterventionId $InterventionVersion $TargetId $TargetGeneration $GovernorId $deliveryNow)
+    exit 0
+  }
+  if ($Action -eq 'intervention-transport') {
+    Write-InterventionPayload (Invoke-InterventionTransport $state $resolved.Path $InterventionId $InterventionVersion $ClaimToken $TransportResult $deliveryNow)
+    exit 0
+  }
+  if ($Action -eq 'intervention-response') {
+    Write-InterventionPayload (Invoke-InterventionResponse $state $resolved.Path $InterventionId $InterventionVersion $TargetId $TargetGeneration $TaskResponse $deliveryNow)
+    exit 0
+  }
+  if ($Action -eq 'intervention-verify') {
+    Write-InterventionPayload (Invoke-InterventionVerify $state $resolved.Path $InterventionId $InterventionVersion $VerificationSource $VerificationResult $deliveryNow)
     exit 0
   }
   $events = @(Invoke-Cycle $input $state $resolved.Path $evidenceNow $deliveryNow)

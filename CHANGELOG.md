@@ -2,6 +2,27 @@
 
 ## v0.8.1
 
+- Add a bounded Governor-to-task intervention state machine. It separates event
+  delivery, target resolution, send claims, transport certainty, task replies,
+  and independent postcondition verification.
+- Keep one active intervention per target. Coalesce simultaneous equal or lower
+  severity events, replace an unsent record on material worsening, and permit at
+  most one initial send plus one definite-failure retry.
+- Treat an uncertain send as `delivery_unknown` and never retry it blindly.
+  Transport acceptance is not task acknowledgement, and a task report is not
+  proof of recovery.
+- Bind replies to the exact hashed target, host generation, intervention ID, and
+  version. Persist only hashes, allowlisted categories, counters, and timestamps.
+- Add fixed safe intervention templates and fail closed for ambiguous targets,
+  target-policy mismatches, unavailable transport, user-only authority,
+  installs, permission or model changes, process termination, restarts,
+  destructive Git, and publication.
+- Forbid Governor self-targeting. Keep standalone Governor-origin usage local,
+  require same-subject and same-window corroboration before an affected-task
+  intervention, and keep token volume separate from unknown cost or quota impact.
+- Remove routine user action requests from convergence, rotation, and
+  intervention recovery. The Governor communicates directly with the exact
+  affected task through host task tools; normal cycles remain silent.
 - Add privacy-bounded lifecycle discovery for `SessionStart`, `SessionEnd`,
   `SubagentStart`, and `SubagentStop` through reviewed plugin hooks.
 - Keep lifecycle hooks headless and off the turn, prompt, tool, and approval
@@ -32,6 +53,9 @@
   handling, host-confirmed reactivation, visible capacity pressure, two-phase
   release, crash-reconciling bootstrap instructions, and deterministic Windows
   supervision tests.
+- Keep hook lock waits to 100 ms for asynchronous events and 250 ms for
+  synchronous events. On contention, queue one bounded DPAPI-protected event and
+  merge it during the next hook or Governor status so burst starts are not lost.
 - Decode hook standard input as strict UTF-8 with optional BOM detection so
   lifecycle registration behaves consistently in interactive Codex and hosted
   Windows process environments.

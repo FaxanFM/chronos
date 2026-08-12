@@ -190,7 +190,7 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 ## v0.8.1 Candidate Evidence
 
 - Candidate ZIP SHA-256:
-  `e9fb847175594dff1fde2962f100f9b78d019a557c5f866d279979a61325832e`.
+  `f1fcd912ce1ddd31fe2d807e8345eeeed7f36d00ab63e0dda5c7a741e55a25cd`.
   The deterministic package contains 13 files.
 - Local Windows PowerShell 5.1 validation passed the Inspector suite, Heartbeat
   suite, 42-scenario Governor suite, hardened supervision suite, and two-build
@@ -203,19 +203,29 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 - An independent Pro design audit changed its verdict from `HOLD` to
   `SHIP-CONTINGENT-ON-EXTERNAL-CANARY`. It found no additional source or package
   blocker in the supplied evidence.
+- A second Windows machine installed the earlier v0.8.1 candidate at commit
+  `5d85799a60b4a805a8e9e97317aebe463c70f0f3`. Its manifest, two-skill
+  inventory, eight installed skill-file hashes, and full validation suite
+  passed. After valid Git metadata was initialized in place, Governor status
+  resolved repository identity. Supervision was not enabled, so this proves
+  installation and compatibility only; it is not the required autonomy canary
+  for the refreshed candidate above.
 - v0.8.1 is not validated or released at this point. The remaining gate is an
   external installed-package canary that verifies normal hook trust, exact
-  version and hash, same-installation convergence to one Governor and one recurrence,
-  independence of Governors on separate PCs,
-  partial-failure recovery, two-phase release, Luna Medium selection without
-  fallback, bounded cadence, silent normal cycles, and the rotation or pause
+  version and hash, same-installation convergence to one Governor and one
+  recurrence, and Luna Medium selection without changing monitored task models.
+  It must use real host task transport to prove one exact affected task receives
+  one intervention, no unrelated task or Governor self-target wakes, compatible
+  events coalesce, ambiguous delivery does not retry, a definite failure retries
+  at most once, stale or wrong replies are rejected, and independent evidence is
+  required for resolution. It must also verify silent normal cycles, bounded
+  cadence, partial-failure recovery, two-phase release, and the rotation or pause
   boundary.
 - This entry is sanitized. It records no machine, user, workspace, repository,
   task, session, or account identifier.
 - Signed candidate source is public on the `main` branch pending the final canary tag.
-  The local Codex marketplace refreshed to that source and installed manifest
-  v0.8.1. All 13 installed package files matched the release inventory; the
-  cache added only its local `.gitignore` marker. Installed supervision status
-  and one real headless lifecycle-hook stdin invocation passed with no hook
-  output. This is local installation evidence, not the required external
-  validation.
+  An earlier local Codex marketplace candidate installed manifest v0.8.1 and
+  passed one real headless lifecycle-hook invocation with no output. The final
+  refreshed artifact above passed isolated installed-package validation and
+  two-build reproducibility, but it has not yet passed the external autonomy
+  canary.

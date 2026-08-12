@@ -96,6 +96,49 @@ function Invoke-RawModule {
   return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = @($output); Text = ($output -join "`n") }
 }
 
+function Invoke-Intervention {
+  param(
+    $Case,
+    [string]$Action,
+    [string]$EventId,
+    [string]$CorroboratingEventId,
+    [string]$InterventionId,
+    [int]$Version = 0,
+    [string]$Target = 'worker-target',
+    [string]$Generation = 'generation-1',
+    [string]$Governor = 'governor-task',
+    [string]$ClaimToken,
+    [string]$TransportResult,
+    [string]$TaskResponse,
+    [string]$VerificationSource,
+    [string]$VerificationResult,
+    [string]$FailureReason
+  )
+  $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $wrapper, '-Action', 'heartbeat', '-HeartbeatStatePath', $Case.State, '-HeartbeatInterventionAction', $Action)
+  if ($EventId) { $arguments += @('-HeartbeatEventId', $EventId) }
+  if ($CorroboratingEventId) { $arguments += @('-HeartbeatCorroboratingEventId', $CorroboratingEventId) }
+  if ($InterventionId) { $arguments += @('-HeartbeatInterventionId', $InterventionId) }
+  if ($Version -gt 0) { $arguments += @('-HeartbeatInterventionVersion', [string]$Version) }
+  if ($Target) { $arguments += @('-HeartbeatTargetId', $Target) }
+  if ($Generation) { $arguments += @('-HeartbeatTargetGeneration', $Generation) }
+  if ($Governor) { $arguments += @('-HeartbeatGovernorId', $Governor) }
+  if ($ClaimToken) { $arguments += @('-HeartbeatClaimToken', $ClaimToken) }
+  if ($TransportResult) { $arguments += @('-HeartbeatTransportResult', $TransportResult) }
+  if ($TaskResponse) { $arguments += @('-HeartbeatTaskResponse', $TaskResponse) }
+  if ($VerificationSource) { $arguments += @('-HeartbeatVerificationSource', $VerificationSource) }
+  if ($VerificationResult) { $arguments += @('-HeartbeatVerificationResult', $VerificationResult) }
+  if ($FailureReason) { $arguments += @('-HeartbeatFailureReason', $FailureReason) }
+  $output = @(& powershell.exe @arguments 2>&1)
+  return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = @($output); Text = ($output -join "`n") }
+}
+
+function Get-InterventionPayload {
+  param($Result)
+  Assert-True ($Result.ExitCode -eq 0) ("Intervention exit code. Output: $($Result.Text)")
+  Assert-True ($Result.Text.StartsWith('CHRONOS INTERVENTION ')) ("Missing intervention envelope: $($Result.Text)")
+  return ($Result.Text.Substring('CHRONOS INTERVENTION '.Length) | ConvertFrom-Json)
+}
+
 function Assert-Silent {
   param($Result, [string]$Message)
   Assert-Equal $Result.ExitCode 0 ($Message + ' exit code.')
@@ -196,6 +239,19 @@ try {
   $parseErrors = $null
   [void][Management.Automation.Language.Parser]::ParseFile($module, [ref]$null, [ref]$parseErrors)
   Assert-Equal @($parseErrors).Count 0 'Heartbeat module must parse on Windows PowerShell.'
+  $governorSkill = Get-Content -Raw -LiteralPath (Join-Path $repo 'plugins\chronos\skills\chronos-governor\SKILL.md')
+  $compactGovernorSkill = $governorSkill -replace '\s+', ' '
+  foreach ($required in @(
+    'send_message_to_thread',
+    'Plan all events before claiming one',
+    'one active intervention per target',
+    'Never retry `unknown`',
+    'report is not proof that recovery occurred',
+    'It can never target the Governor',
+    'Do not broadcast, choose an arbitrary target, or manufacture a user action'
+  )) {
+    Assert-True ($compactGovernorSkill.Contains($required)) "Governor autonomy contract omitted: $required"
+  }
 
   # Agent stall: baseline, transition, dedupe, escalation, coverage, resolution, and canonical worker IDs.
   $case = New-Case 'agent'
@@ -452,7 +508,7 @@ try {
     $process.Dispose()
   }
   Assert-Equal ([regex]::Matches($raceText, 'AGENT_STALL').Count) 1 'Concurrent cycles must emit one stall event.'
-  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 4) 'Concurrent cycles corrupted state.'
+  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 5) 'Concurrent cycles corrupted state.'
 
   # The persisted outbox closes the state/output crash window with stable IDs.
   $outbox = New-Case 'outbox'
@@ -483,11 +539,170 @@ try {
   Assert-Equal $elapsedEvents.Count 1 'Newer evidence preempted a due replay of the older serialized run.'
   $replayedState = Get-Content -Raw $outbox.State | ConvertFrom-Json
   Assert-Equal $replayedState.health.lastCycleUtc $elapsedState.health.lastCycleUtc 'Stale replay advanced detector evidence time.'
+  $replayedState.outbox[0].lastAttempt = [DateTimeOffset]::UtcNow.AddMinutes(-20).ToString('o')
+  [IO.File]::WriteAllText($outbox.State, ($replayedState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  Assert-Silent (Invoke-RawModule @('-InputPath', $firstDelivery.InputPath, '-StatePath', $outbox.State)) 'Outbox retry budget must stop after two attempts.'
   $ackOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatAcknowledgeEventId $firstEvent.EventId -HeartbeatStatePath $outbox.State 2>&1)
   Assert-Equal $LASTEXITCODE 0 'Outbox acknowledgement exit code.'
   Assert-True (($ackOutput -join "`n") -match '"acknowledged":true') 'Outbox acknowledgement response.'
   Assert-Equal @((Get-Content -Raw $outbox.State | ConvertFrom-Json).outbox).Count 0 'Acknowledged event remained pending.'
   Assert-Silent (Invoke-Heartbeat $outbox @{ collectorCoverage = @{ agent_stall = 'partial' }; agents = @(@{ id = 'outbox-agent'; active = $true; progressHash = 'a'; totalTokens = 50000 }) } -At $outbox.BaseTime.AddMinutes(70)) 'Acknowledged event must not retry.'
+
+  # Native planning enforces each fixed target policy instead of trusting the host.
+  $subjectBinding = New-Case 'intervention-subject-binding'
+  Assert-Silent (Invoke-Heartbeat $subjectBinding @{ usage = @{ owner = 'usage-owner'; dominantThread = 'usage-subject'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Subject target baseline.'
+  $subjectBindingCycle = Invoke-Heartbeat $subjectBinding @{ usage = @{ owner = 'usage-owner'; dominantThread = 'usage-subject'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } } -NoAcknowledge
+  $subjectBindingEvent = Assert-Event $subjectBindingCycle 'USAGE_BURN' 'governor'
+  $subjectMismatch = Get-InterventionPayload (Invoke-Intervention $subjectBinding 'plan' -EventId $subjectBindingEvent.EventId -Target 'usage-owner' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $subjectMismatch.reason 'target_policy_mismatch' 'A subject-only event was redirected to its owner.'
+
+  $ownerBinding = New-Case 'intervention-owner-binding'
+  Assert-Silent (Invoke-Heartbeat $ownerBinding @{ tests = @(@{ name = 'binding-test'; owner = 'binding-owner'; status = 'passed'; commit = 'aaaaaaaa'; repairAttempts = 0; failureCount = 0 }) }) 'Owner target baseline.'
+  $ownerBindingCycle = Invoke-Heartbeat $ownerBinding @{ tests = @(@{ name = 'binding-test'; owner = 'binding-owner'; status = 'failed'; commit = 'aaaaaaaa'; repairAttempts = 1; failureCount = 1 }) } -NoAcknowledge
+  $ownerBindingEvent = Assert-Event $ownerBindingCycle 'TEST_REGRESSION' 'governor'
+  $ownerMismatch = Get-InterventionPayload (Invoke-Intervention $ownerBinding 'plan' -EventId $ownerBindingEvent.EventId -Target 'binding-test' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $ownerMismatch.reason 'target_policy_mismatch' 'An owner-only event was redirected to its subject.'
+
+  $subjectOrOwnerBinding = New-Case 'intervention-subject-or-owner-binding'
+  Assert-Silent (Invoke-Heartbeat $subjectOrOwnerBinding @{ agents = @(@{ id = 'binding-agent'; owner = 'binding-root'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Subject-or-owner baseline.'
+  $subjectOrOwnerCycle = Invoke-Heartbeat $subjectOrOwnerBinding @{ agents = @(@{ id = 'binding-agent'; owner = 'binding-root'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 }) } -NoAcknowledge
+  $subjectOrOwnerEvent = Assert-Event $subjectOrOwnerCycle 'AGENT_STALL' 'governor'
+  $ownerPlan = Get-InterventionPayload (Invoke-Intervention $subjectOrOwnerBinding 'plan' -EventId $subjectOrOwnerEvent.EventId -Target 'binding-root' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $ownerPlan.decision 'send' 'A verified owner was rejected for a subject-or-owner event.'
+
+  # Eight events for one task are coalesced before any host wake is claimed.
+  $coalesce = New-Case 'intervention-coalesce'
+  $coalesceTasks = @(1..8 | ForEach-Object { @{ id = ('coalesce-item-' + $_); owner = 'coalesce-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false } })
+  $coalesceCycle = Invoke-Heartbeat $coalesce @{ tasks = $coalesceTasks } -NoAcknowledge
+  $coalesceEvents = @(Get-Events $coalesceCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })
+  Assert-Equal $coalesceEvents.Count 8 'Expected eight simultaneous task events for coalescing.'
+  $planDecisions = @()
+  foreach ($event in $coalesceEvents) {
+    $planDecisions += (Get-InterventionPayload (Invoke-Intervention $coalesce 'plan' -EventId $event.EventId -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task')).decision
+  }
+  Assert-Equal @($planDecisions | Where-Object { $_ -eq 'send' }).Count 1 'One task received more than one initial intervention envelope.'
+  Assert-Equal @($planDecisions | Where-Object { $_ -eq 'coalesced' }).Count 7 'Compatible task events were not coalesced.'
+  $coalescedState = Get-Content -Raw $coalesce.State | ConvertFrom-Json
+  $activeInterventions = @($coalescedState.interventions | Where-Object { $_.state -eq 'queued' })
+  Assert-Equal $activeInterventions.Count 1 'More than one active intervention was retained for one target.'
+  Assert-Equal $activeInterventions[0].coalescedCount 7 'Coalesced event count was not retained.'
+  Assert-True ((Get-Content -Raw $coalesce.State) -notmatch 'coalesce-target') 'Intervention state persisted a raw target identifier.'
+  $coalescedClaim = Get-InterventionPayload (Invoke-Intervention $coalesce 'claim' -InterventionId $activeInterventions[0].interventionId -Version 1 -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task')
+  $unknownDelivery = Get-InterventionPayload (Invoke-Intervention $coalesce 'transport' -InterventionId $coalescedClaim.interventionId -Version 1 -ClaimToken $coalescedClaim.claimToken -TransportResult 'unknown')
+  Assert-Equal $unknownDelivery.state 'delivery_unknown' 'Ambiguous transport was not retained as delivery_unknown.'
+  Assert-FailedSafely (Invoke-Intervention $coalesce 'claim' -InterventionId $coalescedClaim.interventionId -Version 1 -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task') 'heartbeat_intervention_transition_invalid' 'Ambiguous delivery was retried blindly.'
+
+  # A higher-severity event replaces an unsent version instead of adding a wake.
+  $replace = New-Case 'intervention-replace'
+  Assert-Silent (Invoke-Heartbeat $replace @{ agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Replacement baseline.'
+  $replaceCycle = Invoke-Heartbeat $replace @{
+      agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 160000; tokensSinceMeaningfulChange = 150000; repeatedEquivalentActions = 10; minutesSinceMeaningfulChange = 45 })
+      tasks = @(@{ id = 'replace-task'; owner = 'replace-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false })
+    } -NoAcknowledge
+  $replaceEvents = @(Get-Events $replaceCycle)
+  $warningReplaceEvent = @($replaceEvents | Where-Object { $_.Type -eq 'ZOMBIE_TASK' })[0]
+  $highReplaceEvent = @($replaceEvents | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
+  $warningPlan = Get-InterventionPayload (Invoke-Intervention $replace 'plan' -EventId $warningReplaceEvent.EventId -Target 'replace-target' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $warningPlan.version 1 'Initial warning intervention version.'
+  $highPlan = Get-InterventionPayload (Invoke-Intervention $replace 'plan' -EventId $highReplaceEvent.EventId -Target 'replace-target' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $highPlan.version 2 'Higher-severity event did not replace the unsent intervention version.'
+  $replaceState = Get-Content -Raw $replace.State | ConvertFrom-Json
+  Assert-Equal @($replaceState.interventions | Where-Object { $_.state -eq 'queued' }).Count 1 'Replacement retained multiple queued wakes.'
+  Assert-Equal @($replaceState.interventions | Where-Object { $_.state -eq 'superseded' }).Count 1 'Prior unsent version was not superseded.'
+
+  # Governor usage can be diagnosed, but it can never target or wake Governor.
+  $selfUsage = New-Case 'intervention-self-usage'
+  Assert-Silent (Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Governor usage baseline.'
+  $selfCycle = Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 } } -NoAcknowledge
+  $selfEvent = Assert-Event $selfCycle 'USAGE_BURN' 'governor'
+  Assert-Equal $selfEvent.CostImpact 'unknown' 'Usage volume was incorrectly converted into model cost.'
+  Assert-Equal $selfEvent.QuotaImpact 'unknown' 'Usage volume was incorrectly converted into quota impact.'
+  $selfPlan = Get-InterventionPayload (Invoke-Intervention $selfUsage 'plan' -EventId $selfEvent.EventId -Target 'governor-task' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $selfPlan.decision 'failed_closed' 'Governor self-target was not rejected.'
+  Assert-Equal $selfPlan.reason 'self_target_forbidden' 'Governor self-target rejection was not explicit.'
+  Assert-Equal @((Get-Content -Raw $selfUsage.State | ConvertFrom-Json).outbox).Count 0 'Self-origin event remained eligible for repeat delivery.'
+
+  $governorUsageLocal = New-Case 'governor-usage-local'
+  Assert-Silent (Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Governor-local usage baseline.'
+  $governorUsageCycle = Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 } } -NoAcknowledge
+  $governorUsageEvent = Assert-Event $governorUsageCycle 'USAGE_BURN' 'governor'
+  $unrelatedPlan = Get-InterventionPayload (Invoke-Intervention $governorUsageLocal 'plan' -EventId $governorUsageEvent.EventId -Target 'unrelated-task' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $unrelatedPlan.reason 'governor_usage_uncorroborated' 'Governor usage alone was allowed to wake another task.'
+
+  $corroboratedUsage = New-Case 'governor-usage-corroborated'
+  Assert-Silent (Invoke-Heartbeat $corroboratedUsage @{
+      agents = @(@{ id = 'affected-task'; owner = 'affected-task'; active = $true; progressHash = 'same'; totalTokens = 1000 })
+      usage = @{ owner = 'governor'; dominantThread = 'affected-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' }
+    }) 'Corroborated usage baseline.'
+  $corroboratedCycle = Invoke-Heartbeat $corroboratedUsage @{
+      agents = @(@{ id = 'affected-task'; owner = 'affected-task'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 })
+      usage = @{ owner = 'governor'; dominantThread = 'affected-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 }
+    } -NoAcknowledge
+  $corroboratedEvents = @(Get-Events $corroboratedCycle)
+  $corroboratedUsageEvent = @($corroboratedEvents | Where-Object { $_.Type -eq 'USAGE_BURN' })[0]
+  $corroboratingStallEvent = @($corroboratedEvents | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
+  $corroboratedPlan = Get-InterventionPayload (Invoke-Intervention $corroboratedUsage 'plan' -EventId $corroboratedUsageEvent.EventId -CorroboratingEventId $corroboratingStallEvent.EventId -Target 'affected-task' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $corroboratedPlan.decision 'send' 'Same-subject same-window corroboration did not authorize the affected task.'
+
+  # A task report is advisory; only later independent evidence resolves the event.
+  $postcondition = New-Case 'intervention-postcondition'
+  Assert-Silent (Invoke-Heartbeat $postcondition @{ agents = @(@{ id = 'postcondition-worker'; active = $true; progressHash = 'a'; totalTokens = 1000 }) }) 'Postcondition baseline.'
+  $postCycle = Invoke-Heartbeat $postcondition @{ agents = @(@{ id = 'postcondition-worker'; active = $true; progressHash = 'a'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 }) } -NoAcknowledge
+  $postEvent = Assert-Event $postCycle 'AGENT_STALL' 'governor'
+  $postPlan = Get-InterventionPayload (Invoke-Intervention $postcondition 'plan' -EventId $postEvent.EventId -Target 'postcondition-worker' -Generation 'generation-1' -Governor 'governor-task')
+  $postClaim = Get-InterventionPayload (Invoke-Intervention $postcondition 'claim' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -Governor 'governor-task')
+  $postTransport = Get-InterventionPayload (Invoke-Intervention $postcondition 'transport' -InterventionId $postPlan.interventionId -Version 1 -ClaimToken $postClaim.claimToken -TransportResult 'accepted')
+  Assert-Equal $postTransport.state 'awaiting_task_ack' 'Accepted transport was treated as task acknowledgement.'
+  Assert-FailedSafely (Invoke-Intervention $postcondition 'response' -InterventionId $postPlan.interventionId -Version 1 -Target 'wrong-worker' -Generation 'generation-1' -TaskResponse 'outcome_reported') 'heartbeat_intervention_reporter_mismatch' 'A different task advanced the intervention.'
+  $reported = Get-InterventionPayload (Invoke-Intervention $postcondition 'response' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -TaskResponse 'outcome_reported')
+  Assert-Equal $reported.state 'verification_pending' 'Task outcome did not enter independent verification.'
+  $reportedState = Get-Content -Raw $postcondition.State | ConvertFrom-Json
+  Assert-True (@($reportedState.conditions.PSObject.Properties.Value | Where-Object { $_.type -eq 'AGENT_STALL' -and $_.open }).Count -eq 1) 'Task self-report resolved the detector condition.'
+  $resolutionCycle = Invoke-Heartbeat $postcondition @{ agents = @(@{ id = 'postcondition-worker'; active = $true; progressHash = 'b'; totalTokens = 61000; tokensSinceMeaningfulChange = 0; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }
+  $resolutionEvents = @(Get-Events $resolutionCycle | Where-Object { $_.Event -eq 'HEARTBEAT_RESOLVED' -and $_.Type -eq 'AGENT_STALL' })
+  Assert-Equal $resolutionEvents.Count 1 'Independent observed recovery did not resolve the stall.'
+  Assert-True ([bool]$resolutionEvents[0].ReleaseNoticeEligible) 'An acknowledged temporary restriction did not become release-notice eligible.'
+  $resolvedIntervention = @((Get-Content -Raw $postcondition.State | ConvertFrom-Json).interventions | Where-Object { $_.interventionId -eq $postPlan.interventionId })[0]
+  Assert-Equal $resolvedIntervention.state 'verified_resolved' 'Independent detector recovery did not resolve the intervention.'
+  Assert-Equal $resolvedIntervention.verificationSource 'heartbeat_engine' 'Task self-report was mistaken for independent verification.'
+
+  # Only a definite send failure receives one retry.
+  $retryBudget = New-Case 'intervention-retry-budget'
+  $retryCycle = Invoke-Heartbeat $retryBudget @{ tasks = @(@{ id = 'retry-item'; owner = 'retry-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }) } -NoAcknowledge
+  $retryEvent = @(Get-Events $retryCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })[0]
+  $retryPlan = Get-InterventionPayload (Invoke-Intervention $retryBudget 'plan' -EventId $retryEvent.EventId -Target 'retry-target' -Generation 'generation-1' -Governor 'governor-task')
+  $retryClaim1 = Get-InterventionPayload (Invoke-Intervention $retryBudget 'claim' -InterventionId $retryPlan.interventionId -Version 1 -Target 'retry-target' -Generation 'generation-1' -Governor 'governor-task')
+  $retryFailure1 = Get-InterventionPayload (Invoke-Intervention $retryBudget 'transport' -InterventionId $retryPlan.interventionId -Version 1 -ClaimToken $retryClaim1.claimToken -TransportResult 'definite_failure')
+  Assert-Equal $retryFailure1.state 'retry_queued' 'A definite first failure did not queue one retry.'
+  $retryClaim2 = Get-InterventionPayload (Invoke-Intervention $retryBudget 'claim' -InterventionId $retryPlan.interventionId -Version 1 -Target 'retry-target' -Generation 'generation-1' -Governor 'governor-task')
+  $retryFailure2 = Get-InterventionPayload (Invoke-Intervention $retryBudget 'transport' -InterventionId $retryPlan.interventionId -Version 1 -ClaimToken $retryClaim2.claimToken -TransportResult 'definite_failure')
+  Assert-Equal $retryFailure2.state 'undelivered' 'Second definite failure did not exhaust the retry budget.'
+  Assert-Equal @((Get-Content -Raw $retryBudget.State | ConvertFrom-Json).interventions)[0].attempts 2 'Intervention exceeded its two-attempt bound.'
+
+  # Schema 4 Heartbeat state upgrades in place on the next mutating cycle.
+  $migration = New-Case 'intervention-schema-migration'
+  Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema migration baseline.'
+  $legacyState = Get-Content -Raw $migration.State | ConvertFrom-Json
+  $legacyState.schema = 4
+  $legacyState.PSObject.Properties.Remove('interventions')
+  [IO.File]::WriteAllText($migration.State, ($legacyState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema 4 migration cycle.'
+  Assert-Equal (Get-Content -Raw $migration.State | ConvertFrom-Json).schema 5 'Schema 4 state did not migrate to schema 5.'
+
+  $legacyUsage = New-Case 'legacy-usage-migration'
+  Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Legacy usage baseline.'
+  $legacyUsageCycle = Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } } -NoAcknowledge
+  $legacyUsageEvent = Assert-Event $legacyUsageCycle 'USAGE_BURN' 'governor'
+  $legacyUsageState = Get-Content -Raw $legacyUsage.State | ConvertFrom-Json
+  $legacyUsageState.schema = 4
+  $legacyUsageState.PSObject.Properties.Remove('interventions')
+  foreach ($entry in @($legacyUsageState.outbox)) {
+    $entry.PSObject.Properties.Remove('ownerHash')
+    $entry.PSObject.Properties.Remove('governorOrigin')
+  }
+  [IO.File]::WriteAllText($legacyUsage.State, ($legacyUsageState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  $legacyUsagePlan = Get-InterventionPayload (Invoke-Intervention $legacyUsage 'plan' -EventId $legacyUsageEvent.EventId -Target 'legacy-usage-task' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $legacyUsagePlan.reason 'governor_usage_uncorroborated' 'Legacy usage outbox upgrade permitted an uncorroborated task wake.'
 
   # An abandoned named mutex is recovered without losing the cycle.
   $abandoned = New-Case 'abandoned-mutex'

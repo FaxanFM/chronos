@@ -451,15 +451,24 @@ try {
     $deadlineWatch.Stop()
     Assert-True ($contendedEnd.ExitCode -eq 0 -and -not $contendedEnd.Output -and -not $contendedEnd.Error) 'Contended SessionEnd did not fail silent.'
     Assert-True ($deadlineWatch.ElapsedMilliseconds -lt 2800) 'Contended SessionEnd exceeded the three-second host hook ceiling.'
-    Assert-True ([IO.File]::ReadAllText($mutexState) -eq $mutexStateBefore) 'Contended SessionEnd changed registry state.'
+    Assert-True ([IO.File]::ReadAllText($mutexState) -eq $mutexStateBefore) 'Contended SessionEnd changed the locked registry state.'
   } finally {
     try { $heldMutex.ReleaseMutex() | Out-Null } catch {}
     $heldMutex.Dispose()
   }
+  $pendingDirectory = $mutexState + '.pending'
+  $pendingFiles = @(Get-ChildItem -LiteralPath $pendingDirectory -File -Force)
+  Assert-True ($pendingFiles.Count -eq 1) 'Contended SessionEnd was not preserved in the bounded fallback queue.'
+  $pendingText = Get-Content -Raw -LiteralPath $pendingFiles[0].FullName
+  Assert-True ($pendingText -notmatch 'thread-mutex|[A-Za-z]:\\') 'Fallback queue persisted a raw task ID or workspace path.'
+  $reconciledMutexStatus = Get-Payload (Invoke-Supervision $mutexState)
+  Assert-True ($reconciledMutexStatus.activeTasks -eq 0 -and $reconciledMutexStatus.hookRuns -eq 2) 'Governor status did not merge the contended SessionEnd.'
+  Assert-True (-not (Test-Path -LiteralPath $pendingDirectory)) 'Merged fallback queue was not removed.'
 
   $sourceText = Get-Content -Raw -LiteralPath $module
   Assert-True ($sourceText.Contains('SpecialFolder]::LocalApplicationData')) 'Default supervision state must use LocalAppData, not volatile temp storage.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
+  Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'
   Assert-True ($sourceText.Contains("@('Global', 'Local')")) 'Registry mutex must fall back to the same-user Local namespace when Global is unavailable.'
   foreach ($forbidden in @('Register-ScheduledTask', 'New-ScheduledTask', 'Start-Job', 'Start-Process', 'Invoke-WebRequest', 'Invoke-RestMethod', 'HttpClient', 'WebClient')) {
     Assert-True (-not $sourceText.Contains($forbidden)) "Supervision module contains a prohibited host or network primitive: $forbidden"

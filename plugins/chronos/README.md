@@ -37,9 +37,12 @@ commands below only as a fallback.
 - Recommends the safest next step for the current condition.
 - Evaluates eight opt-in Heartbeat families and emits an event only for an
   actionable transition or material worsening. Stable event IDs and a bounded
-  acknowledged outbox protect host delivery across restarts.
+  outbox protect host delivery across restarts. One active intervention per
+  target, event coalescing, and a two-attempt limit prevent wake storms.
 - Passively registers task and subagent lifecycle changes through four reviewed,
-  headless hooks with no per-turn output or worker recurrence.
+  headless hooks with no per-turn output or worker recurrence. Brief registry
+  contention uses a bounded protected fallback that the next Governor status
+  removes after merging.
 - Reuses one host-verified Governor or creates one fresh history-free Governor
   task instead of automatically forking a working task.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
@@ -106,8 +109,12 @@ for the normalized collector schema, coverage rules, and host delivery contract.
 The Codex host owns the recurring schedule, evaluator model, and delivery to the
 Governor inbox. Chronos does not install a scheduler or service. Monitored tasks
 can use any model and do not run Heartbeats. A cycle with no actionable
-transition ends silently. The host deduplicates and acknowledges emitted
-`EventId` values. Any forwarding to an owner is an explicit host decision.
+transition ends silently. For an actionable transition, the Governor verifies
+one live affected task and sends one fixed, bounded instruction through host
+task tools. It does not ask the user to relay routine remediation. The task's
+reply does not resolve the event until independent evidence confirms the
+postcondition. Governor self-usage never creates a self-message, and Chronos
+does not infer model cost or quota effect from a model name.
 
 To delegate a small repository task, ask:
 
@@ -171,11 +178,12 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
   local ownership.
 - Stores lifecycle identifiers protected with current-user Windows DPAPI and
   does not store transcript or workspace paths. DPAPI does not isolate data from
-  another process already running as that user.
+  another process already running as that user. The temporary contention
+  fallback uses the same protected or hashed metadata and no raw path.
 - Stores one random, non-secret 128-bit installation ID with no machine-derived
   data so host reconciliation remains scoped to this PC after registry recovery.
 - Heartbeat evaluation stores bounded per-scope transition, coverage, cadence,
-  deduplication, hashed delivery/outbox, and health metadata. It does not persist raw snapshots,
+  deduplication, hashed delivery/outbox, intervention, and health metadata. It does not persist raw snapshots,
   prompts, responses, commands, source, paths, credentials, or tool output.
 - When Governor is invoked, stores only untrusted local coordination metadata beneath the
   current user's Windows temporary application-data directory: opaque IDs, identity hashes, base

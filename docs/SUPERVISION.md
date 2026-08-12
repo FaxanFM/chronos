@@ -1,6 +1,6 @@
 # Chronos Supervision
 
-Chronos supervision gives one dedicated Governor task a low-cost view of active
+Chronos supervision gives one dedicated Governor task a low-overhead view of active
 Codex tasks. Worker tasks remain passive and can use any available model.
 Chronos does not install a daemon, operating-system scheduler, network client,
 or per-task model loop.
@@ -35,8 +35,10 @@ No worker prompt or worker-side script is required. The plugin registers only:
 The start and subagent hooks run asynchronously. `SessionEnd` follows the Codex
 synchronous event contract. Every hook is headless, has a three-second host
 timeout, exits without model-visible output, and never runs for prompts, turns,
-approvals, or tools. Synchronous mutex acquisition is capped at 250 ms; failure
-leaves prior state unchanged and exits zero.
+approvals, or tools. Synchronous mutex acquisition is capped at 250 ms;
+asynchronous acquisition is capped at 100 ms. If the registry is busy, the hook
+writes one bounded protected fallback event and exits zero. The next hook or
+Governor status merges the event under the registry mutex.
 
 ## Governor Selection
 
@@ -61,7 +63,8 @@ The host uses this reconciliation order:
    for at most three attempts. Setup is complete only when exactly one active
    recurrence carrying the complete equivalence key targets exactly one claimed,
    live Governor and zero active duplicates remain. After three failed attempts,
-   stop retrying and request one user action.
+   stop for that pulse, preserve state, and retry later. Routine convergence
+   failure must not become a user chore.
 6. Repeat the same host-global winner and postcondition check before discovery
    on Governor cycles zero and one. This catches concurrently created state that
    was not yet visible during setup. A loser stops its own recurrence and stands
@@ -98,8 +101,9 @@ not a secret or authentication credential.
 
 The host requests `gpt-5.6-luna` with Medium reasoning when that exact choice is
 available. Chronos cannot change a task's model itself and does not silently
-substitute a higher-cost model. This preference applies only to the Governor;
-monitored tasks remain model-agnostic.
+substitute another model. This preference applies only to the Governor;
+monitored tasks remain model-agnostic. Chronos does not infer cost, quota impact,
+or efficiency from a model name.
 
 ## Runtime Contract
 
@@ -131,24 +135,54 @@ eight entries and covers larger registries fairly over successive cycles.
 Terminal hook state has precedence: a delayed asynchronous start cannot revive
 an ended task or agent. Only `confirm-active`, after host verification, can do
 that. Do not poll full transcripts, repeatedly read unchanged tasks, or send
-routine messages to workers.
+routine messages to monitored tasks.
 
 The Governor owns the only model recurrence. When the user enables recurring
 supervision, reconcile one host Heartbeat automation attached to the dedicated
 task. Use 60 minutes while monitored work is active and 360 minutes while idle.
-A normal cycle ends silently. This bounds scheduled Governor turns to 24 per
+A normal cycle ends silently. A new, materially worse, or eligible resolution
+transition can open one bounded intervention for one exact affected task. The
+Governor plans all events before it sends, coalesces by target, and never
+broadcasts. This bounds scheduled Governor turns to 24 per
 active day or four per idle day; provider billing and caching remain host
 concerns and Chronos makes no cost claim.
 
 The registry reports `rotationRequired=true` after 336 cycles or 14 days. The
 host must then perform a verified fresh-task handoff, preserving one recurrence,
-or pause the recurrence and notify the user once. It must not continue adding
+or pause the recurrence and retain the reason locally. It must not continue adding
 unbounded history to the same Governor task. Release is two phase: stop and
 verify every matching recurrence first, then confirm local release. A failure
 before confirmation preserves the claim so the next setup can reconcile it.
 
 The PowerShell module does not create that automation or contact a task. It
 returns local routing metadata for the Codex host to use.
+
+## Task communication
+
+The Governor, not each monitored task, owns monitoring. Workers remain passive
+until one event requires a bounded action. The Governor then uses the host task
+transport to contact the exact verified affected task. It does not tell the user
+to relay the message.
+
+Before sending, the Governor must:
+
+1. Reconcile current host liveness and generation.
+2. Plan every event in the current cycle.
+3. Keep only one active intervention for each target.
+4. Recheck the target immediately before it claims the send.
+5. Send one fixed-template instruction and fixed categorical reply format.
+
+An accepted host send advances to `awaiting_task_ack`. A timeout or uncertain
+result advances to `delivery_unknown` and does not retry. A definite rejection
+can retry once. Only the exact target and version can report an outcome. The
+outcome advances to independent verification; it does not resolve the detector
+condition. See [Heartbeats](HEARTBEATS.md) for the full state machine.
+
+Governor usage alone stays Governor-local and never creates a self-message. It
+can support an affected-task intervention only when a second observation covers
+the same task and time window. Unrelated machine, review, or task evidence does
+not count. Ambiguous targets, unavailable transport, and user-only authority
+fail closed without a broadcast or routine user action.
 
 ## Local State
 
@@ -174,6 +208,14 @@ marks the engine degraded, and exposes `registryCapacity=exhausted` instead of
 silently evicting active work. Atomic replacement, a named mutex, strict size
 limits, reparse-point checks, retention limits, and safe failure protect the
 local coordination path.
+
+Registry contention can create a temporary sibling fallback directory. Each
+entry is at most 4 KiB and contains only an event category, DPAPI-protected task
+or agent identifiers, a workspace hash, safe labels, and a timestamp. The queue
+is capped at 256 entries. Chronos merges valid entries and removes them during
+the next hook or Governor status. It removes malformed entries and records a
+degraded counter. The queue is not a transcript, diagnostic log, or telemetry
+transport.
 
 ## Usage Boundary
 

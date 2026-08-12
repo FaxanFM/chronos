@@ -11,6 +11,27 @@ param(
   [string]$HeartbeatStatePath,
   [string]$HeartbeatScope,
   [string]$HeartbeatAcknowledgeEventId,
+  [string]$HeartbeatEventId,
+  [string]$HeartbeatCorroboratingEventId,
+  [ValidateSet("", "plan", "fail-closed", "claim", "transport", "response", "verify")]
+  [string]$HeartbeatInterventionAction = "",
+  [string]$HeartbeatInterventionId,
+  [ValidateRange(0, 2147483647)]
+  [int]$HeartbeatInterventionVersion = 0,
+  [string]$HeartbeatTargetId,
+  [string]$HeartbeatTargetGeneration,
+  [string]$HeartbeatGovernorId,
+  [string]$HeartbeatClaimToken,
+  [ValidateSet("", "accepted", "definite_failure", "unknown")]
+  [string]$HeartbeatTransportResult = "",
+  [ValidateSet("", "acknowledged", "outcome_reported", "declined", "user_authority_required", "remediation_failed")]
+  [string]$HeartbeatTaskResponse = "",
+  [ValidateSet("", "heartbeat_engine", "host_inventory", "host_test", "host_git")]
+  [string]$HeartbeatVerificationSource = "",
+  [ValidateSet("", "resolved", "active", "failed")]
+  [string]$HeartbeatVerificationResult = "",
+  [ValidateSet("", "ambiguous_target", "target_not_live", "transport_unavailable", "user_authority_required", "unsupported_action")]
+  [string]$HeartbeatFailureReason = "",
   [ValidateSet("status", "initialize", "confirm-active", "discover", "release")]
   [string]$SupervisionAction = "status",
   [string]$SupervisionStatePath,
@@ -29,7 +50,28 @@ $ErrorActionPreference = "Stop"
 if ($Action -eq 'heartbeat') {
   $heartbeatScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
   if (-not (Test-Path -LiteralPath $heartbeatScript)) { throw 'heartbeat_module_missing' }
-  if ($HeartbeatAcknowledgeEventId) {
+  if ($HeartbeatInterventionAction -and $HeartbeatAcknowledgeEventId) { throw 'heartbeat_arguments_conflict' }
+  if ($HeartbeatInterventionAction) {
+    $heartbeatArguments = @{
+      Action = 'intervention-' + $HeartbeatInterventionAction
+      Scope = $HeartbeatScope
+      EventId = $HeartbeatEventId
+      CorroboratingEventId = $HeartbeatCorroboratingEventId
+      InterventionId = $HeartbeatInterventionId
+      InterventionVersion = $HeartbeatInterventionVersion
+      TargetId = $HeartbeatTargetId
+      TargetGeneration = $HeartbeatTargetGeneration
+      GovernorId = $HeartbeatGovernorId
+      ClaimToken = $HeartbeatClaimToken
+      TransportResult = $HeartbeatTransportResult
+      TaskResponse = $HeartbeatTaskResponse
+      VerificationSource = $HeartbeatVerificationSource
+      VerificationResult = $HeartbeatVerificationResult
+      FailureReason = $HeartbeatFailureReason
+    }
+    if ($HeartbeatStatePath) { $heartbeatArguments.StatePath = $HeartbeatStatePath }
+    & $heartbeatScript @heartbeatArguments
+  } elseif ($HeartbeatAcknowledgeEventId) {
     if ($HeartbeatStatePath) { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -StatePath $HeartbeatStatePath -Scope $HeartbeatScope }
     else { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -Scope $HeartbeatScope }
   } elseif (-not $HeartbeatInputPath -and -not $HeartbeatInspectorOutputPath) {

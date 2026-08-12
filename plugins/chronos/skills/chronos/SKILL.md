@@ -9,7 +9,9 @@ Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
 operating-system scheduler, daemon, service, telemetry file, or persistent log.
 After normal Codex hook trust review, the plugin's four lifecycle hooks update a
 bounded local supervision registry only when a task or subagent starts or ends.
-They do not run on turns, tools, or prompts and return no model context.
+They do not run on turns, tools, or prompts and return no model context. On
+brief registry contention, a hook writes one bounded DPAPI-protected fallback
+event; the next hook or Governor cycle merges and removes it.
 
 ## Supervision
 
@@ -45,9 +47,11 @@ do not run Heartbeats. The recommended host configuration is one Governor task
 using `gpt-5.6-luna` with Medium reasoning. The host selects that model; Chronos
 cannot change a task's model setting.
 
-`OwningSolThread` is always `governor`. `Owner` and `Subject` are compact triage
-hints, not direct-delivery instructions. Chronos never sends a message, starts
-another task, or wakes each monitored task. The host supplies collector coverage
+`OwningSolThread` is always `governor`. `Owner` and `Subject` are compact routing
+hints, not authority by themselves. The native script never sends a message or
+starts another task. The Codex-host Governor may use `send_message_to_thread`
+for one fixed-template intervention after it verifies exactly one live affected
+task. It never broadcasts or gives monitored tasks a recurrence. The host supplies collector coverage
 and chooses when to invoke the action. The engine enforces its registered
 minimum cadence for each observed family. Supply a stable
 `sourceEpoch` and increasing `sourceSequence`; without continuity proof, Chronos
@@ -63,11 +67,25 @@ default state is
 Run the same action without an input path to show compact Heartbeat status.
 After the host deduplicates and successfully delivers an event, pass its stable
 ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain
-in a bounded local outbox and retry after 15 minutes with the same ID.
+in a bounded local outbox and receive at most one retry after 15 minutes with the
+same ID. `plan` and `fail-closed` consume actionable events atomically.
 Use `-HeartbeatInspectorOutputPath` only with captured compact `CHRONOS` and
 `CHRONOS EFFICIENCY` lines. See the public
 [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
 for the strict normalized input contract and coverage limits.
+
+Only the dedicated Governor uses `-HeartbeatInterventionAction`. It must plan
+all events before sending, keep one active intervention per target, recheck the
+target generation before claiming a send, and use fixed returned instructions.
+Transport acceptance is not task acknowledgement. A task response is not proof
+of recovery; a later observed Heartbeat cycle or allowed independent host check
+must verify the postcondition. Unknown delivery never retries. Definite failure
+gets one retry. Governor/self-origin events never target the Governor.
+
+Token volume is not price. Do not infer cost, quota impact, or efficiency from a
+model name. Governor-origin `USAGE_BURN` remains Governor-local unless a second
+same-subject, same-window event independently shows stall, review amplification,
+or machine degradation. Do not turn routine findings into user chores.
 
 Before running Chronos, resolve `<skill-root>` to the directory containing this `SKILL.md`. Do not assume the user's workspace is the skill directory and do not search the whole disk.
 

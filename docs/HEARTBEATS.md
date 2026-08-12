@@ -28,10 +28,10 @@ quota, test, Git, or machine evidence and cannot prove liveness. Worker tasks
 need no prompt or recurrence. See [Supervision](SUPERVISION.md).
 
 Monitored tasks can use different models and reasoning levels. The recommended
-Governor configuration is `gpt-5.6-luna` with Medium reasoning because the
-Governor performs bounded, repeated triage. OpenAI describes Luna as the
-[efficient high-volume GPT-5.6 tier](https://developers.openai.com/api/docs/guides/latest-model).
-The host must select this setting. Chronos cannot select or enforce a task model.
+Governor configuration is `gpt-5.6-luna` with Medium reasoning when the host
+advertises it. The host must select this setting. Chronos cannot select or
+enforce a task model. Chronos does not infer price, quota impact, or efficiency
+from a model name.
 
 ## Command surface
 
@@ -80,22 +80,25 @@ The host is responsible for:
 - Running one Governor task for the monitored task set.
 - Selecting `gpt-5.6-luna` with Medium reasoning for that Governor when available.
 - Delivering emitted events to the Governor inbox.
-- Deduplicating delivery by `EventId` and acknowledging successful delivery.
-- Recording whether remediation occurred.
+- Resolving one exact live target, coalescing events by target, and using the
+  bounded intervention state machine before task delivery.
+- Recording transport certainty, a categorical task response, and independent
+  postcondition evidence.
 - Rotating or pausing at the reported cycle or age bound and stopping the
   recurrence before local release.
 
-Chronos does not contact another task. `OwningSolThread` is always `governor`.
-`Owner`, `Subject`, and supplied thread IDs are evidence for Governor triage;
-they are not direct-delivery instructions. The host can choose to forward an
-event after Governor review. Chronos never returns a broadcast route or wakes
-each monitored task.
+The native PowerShell code does not contact another task.
+`OwningSolThread` is always `governor`. The Codex-host Governor uses host task
+tools to send one bounded intervention to the exact verified affected task.
+`Owner`, `Subject`, and supplied task IDs are routing evidence, not authority by
+themselves. Chronos never returns a broadcast route or wakes every monitored
+task.
 
 The deterministic cycle does not use model tokens. Monitored tasks can use
 Luna, Terra, Sol, or a mix. The recommended host configuration is one Governor
-task using `gpt-5.6-luna` with Medium reasoning. The host, not Chronos, selects
-the model and reasoning effort. Chronos does not call a model or change a task's
-model setting.
+task using `gpt-5.6-luna` with Medium reasoning when available. The host, not
+Chronos, selects the model and reasoning effort. Chronos does not call a model,
+change a task model, or treat a model label as trusted cost metadata.
 
 ## Top-level input
 
@@ -301,24 +304,106 @@ Each event includes:
 - `Detected`, concise `Changed` and `Evidence` arrays.
 - `LikelyCause` and `RecommendedAction`.
 - A privacy-safe stable `DedupKey` containing a subject hash.
+- `InterventionClass`, `InterventionTemplate`, `TargetPolicy`, and
+  `Postcondition` from a fixed allowlist.
+- `Autonomous` and `SelfTargetAllowed`. Self-target is always false.
+- `CostImpact` and `QuotaImpact`. These are `unknown` for usage events unless a
+  future runtime supplies trusted metadata; Chronos does not infer them from a
+  model name.
+- `GovernorOrigin`, `CorroborationRequired`, and `CorroborationScope` for usage
+  events. Governor-origin usage stays local unless a second event concerns the
+  same subject and observation window.
 
-Chronos emits `INFO` for resolution. A host can record that event without
-waking an expensive reasoning task.
+Chronos emits `INFO` for resolution. `ReleaseNoticeEligible=true` only when an
+active intervention had a temporary restriction that the target acknowledged.
+Other resolutions stay Governor-local.
 
-Event delivery uses a bounded local outbox with at-least-once semantics. Chronos
+Event delivery uses a bounded local outbox. Chronos
 persists an event before writing it to stdout. An unacknowledged event becomes
-eligible for retry after 15 minutes with the same `EventId`. A retry contains
+eligible for one retry after 15 minutes with the same `EventId`. The initial
+attempt plus one retry is the hard limit. An exhausted record remains visible
+in compact status and does not produce more Governor wakes. A retry contains
 only hashes and routes to Governor because Chronos does not persist raw owner,
 task, or route IDs. New events also route to Governor. The host must deduplicate
-the stable ID before delivery and
-acknowledge only after delivery succeeds. A crash can therefore cause a safe
-duplicate attempt, but it cannot permanently suppress a transition that was
-persisted before stdout. Due outbox records are selected before duplicate-run
+the stable ID before delivery. `plan` or `fail-closed` consumes the native
+outbox record atomically. Use `-HeartbeatAcknowledgeEventId` only when the
+Governor records an event without opening an intervention. A crash can cause a
+duplicate Governor-inbox attempt, but never an unbounded retry. Due outbox records are selected before duplicate-run
 suppression, so repeating the same `runId` after a crash can drain the pending
 event. Delivery attempts and retry eligibility use local wall-clock time, not
 the replayable collector `capturedAtUtc` evidence timestamp. Due delivery and
 duplicate-run recovery are evaluated before evidence-time ordering, so an old
 serialized retry cannot be preempted by a newer collector cycle.
+
+## Autonomous intervention state
+
+The Governor must plan all events in a cycle before it sends a task message.
+Chronos permits one active intervention per target. Equal or lower severity
+events coalesce. A higher severity event replaces an unsent version. If an
+earlier version was already sent, only one escalation version is allowed.
+
+The minimum flow is:
+
+1. `plan` or `fail-closed`.
+2. Recheck the exact live target and host generation.
+3. `claim` one send attempt.
+4. Call `send_message_to_thread` with the fixed returned instruction.
+5. Record `accepted`, `definite_failure`, or `unknown`.
+6. Accept a bounded categorical reply only from the exact target and version.
+7. Wait for an observed Heartbeat result or an allowed independent host check.
+8. Mark `verified_resolved`, `active_violation`, or `remediation_failed`.
+
+`plan` hashes the requested target and enforces the fixed event-class policy
+against the persisted subject and owner hashes. A subject-only event cannot be
+redirected to its owner, and an owner-only event cannot be redirected to its
+subject. A mismatch returns `target_policy_mismatch` and consumes the event as
+a fail-closed intervention.
+
+Transport acceptance is not task acknowledgement. A task report is not proof
+of recovery. A send with an unknown outcome does not retry. Only a definite
+failure permits one retry. State keys combine the event occurrence,
+intervention version, target hash, and target-generation hash.
+
+Plan an event:
+
+```powershell
+chronos.ps1 -Action heartbeat -HeartbeatInterventionAction plan `
+  -HeartbeatEventId <event-id> -HeartbeatTargetId <live-task-id> `
+  -HeartbeatTargetGeneration <host-generation> `
+  -HeartbeatGovernorId <governor-task-id>
+```
+
+For Governor-origin `USAGE_BURN`, also pass a same-subject, same-window stall,
+Guardian, or machine event with `-HeartbeatCorroboratingEventId`. Without that
+evidence, planning returns `governor_usage_uncorroborated` and stays local.
+
+Claim only after all events for the cycle are planned and the target is checked
+again:
+
+```powershell
+chronos.ps1 -Action heartbeat -HeartbeatInterventionAction claim `
+  -HeartbeatInterventionId <intervention-id> `
+  -HeartbeatInterventionVersion <version> `
+  -HeartbeatTargetId <live-task-id> `
+  -HeartbeatTargetGeneration <host-generation> `
+  -HeartbeatGovernorId <governor-task-id>
+```
+
+Record the host send result with `-HeartbeatInterventionAction transport` and
+the returned `-HeartbeatClaimToken`. Record a task reply with
+`-HeartbeatInterventionAction response`, the exact target and generation, and
+one allowed `-HeartbeatTaskResponse`. Record independent evidence with
+`-HeartbeatInterventionAction verify`, an allowed verification source, and a
+categorical result. These commands persist hashes, enums, counters, and
+timestamps only.
+
+The fixed autonomous actions can ask an affected task to stop new worker
+creation, reduce its own parallel work, checkpoint, return completed workers,
+prepare a fresh-task handoff, reconcile a child it owns, or run one known narrow
+validation. They cannot expand the task's user-authorized assignment. Chronos
+fails closed for installs, model or reviewer changes, permissions, secrets,
+process termination, PC restarts, broad commands, destructive Git actions,
+publishing, ambiguous ownership, unavailable transport, or user-only authority.
 
 ## Persistence and concurrency
 
@@ -335,8 +420,9 @@ to create the hash. Those values are not stored in the file. A host can supply
 The state file contains only bounded hashed identity, normalized counters,
 statuses, timestamps, cadence, coverage, condition state, compact event
 metadata, delivery metadata, and engine health. It retains at most 256
-conditions, 50 compact event records, 64 unacknowledged outbox records, and 32
-run-ID hashes. The file is limited to 256 KiB. Active conditions are never
+conditions, 50 compact event records, 64 unacknowledged outbox records, 64
+intervention records, and 32 run-ID hashes. Intervention records contain hashes,
+enums, counters, and timestamps only. The file is limited to 256 KiB. Active conditions are never
 silently evicted; the cycle fails closed if their capacity is exhausted.
 
 A restrictive per-user `Global\` named mutex serializes every Windows process
@@ -354,8 +440,8 @@ ancestry is rejected.
 Snapshots with `origin=heartbeat`, `origin=heartbeat_notification`, or
 `isHeartbeatGenerated=true` are ignored. `heartbeatActivity` can report
 duplicate schedulers and cycle runtime. An abnormal self-health condition routes
-once to Governor and backs off that collector for 15 minutes. Other families
-continue to run.
+once to the Governor inbox and backs off that collector for 15 minutes. It never
+opens a task intervention against the Governor. Other families continue to run.
 
 ## Limits
 
@@ -369,7 +455,8 @@ Heartbeat state is local and unauthenticated. Atomic writes coordinate local
 processes but do not make the file a security boundary. SHA-256 identifiers are
 pseudonymous metadata, not anonymous data. The engine does not prove that a
 worker is safe, that an artifact is correct, or that a route was delivered. The
-owning coordinator must investigate and accept any remediation.
+Governor must verify the named postcondition independently before it records
+recovery.
 
 Heartbeat sends no publisher telemetry and makes no network or model calls. It
 emits a bounded local event to the invoking host. Any host delivery is controlled

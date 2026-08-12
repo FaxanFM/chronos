@@ -86,8 +86,13 @@ Different installations generate different IDs.
 
 Lifecycle hooks do not run for every turn, prompt, tool call, or approval. They
 return no model-visible output and make no network request. If a hook is
-disabled, untrusted, malformed, busy, or unable to write, it exits without
-blocking the Codex task.
+disabled, untrusted, malformed, or unable to write, it exits without blocking
+the Codex task. Brief registry contention can create one temporary fallback
+entry with the same DPAPI-protected identifiers, hashed workspace, safe labels,
+event category, and timestamp. Each entry is limited to 4 KiB and the queue to
+256 entries. The next hook or Governor status merges valid entries and removes
+them. No entry contains a raw path, transcript, prompt, response, or source
+content.
 
 When the user explicitly enables or runs Chronos Heartbeats, the Codex host can
 supply a bounded normalized snapshot containing safe counters, status values,
@@ -96,7 +101,7 @@ identifiers. The local Heartbeat engine validates and compares that snapshot. It
 rejects credential-shaped values, Windows or Unix absolute-path identifiers,
 and slash-rooted identifiers outside the canonical `/root` Codex worker form. It
 persists only bounded transition, cadence, coverage, deduplication,
-delivery/outbox, and engine-health metadata in a per-scope file beneath the user's local Chronos
+delivery/outbox, intervention, and engine-health metadata in a per-scope file beneath the user's local Chronos
 application-data directory. Raw collector snapshots, prompts, responses, source
 code, diffs, commands, tool arguments, tool output, credentials, usernames, and
 absolute paths are not persisted.
@@ -104,20 +109,29 @@ absolute paths are not persisted.
 The Heartbeat PowerShell code does not create a scheduler, call a model, send a
 message, or make a network request. It sends no publisher telemetry. It emits a
 concise event to one Governor inbox only when an actionable condition appears,
-resolves, or worsens materially. Owner and subject identifiers are triage hints;
-Chronos does not directly wake monitored tasks. The Codex host processes and
-delivers that event under the user's OpenAI account or workspace controls. A
-cycle with no actionable transition ends without output.
+resolves, or worsens materially. The Codex-host Governor can use host task tools
+to send one fixed-template intervention to one exact verified affected task.
+It does not broadcast or give every task a recurrence. That direct message and
+the task's reply exist in the Governor and affected task contexts under the
+user's OpenAI account or workspace controls; they are not sent to the publisher.
+A cycle with no actionable transition ends without output.
 Stable SHA-256 identifiers in local state are pseudonymous metadata, not
 anonymous data. Unacknowledged event records contain hashes, type, severity,
 timestamps, delivery attempts, and route class; they do not contain raw owner,
 task, subject, or route IDs.
+Intervention records contain hashed target and generation identifiers, event and
+condition hashes, allowlisted state and action categories, attempt counters, and
+timestamps. Claim tokens are stored only as hashes. Raw task IDs are transient
+host routing handles and are not written to Heartbeat state. Task replies are
+reduced to bounded categories; free-form reply text is not persisted.
 
 ## Recipients
 
 Chronos returns its compact summaries in the active Codex task. The supported
-Heartbeat topology returns events only in the dedicated Governor task. OpenAI
-may process that task content and any host-delivered follow-up under
+Heartbeat topology returns events in the dedicated Governor task. When a fixed
+intervention is required, the host also delivers it to the exact affected task.
+OpenAI may process that task content, the intervention, its categorical reply,
+and any host-delivered follow-up under
 the terms and data controls for the user's OpenAI account or workspace. Chronos
 does not send the underlying local files or raw values to Dravara, LLC or
 another service.

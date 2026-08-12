@@ -77,6 +77,7 @@ monitored task set and chooses the recurring cadence. The recommended topology
 uses one Governor task on `gpt-5.6-luna` with Medium reasoning. Monitored tasks
 remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
+It does not infer cost or quota impact from a model name.
 
 The engine supports eight families: agent stall, Guardian or automatic-review
 runaway, usage burn, session or context explosion, test regression,
@@ -90,12 +91,21 @@ per-family cadence, condition-origin epoch binding, source sequence continuity,
 and a restrictive canonical-state global per-user execution lock prevent
 unchanged conditions, Windows path aliases, or duplicate scheduler runs from
 repeatedly waking a coordinator. A bounded acknowledged outbox gives events
-stable IDs and at-least-once host delivery semantics, including a repeated host
-run after an interrupted delivery. A normal cycle with
+stable IDs, one initial Governor-inbox delivery, and at most one retry. A normal cycle with
 no transition or pending delivery produces no output. Event records contain
 concise evidence, ownership hints, and one Governor target. They never broadcast
-to or directly wake monitored tasks. A host can forward a reviewed event under
-an explicit policy.
+to monitored tasks. The Codex-host Governor can contact one exact verified task
+through the host task transport under the fixed intervention policy.
+
+Intervention state is separate from event delivery. One record is keyed by the
+event occurrence, intervention version, target hash, and target-generation hash.
+It moves through target resolution, queued send, claimed send, transport result,
+task response, and independent postcondition verification. One active record is
+allowed per target. Equal or lower severity events coalesce. Unknown transport
+does not retry. A definite failure can retry once. A task report cannot resolve
+the detector condition. Native planning compares the requested target hash with
+the event class's persisted subject or owner hash and fails closed on a policy
+mismatch.
 
 The engine is not a scheduler, task transport, security boundary, telemetry
 client, or general transcript store. Semantic interpretation and event delivery
@@ -147,6 +157,10 @@ and agent IDs, workspace hashes, safe model slugs, lifecycle state, counters,
 and timestamps. It does not read the transcript path supplied by the host and
 does not persist raw workspace paths. Atomic replacement, a named mutex,
 reparse containment, size limits, and retention limits protect the write path.
+If the mutex is briefly busy, the hook writes one bounded fallback event beside
+the registry. It contains the same protected or hashed metadata and no raw path
+or transcript. The next hook or Governor status merges and removes it under the
+mutex.
 
 A separate minimal `installation-scope.json` anchor stores a random 128-bit
 opaque ID. It contains no machine-derived value and is not a credential. The
@@ -175,9 +189,10 @@ The inspector persists nothing. Governor persists only coordination metadata
 beneath the current user's temporary application-data directory, keyed by a
 hash of Git's canonical common directory. An invoked Heartbeat cycle persists
 bounded per-scope transition, cadence, coverage, deduplication, and engine-health
-metadata plus a hashed, bounded delivery outbox beneath the user's local Chronos
-application-data directory. It does not persist the raw collector snapshot or
-raw route, subject, or owner IDs.
+metadata plus hashed, bounded delivery and intervention records beneath the
+user's local Chronos application-data directory. Intervention state contains
+hashes, enums, counters, and timestamps. It does not persist the raw collector
+snapshot or raw route, subject, owner, or task IDs.
 
 Passive supervision persists one bounded registry beneath the current user's
 local application-data directory. Raw task and agent IDs are DPAPI protected

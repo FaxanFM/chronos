@@ -12,7 +12,7 @@ GitHub release candidate: v0.8.1 adds privacy-bounded passive task discovery and
 single-Governor bootstrap guidance. It has not been submitted, approved, or
 published in the OpenAI Plugin Directory. The release artifact is
 `chronos-v0.8.1.zip` with SHA-256
-`e9fb847175594dff1fde2962f100f9b78d019a557c5f866d279979a61325832e`.
+`f1fcd912ce1ddd31fe2d807e8345eeeed7f36d00ab63e0dda5c7a741e55a25cd`.
 Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.1.
 
 Direct listing:

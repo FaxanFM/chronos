@@ -10,6 +10,7 @@ $readmePath = Join-Path $repoRoot "README.md"
 $pluginReadmePath = Join-Path $repoRoot "plugins\chronos\README.md"
 $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
 $supervisionPath = Join-Path $repoRoot "docs\SUPERVISION.md"
+$heartbeatPath = Join-Path $repoRoot "docs\HEARTBEATS.md"
 $supportPath = Join-Path $repoRoot "SUPPORT.md"
 $fieldReportsPath = Join-Path $repoRoot "docs\FIELD-REPORTS.md"
 $submissionPacketPath = Join-Path $repoRoot "docs\PLUGIN-DIRECTORY-SUBMISSION.md"
@@ -64,6 +65,19 @@ try {
   )) {
     if (-not $supervisionContract.Contains($required)) {
       throw "Public supervision contract is missing a release boundary: $required"
+    }
+  }
+  $heartbeatContract = (Get-Content -Raw -LiteralPath $heartbeatPath) -replace '\s+', ' '
+  foreach ($required in @(
+    'one active intervention per target',
+    'A send with an unknown outcome does not retry',
+    'A task report is not proof of recovery',
+    'same subject and observation window',
+    'Chronos does not infer price, quota impact, or efficiency from a model name',
+    'The initial attempt plus one retry is the hard limit'
+  )) {
+    if (-not $heartbeatContract.Contains($required)) {
+      throw "Public Heartbeat contract is missing an autonomy boundary: $required"
     }
   }
   $publicReadmes = @(

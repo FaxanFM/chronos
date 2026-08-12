@@ -21,8 +21,10 @@ $script:CheckBatchLimit = 8
 $script:EndedRetentionHours = 24
 $script:ActiveRetentionDays = 30
 $script:JsonNodeLimit = 4096
+$script:PendingEventLimit = 256
+$script:PendingEventByteLimit = 4096
 $script:SynchronousHookMutexWaitMilliseconds = 250
-$script:AsynchronousHookMutexWaitMilliseconds = 2000
+$script:AsynchronousHookMutexWaitMilliseconds = 100
 $script:GovernorActiveCadenceMinutes = 60
 $script:GovernorIdleCadenceMinutes = 360
 $script:GovernorMaximumCycles = 336
@@ -459,8 +461,10 @@ function Read-State {
 }
 
 function Write-State {
-  param($State, [string]$Path)
-  Assert-State $State
+  param($State, [string]$Path, [switch]$TrustedHookMutation)
+  # Hook state was fully validated immediately after the mutex was acquired and
+  # can only be changed by the closed lifecycle mutation functions below.
+  if (-not $TrustedHookMutation) { Assert-State $State }
   $directory = Split-Path -Parent $Path
   if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
   if (-not (Test-NoReparseAncestors $directory)) { throw 'supervision_state_path_invalid' }
@@ -470,9 +474,14 @@ function Write-State {
     $json = $State | ConvertTo-Json -Compress -Depth 12
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
     if ($bytes.Length -gt $script:StateByteLimit) { throw 'supervision_state_capacity' }
-    $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
-    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    [void]((Get-Content -Raw -LiteralPath $temporary) | ConvertFrom-Json -ErrorAction Stop)
+    # This registry is an advisory discovery cache that host liveness can rebuild.
+    # Atomic replacement matters; forcing a physical flush for every lifecycle
+    # hint only extends lock contention and increases disk work.
+    $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush() } finally { $stream.Dispose() }
+    if (-not $TrustedHookMutation) {
+      [void]((Get-Content -Raw -LiteralPath $temporary) | ConvertFrom-Json -ErrorAction Stop)
+    }
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
       [IO.File]::Replace($temporary, $Path, $backup, $true)
     } else {
@@ -481,6 +490,135 @@ function Write-State {
   } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Get-PendingEventDirectory {
+  param([string]$ResolvedStatePath)
+  return $ResolvedStatePath + '.pending'
+}
+
+function New-PreparedHookEvent {
+  param($HookData, [DateTimeOffset]$EventObservedAt)
+  $event = [string](Get-Value $HookData 'hook_event_name' '')
+  if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop')) { throw 'supervision_hook_event_invalid' }
+  $session = Normalize-OpaqueId (Get-Value $HookData 'session_id')
+  $agent = $null
+  if ($event -in @('SubagentStart', 'SubagentStop')) {
+    $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
+  }
+  $source = if ($event -eq 'SessionStart') { [string](Get-Value $HookData 'source' 'startup') } elseif ($event -in @('SubagentStart', 'SubagentStop')) { 'subagent' } else { 'fallback' }
+  if ($event -eq 'SessionStart' -and $source -notin @('startup', 'resume', 'clear', 'compact')) { throw 'supervision_hook_source_invalid' }
+  return [ordered]@{
+    schema = 1
+    event = $event
+    protectedSessionId = Protect-OpaqueId $session
+    protectedAgentId = if ($null -ne $agent) { Protect-OpaqueId $agent } else { $null }
+    workspaceHash = Get-WorkspaceHash (Get-Value $HookData 'cwd')
+    model = Normalize-Model (Get-Value $HookData 'model')
+    source = $source
+    observedAtUtc = $EventObservedAt.ToString('o')
+  }
+}
+
+function Assert-PendingHookEvent {
+  param($Record)
+  Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'observedAtUtc')
+  if (-not (Test-IsInteger $Record.schema) -or [int]$Record.schema -ne 1 -or
+      [string]$Record.event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop') -or
+      -not (Test-ProtectedIdShape $Record.protectedSessionId) -or
+      [string]$Record.workspaceHash -notmatch '^[a-f0-9]{64}$' -or
+      [string]$Record.model -notmatch '^[A-Za-z0-9._:/-]{1,128}$' -or
+      [string]$Record.source -notin @('startup', 'resume', 'clear', 'compact', 'subagent', 'fallback')) {
+    throw 'supervision_pending_event_invalid'
+  }
+  if ([string]$Record.event -in @('SubagentStart', 'SubagentStop')) {
+    if (-not (Test-ProtectedIdShape $Record.protectedAgentId)) { throw 'supervision_pending_event_invalid' }
+  } elseif ($null -ne $Record.protectedAgentId) {
+    throw 'supervision_pending_event_invalid'
+  }
+  [void](ConvertTo-UtcTimestamp $Record.observedAtUtc)
+}
+
+function Write-PendingHookEvent {
+  param([string]$ResolvedStatePath, $PreparedEvent)
+  Assert-PendingHookEvent $PreparedEvent
+  $directory = Get-PendingEventDirectory $ResolvedStatePath
+  if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+  $directoryItem = Get-Item -LiteralPath $directory -Force
+  if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
+  if (@(Get-ChildItem -LiteralPath $directory -File -Force -ErrorAction Stop).Count -ge $script:PendingEventLimit) { throw 'supervision_pending_event_capacity' }
+  $token = [guid]::NewGuid().ToString('N')
+  $temporary = Join-Path $directory ('.pending-' + $token + '.tmp')
+  $final = Join-Path $directory ('pending-' + $token + '.json')
+  try {
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($PreparedEvent | ConvertTo-Json -Compress -Depth 4))
+    if ($bytes.Length -gt $script:PendingEventByteLimit) { throw 'supervision_pending_event_capacity' }
+    $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush() } finally { $stream.Dispose() }
+    [IO.File]::Move($temporary, $final)
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Read-PendingHookEvents {
+  param([string]$ResolvedStatePath)
+  $directory = Get-PendingEventDirectory $ResolvedStatePath
+  if (-not (Test-Path -LiteralPath $directory)) { return @() }
+  $directoryItem = Get-Item -LiteralPath $directory -Force
+  if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
+  $result = [Collections.Generic.List[object]]::new()
+  foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name | Select-Object -First $script:PendingEventLimit)) {
+    try {
+      if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt $script:PendingEventByteLimit) { throw 'invalid' }
+      $bytes = [IO.File]::ReadAllBytes($file.FullName)
+      $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+      Assert-StrictJson $text 'supervision_pending_event_invalid'
+      $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+      Assert-PendingHookEvent $record
+      $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $record; Valid = $true }) | Out-Null
+    } catch {
+      $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $null; Valid = $false }) | Out-Null
+    }
+  }
+  return @($result)
+}
+
+function Merge-PendingHookEvents {
+  param($State, [string]$ResolvedStatePath, [DateTimeOffset]$Now)
+  $items = @(Read-PendingHookEvents $ResolvedStatePath)
+  $valid = @($items | Where-Object { $_.Valid } | Sort-Object @{Expression={ ConvertTo-UtcTimestamp $_.Record.observedAtUtc }}, Path)
+  foreach ($item in $valid) {
+    $record = $item.Record
+    $session = Unprotect-OpaqueId $record.protectedSessionId
+    $hookData = @{
+      hook_event_name = [string]$record.event
+      session_id = $session
+      model = [string]$record.model
+      source = [string]$record.source
+    }
+    $preparedProtectedId = [string]$record.protectedSessionId
+    if ([string]$record.event -in @('SubagentStart', 'SubagentStop')) {
+      $hookData.agent_id = Unprotect-OpaqueId $record.protectedAgentId
+      $preparedProtectedId = [string]$record.protectedAgentId
+    }
+    Invoke-HookEvent $State $hookData $Now (ConvertTo-UtcTimestamp $record.observedAtUtc) $preparedProtectedId ([string]$record.workspaceHash)
+  }
+  foreach ($item in @($items | Where-Object { -not $_.Valid })) {
+    $State.health.droppedEntries = [long]$State.health.droppedEntries + 1
+  }
+  return @($items | ForEach-Object { [string]$_.Path })
+}
+
+function Remove-PendingHookEvents {
+  param([string[]]$Paths, [string]$ResolvedStatePath)
+  foreach ($path in @($Paths)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+  $directory = Get-PendingEventDirectory $ResolvedStatePath
+  if (Test-Path -LiteralPath $directory) {
+    try {
+      if (@(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop).Count -eq 0) { Remove-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue }
+    } catch {}
   }
 }
 
@@ -553,6 +691,7 @@ function Set-SessionRecord {
     [DateTimeOffset]$Now,
     [DateTimeOffset]$EventObservedAt,
     [ValidateRange(1, 3)][int]$EventRank,
+    [string]$PreparedProtectedId,
     [switch]$AllowReactivation
   )
   $hash = Get-TextHash $Id
@@ -577,7 +716,13 @@ function Set-SessionRecord {
   $firstSeen = if ($null -ne $existing) { [string]$existing.firstSeenUtc } else { $Now.ToString('o') }
   $State.sessions[$hash] = [ordered]@{
     idHash = $hash
-    protectedId = if ($null -ne $existing) { [string]$existing.protectedId } else { Protect-OpaqueId $Id }
+    protectedId = if ($null -ne $existing) {
+      [string]$existing.protectedId
+    } elseif (-not [string]::IsNullOrWhiteSpace($PreparedProtectedId)) {
+      $PreparedProtectedId
+    } else {
+      Protect-OpaqueId $Id
+    }
     kind = $Kind
     parentHash = if ([string]::IsNullOrWhiteSpace($ParentHash)) { $null } else { $ParentHash }
     workspaceHash = $WorkspaceHash
@@ -598,17 +743,17 @@ function Set-SessionRecord {
 }
 
 function Invoke-HookEvent {
-  param($State, $HookData, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt)
+  param($State, $HookData, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$PreparedProtectedId, [string]$PreparedWorkspaceHash)
   $event = [string](Get-Value $HookData 'hook_event_name' '')
   if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop')) { throw 'supervision_hook_event_invalid' }
   $session = Normalize-OpaqueId (Get-Value $HookData 'session_id')
-  $workspaceHash = Get-WorkspaceHash (Get-Value $HookData 'cwd')
+  $workspaceHash = if ([string]$PreparedWorkspaceHash -match '^[a-f0-9]{64}$') { $PreparedWorkspaceHash } else { Get-WorkspaceHash (Get-Value $HookData 'cwd') }
   $model = Normalize-Model (Get-Value $HookData 'model')
   switch ($event) {
     'SessionStart' {
       $source = [string](Get-Value $HookData 'source' 'startup')
       if ($source -notin @('startup', 'resume', 'clear', 'compact')) { throw 'supervision_hook_source_invalid' }
-      [void](Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'active' $source $Now $EventObservedAt 1)
+      [void](Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'active' $source $Now $EventObservedAt 1 $PreparedProtectedId)
     }
     'SessionEnd' {
       $hash = Get-TextHash $session
@@ -627,7 +772,7 @@ function Invoke-HookEvent {
     }
     'SubagentStart' {
       $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
-      [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1)
+      [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1 $PreparedProtectedId)
     }
     'SubagentStop' {
       $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
@@ -770,6 +915,12 @@ try {
       try { $eventObservedAt = ConvertTo-UtcTimestamp $ObservedAtUtc } catch { throw 'supervision_hook_timestamp_invalid' }
     }
   }
+  $preparedHookEvent = $null
+  $preparedProtectedId = $null
+  if ($Action -eq 'hook') {
+    $preparedHookEvent = New-PreparedHookEvent $hookData $eventObservedAt
+    $preparedProtectedId = if ([string]$preparedHookEvent.event -eq 'SessionStart') { [string]$preparedHookEvent.protectedSessionId } elseif ([string]$preparedHookEvent.event -eq 'SubagentStart') { [string]$preparedHookEvent.protectedAgentId } else { $null }
+  }
   $resolved = Resolve-StatePath $StatePath
   $mutex = New-RegistryMutex $resolved
   $mutexWaitMilliseconds = if ($Action -eq 'hook' -and [string](Get-Value $hookData 'hook_event_name' '') -eq 'SessionEnd') {
@@ -778,18 +929,30 @@ try {
     $script:AsynchronousHookMutexWaitMilliseconds
   } else { 1000 }
   try { $acquired = $mutex.WaitOne($mutexWaitMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true }
-  if (-not $acquired) { throw 'supervision_mutex_busy' }
+  if (-not $acquired) {
+    if ($Action -eq 'hook') {
+      Write-PendingHookEvent $resolved $preparedHookEvent
+      exit 0
+    }
+    throw 'supervision_mutex_busy'
+  }
   if ($Action -ne 'hook') {
     $installationScopeId = Get-OrCreateInstallationScopeId $resolved
     $script:HostEquivalenceKey = $script:GovernorEquivalencePrefix + ':' + $installationScopeId
   }
   $state = Read-State $resolved -ValidateProtectedIds:($Action -ne 'hook')
   $now = [DateTimeOffset]::UtcNow
+  $pendingPaths = @(Merge-PendingHookEvents $state $resolved $now)
 
   if ($Action -eq 'hook') {
-    Invoke-HookEvent $state $hookData $now $eventObservedAt
-    Write-State $state $resolved
+    Invoke-HookEvent $state $hookData $now $eventObservedAt $preparedProtectedId ([string]$preparedHookEvent.workspaceHash)
+    Write-State $state $resolved -TrustedHookMutation
+    Remove-PendingHookEvents $pendingPaths $resolved
     exit 0
+  }
+  if ($pendingPaths.Count -gt 0) {
+    Write-State $state $resolved -TrustedHookMutation
+    Remove-PendingHookEvents $pendingPaths $resolved
   }
 
   if ($Action -eq 'status') {

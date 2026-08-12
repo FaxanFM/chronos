@@ -60,13 +60,23 @@ counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
-adaptation, persisted-state privacy, and
+adaptation, persisted-state privacy, schema 4 to 5 migration, one-active-record
+per target, eight-event coalescing, higher-severity replacement, fixed action
+contracts, self-target rejection, same-subject and same-window Governor-usage
+corroboration, transport acceptance versus task acknowledgement, ambiguous-send
+non-retry, two-attempt definite-failure retry, exact reporter and generation
+binding, task-report non-resolution, independent postcondition verification, and
 PowerShell 5.1 compatibility.
 
-These tests validate deterministic transition and Governor-inbox decisions.
-They do not prove that the host collected complete evidence, delivered an
-event, or configured the recommended Luna Medium Governor. Missing host data
-remains partial or unsupported.
+These tests validate deterministic transition, Governor-inbox, and intervention
+state decisions. They do not prove that the host collected complete evidence,
+called `send_message_to_thread`, delivered an event to the correct installed
+task, or configured the recommended Luna Medium Governor. Missing host data
+remains partial or unsupported. An external autonomy canary must prove one exact
+target wake, no unrelated wake, ambiguous-send containment, duplicate
+suppression, task-to-Governor response, independent recovery, Governor self-loop
+prevention, subject-only, owner-only, and subject-or-owner target binding, and
+silent normal cycles.
 
 ## Passive Supervision
 
@@ -82,9 +92,10 @@ and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, delayed starts after terminal
 events, host-confirmed reactivation, two-phase release, live mutex contention,
-full 256-record capacity behavior, silent hook output, headless Windows commands,
-lifecycle-only event coverage, and absence of scheduler, process-launch, and
-network primitives.
+bounded fallback creation, protected fallback contents, reconciliation and
+removal after contention, full 256-record capacity behavior, silent hook output,
+headless Windows commands, lifecycle-only event coverage, and absence of
+scheduler, process-launch, and network primitives.
 
 These tests validate local discovery and persistence. They do not prove that a
 user trusted the hook, that host task and automation tools are available, that

@@ -78,12 +78,14 @@ paths, identifiers, prompts, commands, credentials, or private source.
   unusual usage burn, session growth, test regressions, machine drift, task
   dependencies, and Git or build-state changes.
 - Suppresses unchanged Heartbeat conditions and sends only new, resolved, or
-  materially worse transitions to one Governor inbox. Monitored tasks remain
-  model-agnostic and are not woken by Chronos. Stable event IDs and a bounded
-  acknowledged outbox protect host delivery across restarts.
+  materially worse transitions to one Governor inbox. Normal cycles do not wake
+  monitored tasks. When action is required, the Governor sends one fixed,
+  bounded instruction to the exact verified affected task. Stable event IDs,
+  one active intervention per target, and bounded retries prevent wake storms.
 - Passively registers task and subagent lifecycle changes through four reviewed,
   headless hooks. No per-turn hook, worker recurrence, transcript read, or
-  model-visible hook output is used.
+  model-visible hook output is used. Brief registry contention uses a bounded
+  protected fallback that the next Governor status removes after merging.
 - Reuses one host-verified Chronos Governor or creates a fresh history-free
   Governor task. It never automatically forks a large working task.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
@@ -166,8 +168,12 @@ The Codex host owns the recurring schedule and model choice. Chronos does not
 install a service or scheduler. Monitored tasks can use any model and do not
 run Heartbeats. Each due cycle compares one bounded normalized snapshot with
 compact local state. A cycle with no actionable transition ends silently. All
-events enter one Governor inbox; owner IDs are triage hints. The host deduplicates
-and acknowledges emitted `EventId` values. See
+events enter one Governor inbox. The Governor verifies one exact live target,
+coalesces simultaneous events for that task, and communicates directly through
+host task tools. It does not ask the user to relay routine remediation. A task
+reply remains pending until Chronos or an independent host check verifies the
+postcondition. Governor self-usage never causes a self-message. Chronos does not
+infer cost or quota impact from model names. See
 [Heartbeats](docs/HEARTBEATS.md) for the collector contract, coverage limits,
 routing, delivery, deduplication, and stored fields.
 
@@ -235,12 +241,13 @@ focused v0.7.7 correctness repairs and validation boundary.
   ownership.
 - Stores lifecycle task and agent IDs encrypted for the current Windows user;
   raw transcripts and workspace paths are never stored. DPAPI does not isolate
-  data from another process already running as that user. Host task tools remain
-  the liveness authority.
+  data from another process already running as that user. The temporary
+  contention fallback uses the same protected or hashed metadata and no raw
+  path. Host task tools remain the liveness authority.
 - Stores one random, non-secret 128-bit installation ID with no machine-derived
   data so host reconciliation remains scoped to this PC after registry recovery.
 - An invoked Heartbeat cycle stores bounded per-scope transition, coverage,
-  cadence, deduplication, hashed delivery/outbox, and health metadata in the user's local Chronos
+  cadence, deduplication, hashed delivery/outbox, intervention, and health metadata in the user's local Chronos
   application-data directory. It does not persist raw snapshots, prompts,
   responses, commands, source, paths, credentials, or tool output.
 - When Governor is invoked, stores only untrusted local coordination metadata beneath the

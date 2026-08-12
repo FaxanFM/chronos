@@ -34,7 +34,7 @@ Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
 The v0.8.1 release-candidate ZIP SHA-256 is
-`e9fb847175594dff1fde2962f100f9b78d019a557c5f866d279979a61325832e`.
+`f1fcd912ce1ddd31fe2d807e8345eeeed7f36d00ab63e0dda5c7a741e55a25cd`.
 It packages the passive supervision hooks and registry. Treat this value as
 provisional until the signed release workflow publishes and verifies the
 immutable asset.
@@ -145,6 +145,11 @@ health.
 local state and never justify deleting a task or workspace file. Worker tasks
 need no setup and must not receive a recurring automation.
 
+`status` and `discover` automatically merge bounded fallback events left by
+brief hook contention. Do not edit or delete the fallback directory. A malformed
+entry is removed and increments the degraded counter; capacity pressure is
+reported without evicting the committed registry.
+
 The default registry is `%LOCALAPPDATA%\Chronos\Supervision\session-registry.json`.
 The sibling `installation-scope.json` contains only a schema number and random
 opaque installation ID. Keep it during ordinary registry recovery so the host
@@ -172,19 +177,38 @@ with `gpt-5.6-luna` and Medium reasoning when the host offers it. The default is
 Governor turns per day. Rotate or pause after 336 cycles or 14 days. Do not
 create a recurrence in every monitored task. Monitored tasks can use any
 available model.
-Chronos emits only to the Governor inbox; `Owner` and `Subject` are triage hints
-for an explicit host follow-up.
+Chronos emits only to the Governor inbox. `Owner` and `Subject` are routing
+evidence, not authority. The Governor can use the host task transport for one
+fixed-template intervention to one exact verified affected task.
 
 Run `chronos.ps1 -Action heartbeat` without an input path to inspect compact
 Heartbeat health. `outboxPending` counts transitions that the host has not yet
-acknowledged. Deduplicate each event by `EventId`, deliver it once, then pass the
-ID with `-HeartbeatAcknowledgeEventId`. Do not acknowledge an event before host
-delivery succeeds. If delivery is interrupted after state persistence, the host
-can safely retry the same `runId`; due outbox events are returned before that
+acknowledged. `outboxExhausted` counts records that used the initial attempt and
+one retry. Deduplicate each event by `EventId`. Use `plan` or `fail-closed` for
+an actionable event; either command consumes that outbox entry atomically. Use
+`-HeartbeatAcknowledgeEventId` only when the Governor records an event without
+opening an intervention. If delivery is interrupted after state persistence, the host
+can safely replay the same `runId`; due outbox events are returned before that
 run is suppressed. The retry window uses local wall-clock delivery time, so a
 replayed `capturedAtUtc` cannot postpone an already-due event. Due delivery is
 also evaluated before evidence-time ordering, so a newer intervening collector
 cycle cannot preempt replay of the old serialized run.
+
+Plan every event in a cycle before claiming any send. Then recheck the target
+and its host generation. Keep one active intervention per target. Record host
+transport as `accepted`, `definite_failure`, or `unknown`. Never retry an
+unknown result. A definite failure gets one retry. Accept a response only from
+the exact target, intervention ID, version, and generation. Treat
+`outcome_reported` as pending verification, not recovery. Resolve only from a
+later observed Heartbeat cycle or an allowed independent host inventory, narrow
+test, or Git check. `target_policy_mismatch` means the requested task did not
+match the event class's persisted subject or owner hash; keep it failed closed.
+
+Never target the Governor. Governor-origin token volume stays local unless a
+second event concerns the same affected task and observation window. Chronos
+does not infer model price or quota effect. When a target is ambiguous or user
+authority is required, record `fail-closed`; do not broadcast or assign the
+action to the user.
 
 When a host supplies `-HeartbeatStatePath`, it must also supply the same stable
 `-HeartbeatScope` from every working directory and Windows session. The default
