@@ -78,24 +78,19 @@ is one line and under the 30-character final limit.
 
 Long description:
 
-> Chronos is a local diagnostic and coordination plugin for people
-> whose Codex sessions slow down after hours or days of work on Windows. It
-> reports process pressure, diagnostic SQLite churn, token and context
-> amplification, approval loops, permission-rule risks, rollout duplication,
-> and filesystem-helper failures. It separates current machine health from
-> other diagnostic conditions. It also marks missing or partial evidence.
-> Chronos recommends proportionate recovery, evaluates opt-in Heartbeat
-> transitions during long-running work, and coordinates bounded read tasks
-> through Governor. Four reviewed lifecycle hooks can supply one Governor with
-> bounded task and subagent start or end hints without running on each turn.
-> Heartbeat scheduling, task creation, and event delivery remain with the
-> Codex host. Chronos installs no service and sends no publisher telemetry. It does
-> not change SQLite rows or schemas, terminate Codex or unrelated user
-> processes, or stop tasks. Governor can stop only its own bounded Git
-> fingerprint subprocess. A
-> logical read-only SQLite connection can create or update coordination
-> sidecars, which Chronos reports. Governor
-> is a coordination aid, not a sandbox or filesystem security boundary.
+> Chronos is a local diagnostic and coordination plugin for Windows users
+> whose Codex sessions slow down after hours or days of work. It reports
+> process pressure, diagnostic SQLite churn, token and context amplification,
+> approval loops, permission-rule risks, rollout duplication, and
+> filesystem-helper failures. It separates current machine health from other
+> diagnostic conditions and marks missing or partial evidence. Heartbeat
+> evaluates actionable changes during long-running work. One dedicated
+> Governor coordinates bounded read tasks and receives compact task lifecycle
+> hints, so Chronos does not need to run on every turn. Chronos installs no
+> service and sends no publisher telemetry. It does not modify SQLite rows or
+> schemas, terminate Codex, stop tasks, or enable shared-folder writes.
+> Governor is a coordination aid, not a sandbox or filesystem security
+> boundary.
 
 Developer name: `Dravara, LLC`
 
@@ -118,9 +113,8 @@ Supported platform: Windows with the Codex plugin runtime.
 1. `Use Chronos to inspect current Codex resource health.`
 2. `Use Chronos to explain current token and approval pressure.`
 3. `Enable Chronos supervision in one dedicated Governor task.`
-4. `Use Chronos to check Heartbeat transitions for this long-running task.`
 
-All four are unique, single-line, under 128 characters, and contain no app
+All three are unique, single-line, under 128 characters, and contain no app
 mention.
 
 ## Positive Reviewer Cases
