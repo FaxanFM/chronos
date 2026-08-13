@@ -210,17 +210,6 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
   resolved repository identity. Supervision was not enabled, so this proves
   installation and compatibility only; it is not the required autonomy canary
   for the refreshed candidate above.
-- v0.8.1 is not validated or released at this point. The remaining gate is an
-  external installed-package canary that verifies normal hook trust, exact
-  version and hash, same-installation convergence to one Governor and one
-  recurrence, and Luna Medium selection without changing monitored task models.
-  It must use real host task transport to prove one exact affected task receives
-  one intervention, no unrelated task or Governor self-target wakes, compatible
-  events coalesce, ambiguous delivery does not retry, a definite failure retries
-  at most once, stale or wrong replies are rejected, and independent evidence is
-  required for resolution. It must also verify silent normal cycles, bounded
-  cadence, partial-failure recovery, two-phase release, and the rotation or pause
-  boundary.
 - The first full external autonomy canary correctly failed closed. Direct
   affected-task delivery, target isolation, intervention coalescing, retry
   limits, stale-reply rejection, independent resolution, normal-cycle silence,
@@ -237,11 +226,19 @@ in v0.7.4. Existing calibration work remains frozen pending labeled evidence.
 - The canary's attempted report delivery to a development task absent from that
   host registry was definitely rejected. It correctly performed no retry and
   did not convert the transport failure into a user-relay request.
+- A follow-up external packaged-suite confirmation checked signed commit
+  `72c0a4911dc70e599b6b5da801864c4d65f961c7` and reproduced ZIP SHA-256
+  `e64552de2295b3658d7f60986c34492c1c1c3fe62351141abc4fe8a41e1be745`.
+  The complete Heartbeat suite passed against the extracted package. A
+  forbidden state path returned `heartbeat_state_path_invalid`, including when
+  paired with malformed input, which proves the corrected validation-order
+  contract. Together with the earlier autonomy canary, this clears the external
+  v0.8.1 validation gate.
 - This entry is sanitized. It records no machine, user, workspace, repository,
   task, session, or account identifier.
-- Signed candidate source is public on the `main` branch pending the final canary tag.
+- Signed candidate source is public on the `main` branch pending the release tag.
   An earlier local Codex marketplace candidate installed manifest v0.8.1 and
   passed one real headless lifecycle-hook invocation with no output. The final
   refreshed artifact above passed isolated installed-package validation and
-  two-build reproducibility, but it has not yet passed the external autonomy
-  canary.
+  two-build reproducibility. The external autonomy and packaged-suite gates
+  have now passed.
