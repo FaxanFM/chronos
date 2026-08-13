@@ -208,9 +208,10 @@ The default registry is:
 %TEMP%\Chronos\Supervision\session-registry.json
 ```
 
-The directory receives a current-user ACL when the platform permits it. Task
-and agent identifiers remain protected by Windows DPAPI even when ACL hardening
-is unavailable. On first use after an upgrade, Chronos imports a valid legacy
+The directory retains the current user's inherited TEMP permissions. Chronos
+does not replace them with a transient sandbox identity. Task and agent
+identifiers remain protected by Windows DPAPI. On first use after an upgrade,
+Chronos imports a valid legacy
 LocalAppData registry and its separate installation-scope anchor into the temp
 state root. It reports the state-store mode, write preflight, protection mode,
 and migration result without returning a path.

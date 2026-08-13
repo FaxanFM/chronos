@@ -65,7 +65,12 @@ can open a condition but will not resolve one.
 
 Use `-HeartbeatStatePath` only for controlled test or host-managed state. The
 default state is
-`%TEMP%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json`.
+`%TEMP%\Chronos\Heartbeat-v2\<scope-sha256>\heartbeat-state.json`.
+Explicit state paths are accepted only beneath that versioned TEMP root or the
+LocalAppData Heartbeat root.
+Chronos imports readable prior state without modifying its source directory. If
+the prior sandbox-owned directory is inaccessible, it starts safely in the new
+namespace and reports that migration result in compact status.
 Run the same action without an input path to show compact Heartbeat status.
 After the host deduplicates and successfully delivers an event, pass its stable
 ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain

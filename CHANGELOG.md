@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.8.4
+
+- Recover safely when a prior Heartbeat state directory was created under a
+  different Codex sandbox identity. Default Heartbeat state now uses the
+  versioned `%TEMP%\Chronos\Heartbeat-v2` namespace.
+- Import valid readable v0.8.2/v0.8.3 Heartbeat state without changing the old
+  directory. If the prior state is inaccessible, start in the new namespace
+  and report `prior_state_unavailable_new_root` instead of blocking status or a
+  live cycle.
+- Keep inherited current-user TEMP permissions for new Heartbeat and
+  supervision state. This prevents a transient sandbox SID from locking a
+  later Codex identity out while hashed metadata and DPAPI-protected task IDs
+  retain the existing privacy boundaries.
+- Add an installed-runtime regression for inaccessible prior Heartbeat state.
+  It verifies successful status, successful live-cycle persistence in the new
+  namespace, stable scope identity, and no ownership change to the old state.
+- Restrict explicit Heartbeat state paths to the approved versioned TEMP or
+  LocalAppData Heartbeat roots. A JSON path in an unrelated TEMP sibling now
+  fails before creating a directory or file.
+- Keep all v0.8.3 containment controls and frozen diagnostic heuristics
+  unchanged.
+
 ## v0.8.3
 
 - Fix the supervision state-store containment defect found by the external

@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Detect Codex degradation, approval loops, quota amplification, workflow regressions, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
     "name": "Dravara, LLC",

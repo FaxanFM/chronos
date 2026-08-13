@@ -703,7 +703,8 @@ function Resolve-StatePath {
   param([string]$Requested, [string]$RequestedScope)
   $localRoot = Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'
   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-  $privateTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat'
+  $priorTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat'
+  $privateTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat-v2'
   if ([string]::IsNullOrWhiteSpace($RequestedScope)) {
     $codexHome = Join-Path $HOME '.codex'
     $RequestedScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
@@ -716,15 +717,16 @@ function Resolve-StatePath {
     return [pscustomobject]@{
       Path = (Join-Path $privateTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
       ScopeHash = $scopeHash
+      PriorTempPath = (Join-Path $priorTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
       LegacyPath = (Join-Path $localRoot (Join-Path $scopeHash 'heartbeat-state.json'))
     }
   }
   $script:StateStoreMode = 'explicit'
   try { $full = [IO.Path]::GetFullPath($Requested) } catch { throw 'heartbeat_state_path_invalid' }
   if ([IO.Path]::GetExtension($full) -ne '.json') { throw 'heartbeat_state_path_invalid' }
-  if (-not (Test-ContainedPath $full $localRoot) -and -not (Test-ContainedPath $full $tempRoot)) { throw 'heartbeat_state_path_invalid' }
+  if (-not (Test-ContainedPath $full $localRoot) -and -not (Test-ContainedPath $full $privateTempRoot)) { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-NoReparseAncestors $full)) { throw 'heartbeat_state_path_invalid' }
-  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); LegacyPath = $null }
+  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); PriorTempPath = $null; LegacyPath = $null }
 }
 
 function Initialize-StateStore {
@@ -737,19 +739,11 @@ function Initialize-StateStore {
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
       throw 'heartbeat_state_store_unwritable'
     }
-    if ($script:StateStoreMode -eq 'temp_private' -and $createdDirectory) {
-      try {
-        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-        $security = New-Object Security.AccessControl.DirectorySecurity
-        $security.SetAccessRuleProtection($true, $false)
-        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
-        $security.AddAccessRule($rule)
-        [IO.Directory]::SetAccessControl($directory, $security)
-        $script:StateStoreProtection = 'private_acl_hashed_metadata'
-      } catch {
-        $script:StateStoreProtection = 'inherited_acl_hashed_metadata'
-      }
+    if ($script:StateStoreMode -eq 'temp_private') {
+      # User TEMP already inherits the host user's boundary. Do not replace its
+      # ACL with a transient sandbox SID or a later Codex identity can be locked
+      # out of its own upgrade state.
+      $script:StateStoreProtection = 'user_temp_inherited_hashed_metadata'
     }
     if (-not (Test-Path -LiteralPath $ResolvedStatePath -PathType Leaf)) {
       $probe = Join-Path $directory ('.heartbeat-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
@@ -1119,16 +1113,46 @@ function Write-State {
 function Import-LegacyStateIfPresent {
   param($Resolved)
   if ($script:StateStoreMode -ne 'temp_private' -or
-      (Test-Path -LiteralPath $Resolved.Path) -or
-      [string]::IsNullOrWhiteSpace([string]$Resolved.LegacyPath) -or
-      -not (Test-Path -LiteralPath $Resolved.LegacyPath -PathType Leaf)) { return }
-  try {
-    $legacy = Read-State $Resolved.LegacyPath $Resolved.ScopeHash
-    Write-State $legacy $Resolved.Path
-    $script:StateStoreMigration = 'legacy_state_imported'
-  } catch {
-    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
+      (Test-Path -LiteralPath $Resolved.Path)) { return }
+  $unavailable = $false
+  $invalid = $false
+  foreach ($candidate in @(
+    [pscustomobject]@{ Path = [string]$Resolved.PriorTempPath; Imported = 'prior_temp_state_imported' },
+    [pscustomobject]@{ Path = [string]$Resolved.LegacyPath; Imported = 'legacy_state_imported' }
+  )) {
+    if ([string]::IsNullOrWhiteSpace($candidate.Path)) { continue }
+    try {
+      $item = Get-Item -LiteralPath $candidate.Path -Force -ErrorAction Stop
+    } catch {
+      if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) { $unavailable = $true }
+      continue
+    }
+    if ($item.PSIsContainer) { $invalid = $true; continue }
+    try {
+      $probe = New-Object IO.FileStream($candidate.Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+      $probe.Dispose()
+    } catch {
+      if ($_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+          $_.Exception -is [UnauthorizedAccessException] -or
+          $_.Exception.InnerException -is [UnauthorizedAccessException]) { $unavailable = $true }
+      else { $invalid = $true }
+      continue
+    }
+    try {
+      $legacy = Read-State $candidate.Path $Resolved.ScopeHash
+      Write-State $legacy $Resolved.Path
+      $script:StateStoreMigration = $candidate.Imported
+      return
+    } catch {
+      if ($_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+          $_.Exception -is [UnauthorizedAccessException] -or
+          $_.Exception.InnerException -is [UnauthorizedAccessException]) { $unavailable = $true }
+      else { $invalid = $true }
+    }
   }
+  if ($unavailable) { $script:StateStoreMigration = 'prior_state_unavailable_new_root' }
+  elseif ($invalid) { $script:StateStoreMigration = 'prior_state_invalid_rebuilt' }
+  else { $script:StateStoreMigration = 'namespace_v2_new_root' }
 }
 
 function New-DetectorResult {

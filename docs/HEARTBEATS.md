@@ -447,16 +447,23 @@ publishing, ambiguous ownership, unavailable transport, or user-only authority.
 Default state is stored at:
 
 ```text
-%TEMP%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json
+%TEMP%\Chronos\Heartbeat-v2\<scope-sha256>\heartbeat-state.json
 ```
 
 The default scope combines the machine, Codex home, and current workspace only
 to create the hash. Those values are not stored in the file. The default state
-directory receives a current-user ACL when Windows permits it. On first use
-after an upgrade, Chronos imports a valid legacy LocalAppData state file. Compact
-status reports the state-store mode, write preflight, protection mode, and
-migration result without returning a path. A host can supply
+directory retains the current user's inherited TEMP permissions; Chronos does
+not replace them with a transient sandbox identity. On first use after an
+upgrade, Chronos imports valid readable state from the prior TEMP namespace or
+legacy LocalAppData location. If prior state is inaccessible, Chronos does not
+take ownership or change its permissions. It starts in the versioned namespace
+and reports `prior_state_unavailable_new_root`. Compact status reports the
+state-store mode, write preflight, protection mode, and migration result without
+returning a path. A host can supply
 `-HeartbeatScope` for a stable explicit scope.
+An explicit `-HeartbeatStatePath` must stay beneath the versioned TEMP root or
+the LocalAppData Heartbeat root. A sibling elsewhere under TEMP is rejected
+before Chronos creates a directory or file.
 
 The state file uses schema `6` and contains only bounded hashed identity, normalized counters,
 statuses, timestamps, cadence, coverage, condition state, compact event

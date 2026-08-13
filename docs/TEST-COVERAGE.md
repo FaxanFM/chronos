@@ -51,7 +51,8 @@ the release ZIP, then run this complete suite against that package. The same
 suite accepts a source plugin root for local development. State-containment
 cases use a path outside both approved roots and separately verify that
 state-path rejection precedes malformed-input parsing regardless of the package
-extraction folder. It covers normal and actionable paths
+extraction folder. A separate regression rejects an unrelated TEMP sibling
+without creating its directory or file. It covers normal and actionable paths
 for all eight families, first observation and current-versus-previous deltas,
 deduplication, material escalation, resolution, Governor-only routing with
 preserved owner hints, silent normal cycles, recursion
@@ -65,7 +66,9 @@ counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
-adaptation, persisted-state privacy, schema 4 and 5 to 6 migration, one-active-record
+adaptation, persisted-state privacy, schema 4 and 5 to 6 migration, denied
+prior-state recovery when the Windows host enforces the simulated ACL and
+read-only import when it does not, one-active-record
 per target, eight-event coalescing, higher-severity replacement, fixed action
 contracts, self-target rejection, same-subject and same-window Governor-usage
 corroboration, transport acceptance versus task acknowledgement, ambiguous-send

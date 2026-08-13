@@ -249,19 +249,10 @@ function Initialize-StateStore {
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
       throw 'supervision_state_store_unwritable'
     }
-    if ($script:StateStoreMode -eq 'temp_private' -and $createdDirectory) {
-      try {
-        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-        $security = New-Object Security.AccessControl.DirectorySecurity
-        $security.SetAccessRuleProtection($true, $false)
-        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
-        $security.AddAccessRule($rule)
-        [IO.Directory]::SetAccessControl($directory, $security)
-        $script:StateStoreProtection = 'private_acl_dpapi_ids'
-      } catch {
-        $script:StateStoreProtection = 'inherited_acl_dpapi_ids'
-      }
+    if ($script:StateStoreMode -eq 'temp_private') {
+      # Keep the user TEMP inheritance so a later Codex sandbox identity can
+      # reopen the registry. Persisted task IDs remain DPAPI protected.
+      $script:StateStoreProtection = 'user_temp_inherited_dpapi_ids'
     }
     if (-not (Test-Path -LiteralPath $ResolvedStatePath -PathType Leaf)) {
       $probe = Join-Path $directory ('.supervision-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')

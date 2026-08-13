@@ -104,8 +104,11 @@ rejects credential-shaped values, Windows or Unix absolute-path identifiers,
 and slash-rooted identifiers outside the canonical `/root` Codex worker form. It
 persists only bounded transition, cadence, coverage, deduplication,
 delivery/outbox, intervention, and engine-health metadata in a per-scope file beneath the user's Windows temporary Chronos
-directory. A valid legacy LocalAppData state file can be imported during an
-upgrade. Raw collector snapshots, prompts, responses, source
+directory. New state retains the current user's inherited TEMP permissions;
+Chronos does not bind the directory to a transient sandbox identity. Valid
+readable prior state can be imported during an upgrade. Inaccessible prior state
+is left unchanged while Chronos starts in its new versioned namespace. Raw
+collector snapshots, prompts, responses, source
 code, diffs, commands, tool arguments, tool output, credentials, usernames, and
 absolute paths are not persisted.
 

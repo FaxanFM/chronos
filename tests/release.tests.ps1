@@ -231,7 +231,9 @@ try {
   }
   $installedHeartbeat = Join-Path $installRoot "skills\chronos\scripts\chronos.ps1"
   $installedLauncher = Join-Path $installRoot "skills\chronos\scripts\chronos.cmd"
-  $installedState = Join-Path $testRoot "installed-heartbeat-state.json"
+  $heartbeatTestRoot = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' ('release-smoke-' + [guid]::NewGuid().ToString('N')))
+  New-Item -ItemType Directory -Path $heartbeatTestRoot -Force | Out-Null
+  $installedState = Join-Path $heartbeatTestRoot "installed-heartbeat-state.json"
   $installedOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action heartbeat -HeartbeatStatePath $installedState `
     -HeartbeatScope "release-install-smoke" 2>&1)
@@ -333,6 +335,13 @@ try {
   $approvedSupervisionRoot = [System.IO.Path]::GetFullPath((Join-Path $resolvedTemp 'Chronos\Supervision'))
   if ($resolvedSupervisionTest.StartsWith($approvedSupervisionRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
     Remove-Item -LiteralPath $resolvedSupervisionTest -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  if ($heartbeatTestRoot) {
+    $resolvedHeartbeatTest = [System.IO.Path]::GetFullPath($heartbeatTestRoot)
+    $approvedHeartbeatRoot = [System.IO.Path]::GetFullPath((Join-Path $resolvedTemp 'Chronos\Heartbeat-v2'))
+    if ($resolvedHeartbeatTest.StartsWith($approvedHeartbeatRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Remove-Item -LiteralPath $resolvedHeartbeatTest -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 }
 

@@ -7,7 +7,7 @@ if ([string]::IsNullOrWhiteSpace($PluginRoot)) { $PluginRoot = Join-Path $repo '
 $PluginRoot = [IO.Path]::GetFullPath($PluginRoot)
 $wrapper = Join-Path $PluginRoot 'skills\chronos\scripts\chronos.ps1'
 $module = Join-Path $PluginRoot 'skills\chronos\scripts\heartbeat.ps1'
-$root = Join-Path ([IO.Path]::GetTempPath()) ('chronos-heartbeat-tests-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' ('tests-' + [guid]::NewGuid().ToString('N')))
 New-Item -ItemType Directory -Path $root | Out-Null
 
 function Assert-True {
@@ -21,6 +21,14 @@ function Assert-True {
 function Assert-Equal {
   param($Actual, $Expected, [string]$Message)
   if ($Actual -ne $Expected) { throw "$Message Expected '$Expected', got '$Actual'." }
+}
+
+function Get-TestStableHash {
+  param($Value)
+  $json = $Value | ConvertTo-Json -Compress -Depth 16
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json)))).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
 }
 
 function New-Case {
@@ -462,7 +470,7 @@ try {
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $oversized, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Oversized input.'
   $outsideState = Join-Path ([Environment]::GetFolderPath('UserProfile')) ('heartbeat-state-must-not-write-' + [guid]::NewGuid().ToString('N') + '.json')
   $outsideStateFull = [IO.Path]::GetFullPath($outsideState)
-  foreach ($approvedRoot in @([IO.Path]::GetTempPath(), (Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'))) {
+  foreach ($approvedRoot in @((Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2'), (Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'))) {
     $approvedRootFull = [IO.Path]::GetFullPath($approvedRoot).TrimEnd('\')
     Assert-True (-not $outsideStateFull.Equals($approvedRootFull, [StringComparison]::OrdinalIgnoreCase) -and -not $outsideStateFull.StartsWith($approvedRootFull + '\', [StringComparison]::OrdinalIgnoreCase)) 'Outside-root test fixture unexpectedly fell inside an approved state root.'
   }
@@ -471,6 +479,10 @@ try {
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $validForPath, '-StatePath', $outsideState)) 'heartbeat_state_path_invalid' 'State path outside approved roots.'
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', $outsideState)) 'heartbeat_state_path_invalid' 'State-path validation must precede malformed-input validation.'
   Assert-True (-not (Test-Path -LiteralPath $outsideState)) 'Rejected state path was written.'
+  $tempSiblingDirectory = Join-Path ([IO.Path]::GetTempPath()) ('heartbeat-state-sibling-' + [guid]::NewGuid().ToString('N'))
+  $tempSiblingState = Join-Path $tempSiblingDirectory 'arbitrary.json'
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $validForPath, '-StatePath', $tempSiblingState)) 'heartbeat_state_path_invalid' 'State path in a TEMP sibling outside the approved Heartbeat root.'
+  Assert-True (-not (Test-Path -LiteralPath $tempSiblingState) -and -not (Test-Path -LiteralPath $tempSiblingDirectory)) 'Rejected TEMP sibling state path was created.'
 
   # State corruption, replacement, interrupted temp files, and out-of-order samples fail safely.
   $stateCase = New-Case 'state'
@@ -812,6 +824,52 @@ try {
   Assert-True (@($boundedState.events).Count -le 50) 'Event retention exceeded its bound.'
   Assert-True ((Get-Item $bounded.State).Length -le 262144) 'Heartbeat state exceeded its byte limit.'
   Assert-True ((Get-Content -Raw $bounded.State) -notmatch 'z-5-64') 'Raw task identifiers were persisted.'
+
+  # A protected v0.8.2 default directory cannot strand a later sandbox
+  # identity. The versioned namespace starts clean and reports the skipped
+  # migration without taking ownership of or changing the prior directory.
+  $upgradeScope = 'heartbeat-upgrade-' + [guid]::NewGuid().ToString('N')
+  $upgradeHash = Get-TestStableHash $upgradeScope
+  $priorUpgradeDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat' $upgradeHash)
+  $priorUpgradeState = Join-Path $priorUpgradeDirectory 'heartbeat-state.json'
+  $newUpgradeDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $upgradeHash)
+  $newUpgradeState = Join-Path $newUpgradeDirectory 'heartbeat-state.json'
+  $upgradeSeedState = Join-Path $root 'upgrade-seed-state.json'
+  $upgradeInput = Join-Path $root 'upgrade-input.json'
+  [IO.File]::WriteAllText($upgradeInput, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"upgrade","sourceSequence":1,"runId":"upgrade-1","origin":"test","forceCadence":true,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  $priorSeed = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $upgradeInput, '-StatePath', $upgradeSeedState, '-Scope', $upgradeScope)
+  Assert-Equal $priorSeed.ExitCode 0 'Could not seed prior default Heartbeat state.'
+  New-Item -ItemType Directory -Path $priorUpgradeDirectory -Force | Out-Null
+  Copy-Item -LiteralPath $upgradeSeedState -Destination $priorUpgradeState -Force
+  $priorAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  $denyRights = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData
+  $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+  $denyRule = New-Object Security.AccessControl.FileSystemAccessRule($sid, $denyRights, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Deny)
+  $restrictedAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
+  [void]$restrictedAcl.AddAccessRule($denyRule)
+  Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $restrictedAcl
+  $denyEffective = $false
+  try {
+    $accessProbe = New-Object IO.FileStream($priorUpgradeState, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $accessProbe.Dispose()
+  } catch {
+    $denyEffective = $true
+  }
+  try {
+    $upgradeStatus = Invoke-RawModule @('-Action', 'status', '-Scope', $upgradeScope)
+    Assert-Equal $upgradeStatus.ExitCode 0 'Inaccessible prior default state blocked new Heartbeat status.'
+    $expectedMigration = if ($denyEffective) { 'prior_state_unavailable_new_root' } else { 'prior_temp_state_imported' }
+    Assert-True ($upgradeStatus.Text -match ('stateStoreMigration=' + $expectedMigration)) "Prior-state handling did not match the host's enforced ACL semantics. Expected $expectedMigration."
+    $upgradeCycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $upgradeInput, '-Scope', $upgradeScope)
+    Assert-Equal $upgradeCycle.ExitCode 0 'Inaccessible prior default state blocked a live Heartbeat cycle.'
+    Assert-True (Test-Path -LiteralPath $newUpgradeState -PathType Leaf) 'Live Heartbeat cycle did not persist in the versioned namespace.'
+    Assert-True ((Get-Content -Raw -LiteralPath $newUpgradeState | ConvertFrom-Json).scopeHash -eq $upgradeHash) 'Versioned state lost the stable scope identity.'
+  } finally {
+    Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $priorAcl -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $priorUpgradeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $newUpgradeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+  }
 
   # The wrapper status path is concise and does not need an input snapshot.
   $emptyStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', (Join-Path $root 'empty-status.json'))
