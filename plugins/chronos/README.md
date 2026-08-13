@@ -39,6 +39,9 @@ commands below only as a fallback.
   actionable transition or material worsening. Stable event IDs and a bounded
   outbox protect host delivery across restarts. One active intervention per
   target, event coalescing, and a two-attempt limit prevent wake storms.
+- Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
+  material runtime degradation backs off the collector, with the budget,
+  baseline, overrun, classification, and decision exposed in compact status.
 - Passively registers task and subagent lifecycle changes through four reviewed,
   headless hooks with no per-turn output or worker recurrence. Brief registry
   contention uses a bounded protected fallback that the next Governor status
@@ -82,7 +85,7 @@ To set up monitoring with one Governor task, ask:
 
 ```text
 Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
+fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
 ```
 
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
@@ -92,14 +95,15 @@ while idle. A stable random installation-scoped equivalence key, deterministic
 winner order, and three-attempt reconciliation budget keep concurrent setups on
 one PC on one Governor and one recurrence. Different PCs retain separate
 Governors. Only its first two pulses repeat that scoped
-check; normal cycles add no automation scan. The Governor rotates or pauses after 336 cycles
-or 14 days. See the
+check; normal cycles add no automation scan. Each cycle reconciles one compact
+host task inventory, so disabled hooks do not require user registration or
+message relay. The Governor rotates or pauses after 336 cycles or 14 days. See the
 public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
 For long-running or asynchronous work, ask:
 
 ```text
-Enable Chronos Heartbeats in one Governor task using GPT-5.6 Luna with Medium reasoning.
+Enable Chronos Heartbeats in one Governor task using GPT-5.6 Terra with Medium reasoning.
 Monitor the other tasks without waking them unless Governor decides intervention is needed.
 ```
 
@@ -113,8 +117,9 @@ transition ends silently. For an actionable transition, the Governor verifies
 one live affected task and sends one fixed, bounded instruction through host
 task tools. It does not ask the user to relay routine remediation. The task's
 reply does not resolve the event until independent evidence confirms the
-postcondition. Governor self-usage never creates a self-message, and Chronos
-does not infer model cost or quota effect from a model name.
+postcondition. Governor self-usage changes only the Governor recurrence after
+the host verifies the new cadence; it never creates a self-message or a routine
+user chore. Chronos does not infer model cost or quota effect from a model name.
 
 To delegate a small repository task, ask:
 

@@ -11,7 +11,7 @@ After installing or upgrading Chronos, open a fresh Codex task and ask:
 
 ```text
 Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
+fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
 ```
 
 This request opts in to one host-managed recurring Governor turn: at most 24
@@ -22,8 +22,8 @@ fresh Governor or pauses after 336 cycles or 14 days, whichever comes first.
 Codex requires a one-time review before a non-managed plugin hook can run. Use
 `/hooks` to inspect and trust the exact Chronos lifecycle definition. Chronos
 does not bypass this review. If hooks remain disabled or untrusted, the
-Governor can still use host task tools, but automatic local discovery is
-unavailable.
+Governor uses one compact host inventory as the deterministic fallback. It
+does not ask the user to register tasks or relay routine findings.
 
 No worker prompt or worker-side script is required. The plugin registers only:
 
@@ -99,7 +99,7 @@ characters>`. It contains no hostname, username, path, machine GUID, task ID, or
 workspace data. It is a persistent random pseudonymous installation identifier,
 not a secret or authentication credential.
 
-The host requests `gpt-5.6-luna` with Medium reasoning when that exact choice is
+The host requests `gpt-5.6-terra` with Medium reasoning when that exact choice is
 available. Chronos cannot change a task's model itself and does not silently
 substitute another model. This preference applies only to the Governor;
 monitored tasks remain model-agnostic. Chronos does not infer cost, quota impact,
@@ -111,27 +111,37 @@ The installed command surface is:
 
 ```powershell
 # Compact state only
-chronos.ps1 -Action supervise -SupervisionAction status
+chronos.cmd -Action supervise -SupervisionAction status
 
 # Run only inside the selected Governor task
-chronos.ps1 -Action supervise -SupervisionAction initialize
-chronos.ps1 -Action supervise -SupervisionAction discover
+chronos.cmd -Action supervise -SupervisionAction initialize
+chronos.cmd -Action supervise -SupervisionAction discover
+
+# After one compact host task-list call, reconcile its normalized inventory
+chronos.cmd -Action supervise -SupervisionAction reconcile-host `
+  -SupervisionHostInventoryPath <temporary-inventory.json>
 
 # Only after host liveness verifies an ended entry is active again
-chronos.ps1 -Action supervise -SupervisionAction confirm-active `
+chronos.cmd -Action supervise -SupervisionAction confirm-active `
   -SupervisionSubjectId <task-or-agent-id>
 
 # First returns the required host cleanup action; it does not clear ownership
-chronos.ps1 -Action supervise -SupervisionAction release
+chronos.cmd -Action supervise -SupervisionAction release
 
 # Run only after all matching recurrences are stopped and verified absent
-chronos.ps1 -Action supervise -SupervisionAction release `
+chronos.cmd -Action supervise -SupervisionAction release `
   -SupervisionConfirmRecurrenceStopped
 ```
 
-The Governor reconciles `discover` results with host task tools. Host task state
-is the liveness authority. Use the rotating `checkBatch`, which returns at most
-eight entries and covers larger registries fairly over successive cycles.
+The Governor calls the host task list once, writes only opaque task IDs, safe
+status categories, optional opaque generations, a capture time, and a
+completeness flag to a bounded temporary JSON file, then calls
+`reconcile-host`. Host task state is the liveness authority. The native action
+adds tasks missed by hooks, reactivates verified live tasks, and closes absent
+tasks only when the inventory declares itself complete. It returns the rotating
+`checkBatch`, which contains at most eight entries and covers larger registries
+fairly over successive cycles. Inventory or transport failure remains
+Governor-local; the routine user action is none.
 Terminal hook state has precedence: a delayed asynchronous start cannot revive
 an ended task or agent. Only `confirm-active`, after host verification, can do
 that. Do not poll full transcripts, repeatedly read unchanged tasks, or send
@@ -178,21 +188,34 @@ can retry once. Only the exact target and version can report an outcome. The
 outcome advances to independent verification; it does not resolve the detector
 condition. See [Heartbeats](HEARTBEATS.md) for the full state machine.
 
-Governor usage alone stays Governor-local and never creates a self-message. It
-can support an affected-task intervention only when a second observation covers
-the same task and time window. Unrelated machine, review, or task evidence does
-not count. Ambiguous targets, unavailable transport, and user-only authority
-fail closed without a broadcast or routine user action.
+Governor usage alone stays Governor-local and never creates a self-message. A
+Governor usage comparison is valid only when both samples include completed
+cycle, state-change, acknowledgement, failure, and duplicate-run counters.
+Completed supervision work counts as progress even when the repository does not
+change. A verified HIGH Governor-local condition returns a fixed instruction to
+change only the Governor recurrence to 360 minutes and verify that one active
+recurrence remains. A later comparable recovery returns the normal cadence
+reconciliation action. It can support an affected-task intervention only when a
+second observation covers the same task and time window. Ambiguous targets and
+unavailable transport stay Governor-local; only genuine user authority is
+surfaced to the user.
 
 ## Local State
 
 The default registry is:
 
 ```text
-%LOCALAPPDATA%\Chronos\Supervision\session-registry.json
+%TEMP%\Chronos\Supervision\session-registry.json
 ```
 
-It is capped at 256 KiB and 256 retained records. Task and agent identifiers are
+The directory receives a current-user ACL when the platform permits it. Task
+and agent identifiers remain protected by Windows DPAPI even when ACL hardening
+is unavailable. On first use after an upgrade, Chronos imports a valid legacy
+LocalAppData registry and its separate installation-scope anchor into the temp
+state root. It reports the state-store mode, write preflight, protection mode,
+and migration result without returning a path.
+
+The registry is capped at 256 KiB and 256 retained records. Task and agent identifiers are
 encrypted with Windows DPAPI for the current Windows user and indexed by
 SHA-256. DPAPI does not protect against another process already running as that
 same user. The file can also contain pseudonymous workspace hashes, safe model
@@ -224,8 +247,10 @@ Supervision adds one short local PowerShell process at task or subagent start
 and end. It adds no per-turn model tokens and no worker recurrence. Only the
 dedicated Governor uses a model on the disclosed bounded host cadence. The
 deterministic supervision engine is model-agnostic; the bootstrap policy alone
-prefers Luna Medium. A disabled or untrusted hook produces no registry event and
-does not block work.
+prefers Terra Medium. `hookExecutionObservation`, `lastHookUtc`, and
+`hookTrustObservation` distinguish observed execution from the host-only trust
+state. A disabled or untrusted hook produces no registry event and does not
+block host inventory reconciliation.
 
 Official Codex hook behavior, plugin hook discovery, trust review, asynchronous
 execution, and event fields are documented in [OpenAI Hooks](https://learn.chatgpt.com/docs/hooks).

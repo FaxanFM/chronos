@@ -28,36 +28,37 @@ quota, test, Git, or machine evidence and cannot prove liveness. Worker tasks
 need no prompt or recurrence. See [Supervision](SUPERVISION.md).
 
 Monitored tasks can use different models and reasoning levels. The recommended
-Governor configuration is `gpt-5.6-luna` with Medium reasoning when the host
-advertises it. The host must select this setting. Chronos cannot select or
-enforce a task model. Chronos does not infer price, quota impact, or efficiency
-from a model name.
+Governor configuration is `gpt-5.6-terra` with Medium reasoning when the host
+advertises it. Field validation found that the Governor needs reliable tool use
+and recovery judgment more than minimum model cost. The host must select this
+setting. Chronos cannot select or enforce a task model. Chronos does not infer
+price, quota impact, or efficiency from a model name.
 
 ## Command surface
 
 Run a normalized cycle:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat -HeartbeatInputPath snapshot.json
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
 ```
 
 Add a captured compact Inspector result when available:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt
 ```
 
 Show local Heartbeat status without running a collector:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat
 ```
 
 After the host successfully deduplicates and delivers an event, acknowledge its
 stable `EventId`:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat -HeartbeatAcknowledgeEventId <sha256-event-id>
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatAcknowledgeEventId <sha256-event-id>
 ```
 
 The Inspector adapter accepts only compact lines beginning with `CHRONOS ` or
@@ -78,7 +79,9 @@ The host is responsible for:
 - Collecting the normalized fields that the runtime exposes.
 - Assigning privacy-safe opaque IDs and ownership hints.
 - Running one Governor task for the monitored task set.
-- Selecting `gpt-5.6-luna` with Medium reasoning for that Governor when available.
+- Selecting `gpt-5.6-terra` with Medium reasoning for that Governor when available.
+- Listing the scoped host tasks once per cycle and reconciling a bounded,
+  privacy-safe inventory before it waits on the returned rotating batch.
 - Delivering emitted events to the Governor inbox.
 - Resolving one exact live target, coalescing events by target, and using the
   bounded intervention state machine before task delivery.
@@ -96,7 +99,7 @@ task.
 
 The deterministic cycle does not use model tokens. Monitored tasks can use
 Luna, Terra, Sol, or a mix. The recommended host configuration is one Governor
-task using `gpt-5.6-luna` with Medium reasoning when available. The host, not
+task using `gpt-5.6-terra` with Medium reasoning when available. The host, not
 Chronos, selects the model and reasoning effort. Chronos does not call a model,
 change a task model, or treat a model label as trusted cost metadata.
 
@@ -123,6 +126,12 @@ input paths fail closed.
 
 The allowed collector keys are `agents`, `guardian`, `usage`, `sessions`,
 `tests`, `machines`, `tasks`, `git`, `build`, and `heartbeatActivity`.
+
+`heartbeatActivity` accepts `schedulerDuplicates`, the legacy
+`runtimeSeconds`, and the preferred `runtimeMilliseconds` plus
+`runtimeBudgetMilliseconds`. The host must report its actual bounded cycle
+budget when it has one. Chronos does not infer a smaller budget from elapsed
+time.
 
 ## Coverage
 
@@ -178,15 +187,27 @@ the volume is small. Chronos does not change approval state or permission rules.
 
 ### Usage burn
 
-Supported fields: `owner`, `dominantThread`, `owningSolThread`, `totalTokens`,
-`windowTokens`, `windowMinutes`, `ratePerMinute`, `baselineRatePerMinute`,
-`projectedExhaustionMinutes`, `reviewerShare`, `meaningfulProgress`, and
-`progressHash`.
+Supported fields: `owner`, `dominantThread`, `owningSolThread`, `role`,
+`totalTokens`, `windowTokens`, `windowMinutes`, `ratePerMinute`,
+`baselineRatePerMinute`, `projectedExhaustionMinutes`, `reviewerShare`,
+`meaningfulProgress`, `progressHash`, `completedCycles`, `stateChanges`,
+`acknowledgedEvents`, `failedCycles`, and `duplicateRuns`.
 
 High usage with progress does not alert. The detector requires abnormal
 velocity or a materially earlier exhaustion projection and uses the supplied
 progress signal. These values are operational observations, not account
-billing totals.
+billing totals. A Governor comparison requires the same five supervision
+counters in both samples. Completed cycles, state changes, and acknowledged
+events count as progress even when the repository did not change. Missing or
+non-comparable Governor counters remain unsupported instead of producing a
+false high-usage diagnosis.
+
+The Governor obtains those counters from compact `chronos.cmd -Action
+heartbeat` status: `completedCycles`, `stateChanges`, `acknowledgedEvents`,
+`failedCycles`, and `duplicateRuns`. It copies them exactly into the normalized
+usage record and combines them with the current compact Inspector usage fields.
+It does not maintain a separate counter ledger or substitute zero for a missing
+field.
 
 ### Session and context growth
 
@@ -313,6 +334,10 @@ Each event includes:
 - `GovernorOrigin`, `CorroborationRequired`, and `CorroborationScope` for usage
   events. Governor-origin usage stays local unless a second event concerns the
   same subject and observation window.
+- `GovernorLocalAction`, `GovernorCadenceMinutes`, `RequiredHostAction`,
+  `MonitoredTaskMessage`, and `UserActionRequired`. These fields make a
+  Governor-local cadence change deterministic and keep routine remediation off
+  the user.
 
 Chronos emits `INFO` for resolution. `ReleaseNoticeEligible=true` only when an
 active intervention had a temporary restriction that the target acknowledged.
@@ -337,7 +362,19 @@ serialized retry cannot be preempted by a newer collector cycle.
 
 ## Autonomous intervention state
 
-The Governor must plan all events in a cycle before it sends a task message.
+The Governor first processes any `GovernorLocalAction`. For
+`throttle_recurrence_to_idle_cadence`, it updates only its own recurrence to
+the returned 360-minute cadence, re-reads the automation, and acknowledges the
+event only after one active recurrence with that cadence is verified. A
+Governor-origin resolution returns
+`restore_supervision_recommended_cadence`; the Governor reconciles the current
+60- or 360-minute supervision cadence and verifies the same one-recurrence
+postcondition. It does not message a monitored task unless an independent event
+concerns the same subject and observation window. A failed host mutation stays
+Governor-local for the bounded retry and never becomes a routine user relay.
+
+For task-directed events, the Governor must plan all events in a cycle before
+it sends a task message.
 Chronos permits one active intervention per target. Equal or lower severity
 events coalesce. A higher severity event replaces an unsent version. If an
 earlier version was already sent, only one escalation version is allowed.
@@ -367,7 +404,7 @@ intervention version, target hash, and target-generation hash.
 Plan an event:
 
 ```powershell
-chronos.ps1 -Action heartbeat -HeartbeatInterventionAction plan `
+chronos.cmd -Action heartbeat -HeartbeatInterventionAction plan `
   -HeartbeatEventId <event-id> -HeartbeatTargetId <live-task-id> `
   -HeartbeatTargetGeneration <host-generation> `
   -HeartbeatGovernorId <governor-task-id>
@@ -381,7 +418,7 @@ Claim only after all events for the cycle are planned and the target is checked
 again:
 
 ```powershell
-chronos.ps1 -Action heartbeat -HeartbeatInterventionAction claim `
+chronos.cmd -Action heartbeat -HeartbeatInterventionAction claim `
   -HeartbeatInterventionId <intervention-id> `
   -HeartbeatInterventionVersion <version> `
   -HeartbeatTargetId <live-task-id> `
@@ -410,14 +447,18 @@ publishing, ambiguous ownership, unavailable transport, or user-only authority.
 Default state is stored at:
 
 ```text
-%LOCALAPPDATA%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json
+%TEMP%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json
 ```
 
 The default scope combines the machine, Codex home, and current workspace only
-to create the hash. Those values are not stored in the file. A host can supply
+to create the hash. Those values are not stored in the file. The default state
+directory receives a current-user ACL when Windows permits it. On first use
+after an upgrade, Chronos imports a valid legacy LocalAppData state file. Compact
+status reports the state-store mode, write preflight, protection mode, and
+migration result without returning a path. A host can supply
 `-HeartbeatScope` for a stable explicit scope.
 
-The state file contains only bounded hashed identity, normalized counters,
+The state file uses schema `6` and contains only bounded hashed identity, normalized counters,
 statuses, timestamps, cadence, coverage, condition state, compact event
 metadata, delivery metadata, and engine health. It retains at most 256
 conditions, 50 compact event records, 64 unacknowledged outbox records, 64
@@ -439,9 +480,23 @@ ancestry is rejected.
 
 Snapshots with `origin=heartbeat`, `origin=heartbeat_notification`, or
 `isHeartbeatGenerated=true` are ignored. `heartbeatActivity` can report
-duplicate schedulers and cycle runtime. An abnormal self-health condition routes
-once to the Governor inbox and backs off that collector for 15 minutes. It never
-opens a task intervention against the Governor. Other families continue to run.
+duplicate schedulers, cycle runtime, and the host's configured runtime budget.
+Chronos keeps a bounded recent successful-runtime baseline. A single modest
+overrun within the larger of 1 second, 10 percent of the configured budget, or
+25 percent above that baseline is `normal_variance`: it remains quiet and does
+not back off. Three consecutive overruns are `sustained_overrun`; a runtime at
+least 50 percent above both the budget and baseline is `material_overrun` and
+does not wait for persistence. Duplicate schedulers, sustained overruns, and
+material overruns route once to the Governor inbox and back off only that
+collector for 15 minutes. A subsequent healthy forced cycle clears the backoff
+and emits the normal resolution transition. Heartbeat never opens a task
+intervention against the Governor. Other families continue to run.
+
+Compact status reports `runtimeBudgetMs`, `runtimeObservedMs`,
+`runtimeOverrunMs`, `runtimeOverrunPercent`, `runtimeBaselineMs`,
+`runtimeClassification`, `runtimeOverrunStreak`, `runtimeBackoffApplied`, and
+`backoffUntil`. This makes the classification and backoff decision auditable
+without retaining raw task content.
 
 ## Limits
 

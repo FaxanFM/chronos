@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.8.2
+
+- Move default Heartbeat and supervision state to the sandbox-writable Windows
+  temporary directory. Preflight the store, reject unsafe ancestry, apply a
+  current-user ACL when Windows permits it, and import valid legacy LocalAppData
+  state without changing the installation identity.
+- Add bounded host-inventory reconciliation. One Governor task can recover
+  tasks missed by disabled or delayed hooks, reactivate host-verified tasks,
+  and close absent tasks only from a fresh complete inventory. Workers remain
+  passive and require no setup.
+- Report hook execution separately from hook trust. A missing lifecycle event is
+  no longer presented as proof that hooks are trusted or working.
+- Add `chronos.cmd` as the supported Windows launcher so every model and host
+  invocation uses noninteractive Windows PowerShell 5.1 with per-call execution
+  policy bypass.
+- Recommend one Terra Medium Governor per machine. Monitored tasks keep their
+  existing models and receive no recurrence.
+- Require comparable Governor supervision counters before classifying its token
+  use as no-progress burn. Completed cycles, state changes, and acknowledgements
+  count as progress even when repository files do not change.
+- Expose those five counters in compact Heartbeat status and migrate schema 4
+  or 5 state to schema 6, so the Governor can build its own usage sample without
+  a hidden host ledger or invented zero values.
+- Replace fixed runtime-edge warnings with bounded adaptive self-health
+  classification. Isolated modest overruns remain quiet, sustained or material
+  degradation backs off, recovery clears the backoff, and compact status reports
+  the budget, observation, overrun, baseline, rationale, and decision.
+- Make confirmed Governor usage control local and deterministic. The host
+  changes only the Governor recurrence to 360 minutes, verifies one active
+  matching recurrence, and restores the active or idle supervision cadence on
+  recovery. It does not message monitored tasks without independent
+  same-subject and same-window evidence.
+- Keep task discovery, transport, recurrence, and routine recovery failures in
+  the Governor. Only a genuine user-authority boundary is returned to the user.
+- Expand deterministic tests for state-store preflight, host reconciliation,
+  missed hooks, stale inventories, Governor progress counters, local throttle
+  and restore events, and packaged launcher behavior.
+
+Existing Inspector warning and critical thresholds, quota scoring, predictive
+claims, shared-folder write policy, and no-publisher-telemetry behavior are
+unchanged.
+
 ## v0.8.1
 
 - Add a bounded Governor-to-task intervention state machine. It separates event

@@ -32,9 +32,10 @@ param(
   [string]$HeartbeatVerificationResult = "",
   [ValidateSet("", "ambiguous_target", "target_not_live", "transport_unavailable", "user_authority_required", "unsupported_action")]
   [string]$HeartbeatFailureReason = "",
-  [ValidateSet("status", "initialize", "confirm-active", "discover", "release")]
+  [ValidateSet("status", "initialize", "confirm-active", "reconcile-host", "discover", "release")]
   [string]$SupervisionAction = "status",
   [string]$SupervisionStatePath,
+  [string]$SupervisionHostInventoryPath,
   [string]$SupervisionSessionId,
   [string]$SupervisionSubjectId,
   [ValidateRange(0, [long]::MaxValue)]
@@ -95,6 +96,7 @@ if ($Action -eq 'supervise') {
     SinceRevision = $SupervisionSinceRevision
   }
   if ($SupervisionStatePath) { $arguments.StatePath = $SupervisionStatePath }
+  if ($SupervisionHostInventoryPath) { $arguments.HostInventoryPath = $SupervisionHostInventoryPath }
   if ($SupervisionSessionId) { $arguments.SessionId = $SupervisionSessionId }
   if ($SupervisionSubjectId) { $arguments.SubjectId = $SupervisionSubjectId }
   if ($SupervisionConfirmRecurrenceStopped) { $arguments.ConfirmRecurrenceStopped = $true }

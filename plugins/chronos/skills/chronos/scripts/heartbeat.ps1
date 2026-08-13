@@ -53,6 +53,10 @@ $script:InputByteLimit = 262144
 $script:InspectorByteLimit = 65536
 $script:StateByteLimit = 262144
 $script:JsonNodeLimit = 32768
+$script:StateStoreMode = 'unknown'
+$script:StateStoreMigration = 'not_applicable'
+$script:StateStoreWriteReady = $false
+$script:StateStoreProtection = 'hashed_metadata'
 
 if (-not ('ChronosHeartbeatPathIdentity' -as [type])) {
   $pathIdentitySource = @'
@@ -475,11 +479,12 @@ function Assert-GuardianRecord {
 
 function Assert-UsageRecord {
   param($Record)
-  Assert-AllowedKeys $Record @('owner', 'dominantThread', 'owningSolThread', 'totalTokens', 'windowTokens', 'windowMinutes', 'ratePerMinute', 'baselineRatePerMinute', 'projectedExhaustionMinutes', 'reviewerShare', 'meaningfulProgress', 'progressHash')
+  Assert-AllowedKeys $Record @('owner', 'dominantThread', 'owningSolThread', 'role', 'totalTokens', 'windowTokens', 'windowMinutes', 'ratePerMinute', 'baselineRatePerMinute', 'projectedExhaustionMinutes', 'reviewerShare', 'meaningfulProgress', 'progressHash', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns')
   Assert-Field $Record 'owner' id
   Assert-Field $Record 'dominantThread' id
   Assert-Field $Record 'owningSolThread' id
-  foreach ($name in @('totalTokens', 'windowTokens')) { Assert-Field $Record $name integer $false 0 9000000000000000 }
+  Assert-Field $Record 'role' enum $false 0 0 @('governor', 'worker', 'coordinator', 'unknown')
+  foreach ($name in @('totalTokens', 'windowTokens', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns')) { Assert-Field $Record $name integer $false 0 9000000000000000 }
   foreach ($name in @('windowMinutes', 'ratePerMinute', 'baselineRatePerMinute', 'projectedExhaustionMinutes')) { Assert-Field $Record $name number $false 0 1000000000000 }
   Assert-Field $Record 'reviewerShare' number $false 0 1
   Assert-Field $Record 'meaningfulProgress' bool
@@ -585,10 +590,11 @@ function Assert-BuildRecord {
 
 function Assert-HeartbeatActivityRecord {
   param($Record)
-  Assert-AllowedKeys $Record @('origin', 'schedulerDuplicates', 'runtimeSeconds', 'runId', 'parentRunId')
+  Assert-AllowedKeys $Record @('origin', 'schedulerDuplicates', 'runtimeSeconds', 'runtimeMilliseconds', 'runtimeBudgetMilliseconds', 'runId', 'parentRunId')
   Assert-Field $Record 'origin' enum $false 0 0 @('host', 'heartbeat', 'heartbeat_notification', 'test')
   Assert-Field $Record 'schedulerDuplicates' integer $false 0 1000000
   Assert-Field $Record 'runtimeSeconds' number $false 0 86400
+  foreach ($name in @('runtimeMilliseconds', 'runtimeBudgetMilliseconds')) { Assert-Field $Record $name number $false 0 86400000 }
   Assert-Field $Record 'runId' id
   Assert-Field $Record 'parentRunId' id
 }
@@ -697,6 +703,7 @@ function Resolve-StatePath {
   param([string]$Requested, [string]$RequestedScope)
   $localRoot = Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'
   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+  $privateTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat'
   if ([string]::IsNullOrWhiteSpace($RequestedScope)) {
     $codexHome = Join-Path $HOME '.codex'
     $RequestedScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
@@ -704,13 +711,60 @@ function Resolve-StatePath {
   if ($RequestedScope.Length -gt 4096) { throw 'heartbeat_scope_invalid' }
   if ([string]::IsNullOrWhiteSpace($Requested)) {
     $scopeHash = Get-StableHash $RequestedScope
-    return [pscustomobject]@{ Path = (Join-Path $localRoot (Join-Path $scopeHash 'heartbeat-state.json')); ScopeHash = $scopeHash }
+    $script:StateStoreMode = 'temp_private'
+    $script:StateStoreMigration = 'not_needed'
+    return [pscustomobject]@{
+      Path = (Join-Path $privateTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
+      ScopeHash = $scopeHash
+      LegacyPath = (Join-Path $localRoot (Join-Path $scopeHash 'heartbeat-state.json'))
+    }
   }
+  $script:StateStoreMode = 'explicit'
   try { $full = [IO.Path]::GetFullPath($Requested) } catch { throw 'heartbeat_state_path_invalid' }
   if ([IO.Path]::GetExtension($full) -ne '.json') { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-ContainedPath $full $localRoot) -and -not (Test-ContainedPath $full $tempRoot)) { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-NoReparseAncestors $full)) { throw 'heartbeat_state_path_invalid' }
-  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope) }
+  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); LegacyPath = $null }
+}
+
+function Initialize-StateStore {
+  param([string]$ResolvedStatePath)
+  $directory = Split-Path -Parent $ResolvedStatePath
+  try {
+    $createdDirectory = -not (Test-Path -LiteralPath $directory)
+    if ($createdDirectory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    $item = Get-Item -LiteralPath $directory -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
+      throw 'heartbeat_state_store_unwritable'
+    }
+    if ($script:StateStoreMode -eq 'temp_private' -and $createdDirectory) {
+      try {
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security = New-Object Security.AccessControl.DirectorySecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+        [IO.Directory]::SetAccessControl($directory, $security)
+        $script:StateStoreProtection = 'private_acl_hashed_metadata'
+      } catch {
+        $script:StateStoreProtection = 'inherited_acl_hashed_metadata'
+      }
+    }
+    if (-not (Test-Path -LiteralPath $ResolvedStatePath -PathType Leaf)) {
+      $probe = Join-Path $directory ('.heartbeat-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
+      try {
+        $stream = New-Object IO.FileStream($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Dispose()
+      } finally {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+      }
+    }
+    $script:StateStoreWriteReady = $true
+  } catch {
+    if ([string]$_.Exception.Message -eq 'heartbeat_state_store_unwritable') { throw }
+    throw 'heartbeat_state_store_unwritable'
+  }
 }
 
 function Resolve-InputFile {
@@ -851,7 +905,7 @@ function New-DefaultState {
     $previous[$family] = @{}
   }
   return [ordered]@{
-    schema = 5
+    schema = 6
     revision = 0
     scopeHash = $ScopeHash
     previous = $previous
@@ -866,6 +920,8 @@ function New-DefaultState {
       routesEmitted = 0
       resolutionEvents = 0
       duplicateRuns = 0
+      acknowledgedEvents = 0
+      failedCycles = 0
       mutexContention = 0
       lastCycleUtc = $null
       lastSuccessUtc = $null
@@ -874,6 +930,14 @@ function New-DefaultState {
       lastError = $null
       backoffUntilUtc = $null
       deliveryAttempts = 0
+      runtimeBudgetMs = 0
+      runtimeObservedMs = 0
+      runtimeOverrunMs = 0
+      runtimeOverrunPercent = 0
+      runtimeBaselineMs = 0
+      runtimeClassification = 'unobserved'
+      runtimeOverrunStreak = 0
+      runtimeBackoffApplied = $false
     }
     runIds = @()
   }
@@ -903,6 +967,8 @@ function Assert-StateRecord {
       if ($text -notmatch '^[a-f0-9]{16,64}$') { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -in @('lastAttempt', 'lastRun', 'lastSuccess', 'backoffUntilUtc', 'firstObserved', 'lastObserved', 'lastNotified', 'resolvedAt', 'detected', 'lastCycleUtc', 'lastSuccessUtc', 'createdAt', 'updatedAt')) {
       [void](ConvertTo-UtcTimestamp $text 'heartbeat_state_invalid')
+    } elseif ([string]$key -eq 'role') {
+      if ($text -notin @('governor', 'worker', 'coordinator', 'unknown')) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -eq 'family') {
       if ($script:Families -notcontains $text) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -eq 'type') {
@@ -935,6 +1001,8 @@ function Assert-StateRecord {
       if ($statusValues -notcontains $text) { throw 'heartbeat_state_invalid' }
     } elseif ([string]$key -eq 'lastError') {
       if ($text -notmatch '^heartbeat_[a-z_]+$') { throw 'heartbeat_state_invalid' }
+    } elseif ([string]$key -eq 'runtimeClassification') {
+      if ($text -notin @('unobserved', 'within_budget', 'normal_variance', 'elevated_variance', 'sustained_overrun', 'material_overrun')) { throw 'heartbeat_state_invalid' }
     } else {
       throw 'heartbeat_state_invalid'
     }
@@ -946,10 +1014,10 @@ function Assert-State {
   if (-not ($State -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   $top = @('schema', 'revision', 'scopeHash', 'previous', 'conditions', 'events', 'outbox', 'interventions', 'collectors', 'health', 'runIds')
   foreach ($key in $State.Keys) { if ($top -notcontains [string]$key) { throw 'heartbeat_state_invalid' } }
-  if ([int]$State.schema -ne 5 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
+  if ([int]$State.schema -ne 6 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
   if (-not ($State.previous -is [System.Collections.IDictionary]) -or -not ($State.conditions -is [System.Collections.IDictionary]) -or -not ($State.collectors -is [System.Collections.IDictionary]) -or -not ($State.health -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   if ($State.conditions.Count -gt $script:ConditionLimit -or @($State.events).Count -gt $script:EventLimit -or @($State.outbox).Count -gt $script:OutboxLimit -or @($State.interventions).Count -gt $script:InterventionLimit -or @($State.runIds).Count -gt $script:RunIdLimit) { throw 'heartbeat_state_invalid' }
-  $snapshotFields = @('active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds')
+  $snapshotFields = @('active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'role', 'progressCountersObserved', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds', 'runtimeMs', 'runtimeBudgetMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
   foreach ($family in $script:Families) {
     if (-not $State.previous.Contains($family) -or -not ($State.previous[$family] -is [System.Collections.IDictionary]) -or $State.previous[$family].Count -gt 128) { throw 'heartbeat_state_invalid' }
     foreach ($recordKey in $State.previous[$family].Keys) {
@@ -976,7 +1044,7 @@ function Assert-State {
     Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'state', 'attempts', 'claimHash', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
     if ([int]$item.version -lt 1 -or [int]$item.attempts -lt 0 -or [int]$item.attempts -gt 2 -or [int]$item.coalescedCount -lt 0) { throw 'heartbeat_state_invalid' }
   }
-  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts')
+  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
   foreach ($runId in @($State.runIds)) { if ([string]$runId -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' } }
 }
 
@@ -993,6 +1061,15 @@ function Upgrade-State {
       }
     }
     $State.schema = 5
+  }
+  if ([int](Get-Value $State 'schema' 0) -eq 5) {
+    if (-not (Has-Value $State.health 'acknowledgedEvents')) { $State.health['acknowledgedEvents'] = 0L }
+    if (-not (Has-Value $State.health 'failedCycles')) { $State.health['failedCycles'] = 0L }
+    $State.schema = 6
+  }
+  if ([int](Get-Value $State 'schema' 0) -eq 6) {
+    $runtimeDefaults = [ordered]@{ runtimeBudgetMs = 0; runtimeObservedMs = 0; runtimeOverrunMs = 0; runtimeOverrunPercent = 0; runtimeBaselineMs = 0; runtimeClassification = 'unobserved'; runtimeOverrunStreak = 0; runtimeBackoffApplied = $false }
+    foreach ($name in $runtimeDefaults.Keys) { if (-not (Has-Value $State.health $name)) { $State.health[$name] = $runtimeDefaults[$name] } }
   }
   return $State
 }
@@ -1030,9 +1107,27 @@ function Write-State {
     } else {
       [IO.File]::Move($temporary, $Path)
     }
+  } catch {
+    if ([string]$_.Exception.Message -match '^heartbeat_state_') { throw }
+    throw 'heartbeat_state_store_unwritable'
   } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Import-LegacyStateIfPresent {
+  param($Resolved)
+  if ($script:StateStoreMode -ne 'temp_private' -or
+      (Test-Path -LiteralPath $Resolved.Path) -or
+      [string]::IsNullOrWhiteSpace([string]$Resolved.LegacyPath) -or
+      -not (Test-Path -LiteralPath $Resolved.LegacyPath -PathType Leaf)) { return }
+  try {
+    $legacy = Read-State $Resolved.LegacyPath $Resolved.ScopeHash
+    Write-State $legacy $Resolved.Path
+    $script:StateStoreMigration = 'legacy_state_imported'
+  } catch {
+    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
   }
 }
 
@@ -1167,6 +1262,11 @@ function Get-UsageDetector {
   $usage = Get-Value $Snapshot 'usage'
   if ($null -eq $usage) { return $result }
   $subject = [string](Get-Value $usage 'dominantThread' 'usage-window')
+  $owner = [string](Get-Value $usage 'owner' 'governor')
+  $role = [string](Get-Value $usage 'role' $(if ($owner -eq 'governor') { 'governor' } else { 'unknown' }))
+  $isGovernor = $role -eq 'governor' -or $owner -eq 'governor'
+  $progressCounterNames = @('completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns')
+  $progressCountersObserved = @($progressCounterNames | Where-Object { Has-Value $usage $_ }).Count -eq $progressCounterNames.Count
   $idHash = Get-StableHash $subject
   $rate = [double](Get-Value $usage 'ratePerMinute' 0)
   if ($rate -le 0 -and (Get-Value $usage 'windowMinutes' 0) -gt 0) { $rate = [double](Get-Value $usage 'windowTokens' 0) / [double]$usage.windowMinutes }
@@ -1178,19 +1278,36 @@ function Get-UsageDetector {
     reviewerShare = [double](Get-Value $usage 'reviewerShare' 0)
     meaningfulProgress = [bool](Get-Value $usage 'meaningfulProgress' $true)
     progressHash = Get-ProgressHash $usage @('progressHash')
+    role = $role
+    progressCountersObserved = $progressCountersObserved
+    completedCycles = [int64](Get-Value $usage 'completedCycles' 0)
+    stateChanges = [int64](Get-Value $usage 'stateChanges' 0)
+    acknowledgedEvents = [int64](Get-Value $usage 'acknowledgedEvents' 0)
+    failedCycles = [int64](Get-Value $usage 'failedCycles' 0)
+    duplicateRuns = [int64](Get-Value $usage 'duplicateRuns' 0)
   }
   $result.Snapshot[$idHash] = $current
   $identity = Get-ConditionIdentity 'usage' $subject 'burn'
-  Add-RouteHint $result $identity $subject (Get-Value $usage 'owner' 'governor') (Get-Value $usage 'owningSolThread')
+  Add-RouteHint $result $identity $subject $owner (Get-Value $usage 'owningSolThread')
   $prior = Get-Value $Previous $idHash
   $reference = if ($current.baselineRate -gt 0) { $current.baselineRate } elseif ($prior -and [double]$prior.rate -gt 0) { [double]$prior.rate } else { 0 }
   $rateMultiple = if ($reference -gt 0) { $current.rate / $reference } else { 1 }
-  $projectionWorsened = $prior -and $current.projectionMinutes -gt 0 -and [double]$prior.projectionMinutes -gt 0 -and $current.projectionMinutes -le ([double]$prior.projectionMinutes * .7)
-  $noProgressDelta = -not $current.meaningfulProgress -and (-not $prior -or [string]$prior.progressHash -eq $current.progressHash)
+  $governorCounterProgress = $prior -and $current.progressCountersObserved -and [bool](Get-Value $prior 'progressCountersObserved' $false) -and (
+    $current.completedCycles -gt [int64](Get-Value $prior 'completedCycles' 0) -or
+    $current.stateChanges -gt [int64](Get-Value $prior 'stateChanges' 0) -or
+    $current.acknowledgedEvents -gt [int64](Get-Value $prior 'acknowledgedEvents' 0)
+  )
+  $hashProgress = $prior -and [string]$prior.progressHash -ne $current.progressHash
+  $progressObserved = $current.meaningfulProgress -or $hashProgress -or $governorCounterProgress
+  $governorProgressComparable = $prior -and $current.progressCountersObserved -and [bool](Get-Value $prior 'progressCountersObserved' $false)
+  $projectionWorsened = $prior -and $current.projectionMinutes -gt 0 -and [double]$prior.projectionMinutes -gt 0 -and $current.projectionMinutes -le ([double]$prior.projectionMinutes * .7) -and (-not $isGovernor -or $governorProgressComparable)
+  $noProgressDelta = if ($isGovernor) { $governorProgressComparable -and -not $progressObserved } else { -not $current.meaningfulProgress -and (-not $prior -or -not $hashProgress) }
   $burn = $current.rate -ge 10000 -and $rateMultiple -ge 2 -and $noProgressDelta
   if ($burn -or $projectionWorsened) {
     $severity = if ($current.projectionMinutes -gt 0 -and $current.projectionMinutes -le 10 -and $noProgressDelta) { 'CRITICAL' } elseif ($rateMultiple -ge 3 -or $current.reviewerShare -ge .75 -or $projectionWorsened) { 'HIGH' } else { 'WARNING' }
-    Add-Candidate $result (New-Candidate 'usage' 'USAGE_BURN' $severity $subject (Get-Value $usage 'owner' 'governor') (Get-Value $usage 'owningSolThread') 'burn' @('rateMultiple=' + (Format-Number $rateMultiple), 'meaningfulProgress=' + $current.meaningfulProgress) @('tokensPerMinute=' + (Format-Number $current.rate), 'reviewerShare=' + (Format-Number $current.reviewerShare), 'projectedExhaustionMinutes=' + (Format-Number $current.projectionMinutes)) 'Usage velocity worsened without a matching progress signal.' 'Bound the dominant task and inspect reviewer, fork, and repeated-tool contribution.' $Now)
+    $cause = if ($isGovernor) { 'Governor usage velocity worsened across comparable supervision cycles without polling, reconciliation, acknowledgement, or state-change progress.' } else { 'Usage velocity worsened without a matching progress signal.' }
+    $action = if ($isGovernor) { 'Keep the condition Governor-local and increase only the Governor recurrence to the idle cadence until a comparable cycle shows progress.' } else { 'Bound the dominant task and inspect reviewer, fork, and repeated-tool contribution.' }
+    Add-Candidate $result (New-Candidate 'usage' 'USAGE_BURN' $severity $subject $owner (Get-Value $usage 'owningSolThread') 'burn' @('rateMultiple=' + (Format-Number $rateMultiple), 'meaningfulProgress=' + $progressObserved, 'governorProgressComparable=' + $governorProgressComparable) @('tokensPerMinute=' + (Format-Number $current.rate), 'reviewerShare=' + (Format-Number $current.reviewerShare), 'projectedExhaustionMinutes=' + (Format-Number $current.projectionMinutes)) $cause $action $Now)
   }
   return $result
 }
@@ -1425,16 +1542,65 @@ function Get-HeartbeatDetector {
   $result = New-DetectorResult
   $activity = Get-Value $Snapshot 'heartbeatActivity'
   if ($null -eq $activity) { return $result }
+  $recordKey = Get-StableHash 'heartbeat-engine'
+  $prior = Get-Value $Previous $recordKey @{}
+  $runtimeMs = if (Has-Value $activity 'runtimeMilliseconds') { [double]$activity.runtimeMilliseconds } else { [double](Get-Value $activity 'runtimeSeconds' 0) * 1000.0 }
+  $runtimeBudgetMs = if (Has-Value $activity 'runtimeBudgetMilliseconds') { [double]$activity.runtimeBudgetMilliseconds } else { 30000.0 }
+  if ($runtimeBudgetMs -le 0) { $runtimeBudgetMs = 30000.0 }
+  $priorBaselineMs = [double](Get-Value $prior 'runtimeBaselineMs' 0)
+  if ($priorBaselineMs -le 0) { $priorBaselineMs = [math]::Min($runtimeMs, $runtimeBudgetMs) }
+  $overrunMs = [math]::Max(0.0, $runtimeMs - $runtimeBudgetMs)
+  $overrunPercent = if ($runtimeBudgetMs -gt 0) { [math]::Round(($overrunMs / $runtimeBudgetMs) * 100.0, 1) } else { 0.0 }
+  $overrunStreak = if ($overrunMs -gt 0) { [int](Get-Value $prior 'runtimeOverrunStreak' 0) + 1 } else { 0 }
+  $varianceLimitMs = [math]::Max($runtimeBudgetMs + [math]::Max(1000.0, $runtimeBudgetMs * 0.10), $priorBaselineMs * 1.25)
+  $materialLimitMs = [math]::Max($runtimeBudgetMs * 1.50, $priorBaselineMs * 1.50)
+  $runtimeClassification = if ($overrunMs -le 0) {
+    'within_budget'
+  } elseif ($runtimeMs -ge $materialLimitMs) {
+    'material_overrun'
+  } elseif ($overrunStreak -ge 3) {
+    'sustained_overrun'
+  } elseif ($runtimeMs -le $varianceLimitMs) {
+    'normal_variance'
+  } else {
+    'elevated_variance'
+  }
+  $runtimeBackoffApplied = $runtimeClassification -in @('material_overrun', 'sustained_overrun')
+  $runtimeBaselineMs = $priorBaselineMs
+  if ($runtimeClassification -in @('within_budget', 'normal_variance')) {
+    $runtimeBaselineMs = if ($priorBaselineMs -gt 0) { [math]::Round(($priorBaselineMs * 0.75) + ($runtimeMs * 0.25), 1) } else { [math]::Round($runtimeMs, 1) }
+  }
   $current = [ordered]@{
     schedulerDuplicates = [int](Get-Value $activity 'schedulerDuplicates' 0)
-    runtimeSeconds = [double](Get-Value $activity 'runtimeSeconds' 0)
+    runtimeSeconds = [math]::Round($runtimeMs / 1000.0, 3)
+    runtimeMs = [math]::Round($runtimeMs, 1)
+    runtimeBudgetMs = [math]::Round($runtimeBudgetMs, 1)
+    runtimeOverrunMs = [math]::Round($overrunMs, 1)
+    runtimeOverrunPercent = $overrunPercent
+    runtimeBaselineMs = $runtimeBaselineMs
+    runtimeClassification = $runtimeClassification
+    runtimeOverrunStreak = $overrunStreak
+    runtimeBackoffApplied = $runtimeBackoffApplied
   }
-  $result.Snapshot[(Get-StableHash 'heartbeat-engine')] = $current
+  $result.Snapshot[$recordKey] = $current
   $identity = Get-ConditionIdentity 'heartbeat' 'heartbeat-engine' 'self-health'
   Add-RouteHint $result $identity 'heartbeat-engine' 'governor' 'governor'
-  if ($current.schedulerDuplicates -ge 2 -or $current.runtimeSeconds -ge 30) {
-    $severity = if ($current.schedulerDuplicates -ge 5 -or $current.runtimeSeconds -ge 120) { 'CRITICAL' } else { 'HIGH' }
-    Add-Candidate $result (New-Candidate 'heartbeat' 'HEARTBEAT_SELF_HEALTH' $severity 'heartbeat-engine' 'governor' 'governor' 'self-health' @('monitoringHealth=degraded') @('schedulerDuplicates=' + $current.schedulerDuplicates, 'runtimeSeconds=' + (Format-Number $current.runtimeSeconds)) 'Heartbeat scheduling or runtime is itself abnormal.' 'Back off this collector and keep one scheduler owner.' $Now)
+  $shouldBackoff = $current.schedulerDuplicates -ge 2 -or $runtimeBackoffApplied
+  if ($shouldBackoff) {
+    $severity = if ($current.schedulerDuplicates -ge 5 -or $runtimeMs -ge ($runtimeBudgetMs * 2.0)) { 'CRITICAL' } else { 'HIGH' }
+    $reason = if ($current.schedulerDuplicates -ge 2) { 'duplicate_scheduler' } else { $runtimeClassification }
+    $changed = @('monitoringHealth=degraded', ('classification={0}' -f $reason))
+    $evidence = @(
+      ('schedulerDuplicates={0}' -f $current.schedulerDuplicates)
+      ('runtimeBudgetMs={0}' -f (Format-Number $current.runtimeBudgetMs))
+      ('runtimeObservedMs={0}' -f (Format-Number $current.runtimeMs))
+      ('runtimeOverrunMs={0}' -f (Format-Number $current.runtimeOverrunMs))
+      ('runtimeOverrunPercent={0}' -f (Format-Number $current.runtimeOverrunPercent))
+      ('runtimeBaselineMs={0}' -f (Format-Number $current.runtimeBaselineMs))
+      ('runtimeOverrunStreak={0}' -f $current.runtimeOverrunStreak)
+      'backoffApplied=true'
+    )
+    Add-Candidate $result (New-Candidate 'heartbeat' 'HEARTBEAT_SELF_HEALTH' $severity 'heartbeat-engine' 'governor' 'governor' 'self-health' $changed $evidence 'Heartbeat scheduling or sustained runtime is abnormal.' 'Keep one scheduler owner and back off only sustained or material runtime degradation.' $Now)
   }
   return $result
 }
@@ -1569,6 +1735,8 @@ function Convert-CandidateToEvent {
   param($Candidate, [string]$EventId)
   $route = Get-RouteTarget $Candidate
   $intervention = Get-InterventionContract ([string]$Candidate.Type)
+  $governorOrigin = [string]$Candidate.Owner -eq 'governor'
+  $governorLocalUsage = [string]$Candidate.Type -eq 'USAGE_BURN' -and $governorOrigin
   return [ordered]@{
     Event = 'HEARTBEAT_EVENT'
     EventId = $EventId
@@ -1584,18 +1752,23 @@ function Convert-CandidateToEvent {
     LikelyCause = $Candidate.LikelyCause
     RecommendedAction = $Candidate.RecommendedAction
     DedupKey = $Candidate.DedupKey
-    InterventionClass = $intervention.Class
-    InterventionTemplate = $intervention.Template
-    TargetPolicy = $intervention.TargetPolicy
+    InterventionClass = if ($governorLocalUsage) { 'governor_usage_control' } else { $intervention.Class }
+    InterventionTemplate = if ($governorLocalUsage) { 'governor_local_only' } else { $intervention.Template }
+    TargetPolicy = if ($governorLocalUsage) { 'none' } else { $intervention.TargetPolicy }
     Postcondition = $intervention.Postcondition
     Autonomous = $intervention.Autonomous
     SelfTargetAllowed = $false
-    InterventionInstruction = $intervention.Instruction
+    InterventionInstruction = if ($governorLocalUsage) { 'Update only the Governor recurrence to the returned cadence, verify one active recurrence remains, and do not message a monitored task.' } else { $intervention.Instruction }
     CostImpact = if ([string]$Candidate.Type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
     QuotaImpact = if ([string]$Candidate.Type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
-    GovernorOrigin = ([string]$Candidate.Owner -eq 'governor')
-    CorroborationRequired = ([string]$Candidate.Type -eq 'USAGE_BURN' -and [string]$Candidate.Owner -eq 'governor')
-    CorroborationScope = if ([string]$Candidate.Type -eq 'USAGE_BURN' -and [string]$Candidate.Owner -eq 'governor') { 'same_subject_and_window' } else { 'none' }
+    GovernorOrigin = $governorOrigin
+    CorroborationRequired = $governorLocalUsage
+    CorroborationScope = if ($governorLocalUsage) { 'same_subject_and_window_for_monitored_task_message' } else { 'none' }
+    GovernorLocalAction = if ($governorLocalUsage) { 'throttle_recurrence_to_idle_cadence' } else { 'none' }
+    GovernorCadenceMinutes = if ($governorLocalUsage) { 360 } else { 0 }
+    RequiredHostAction = if ($governorLocalUsage) { 'update_governor_recurrence_and_verify' } else { 'evaluate_intervention_contract' }
+    MonitoredTaskMessage = if ($governorLocalUsage) { 'forbidden_without_independent_corroboration' } else { 'eligible_after_target_verification' }
+    UserActionRequired = $false
   }
 }
 
@@ -1604,6 +1777,7 @@ function New-ResolutionEvent {
   $owner = if ($RouteHint) { $RouteHint.Owner } else { $null }
   $subject = if ($RouteHint) { [string]$RouteHint.Subject } else { [string]$Condition.subjectHash }
   $intervention = Get-InterventionContract ([string]$Condition.type)
+  $governorOrigin = [string]$Condition.type -eq 'USAGE_BURN' -and [string]$Condition.ownerHash -eq (Get-StableHash 'governor')
   return [ordered]@{
     Event = 'HEARTBEAT_RESOLVED'
     EventId = $EventId
@@ -1628,6 +1802,14 @@ function New-ResolutionEvent {
     InterventionInstruction = 'Close the Governor-local condition. Notify the target only when an acknowledged temporary restriction must be lifted.'
     CostImpact = 'not_applicable'
     QuotaImpact = 'not_applicable'
+    GovernorOrigin = $governorOrigin
+    CorroborationRequired = $false
+    CorroborationScope = 'none'
+    GovernorLocalAction = if ($governorOrigin) { 'restore_supervision_recommended_cadence' } else { 'none' }
+    GovernorCadenceMinutes = 0
+    RequiredHostAction = if ($governorOrigin) { 'reconcile_governor_recurrence_and_verify' } else { 'close_local_condition' }
+    MonitoredTaskMessage = 'none_unless_release_notice_eligible'
+    UserActionRequired = $false
   }
 }
 
@@ -1653,6 +1835,7 @@ function New-OutboxRecord {
 function Convert-OutboxToRetryEvent {
   param($Record)
   $intervention = Get-InterventionContract ([string]$Record.type)
+  $governorLocalUsage = [string]$Record.type -eq 'USAGE_BURN' -and [bool]$Record.governorOrigin
   return [ordered]@{
     Event = [string]$Record.event
     EventId = [string]$Record.eventId
@@ -1668,18 +1851,23 @@ function Convert-OutboxToRetryEvent {
     LikelyCause = 'A prior Heartbeat transition remains unacknowledged by the invoking host.'
     RecommendedAction = 'Deduplicate by EventId, deliver once, then acknowledge the event.'
     DedupKey = 'event:' + [string]$Record.eventId
-    InterventionClass = $intervention.Class
-    InterventionTemplate = $intervention.Template
-    TargetPolicy = $intervention.TargetPolicy
+    InterventionClass = if ($governorLocalUsage) { 'governor_usage_control' } else { $intervention.Class }
+    InterventionTemplate = if ($governorLocalUsage) { 'governor_local_only' } else { $intervention.Template }
+    TargetPolicy = if ($governorLocalUsage) { 'none' } else { $intervention.TargetPolicy }
     Postcondition = $intervention.Postcondition
     Autonomous = $intervention.Autonomous
     SelfTargetAllowed = $false
-    InterventionInstruction = $intervention.Instruction
+    InterventionInstruction = if ($governorLocalUsage) { 'Update only the Governor recurrence to the returned cadence, verify one active recurrence remains, and do not message a monitored task.' } else { $intervention.Instruction }
     CostImpact = if ([string]$Record.type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
     QuotaImpact = if ([string]$Record.type -eq 'USAGE_BURN') { 'unknown' } else { 'not_applicable' }
     GovernorOrigin = [bool]$Record.governorOrigin
-    CorroborationRequired = ([string]$Record.type -eq 'USAGE_BURN' -and [bool]$Record.governorOrigin)
-    CorroborationScope = if ([string]$Record.type -eq 'USAGE_BURN' -and [bool]$Record.governorOrigin) { 'same_subject_and_window' } else { 'none' }
+    CorroborationRequired = $governorLocalUsage
+    CorroborationScope = if ($governorLocalUsage) { 'same_subject_and_window_for_monitored_task_message' } else { 'none' }
+    GovernorLocalAction = if ($governorLocalUsage) { 'throttle_recurrence_to_idle_cadence' } else { 'none' }
+    GovernorCadenceMinutes = if ($governorLocalUsage) { 360 } else { 0 }
+    RequiredHostAction = if ($governorLocalUsage) { 'update_governor_recurrence_and_verify' } else { 'evaluate_intervention_contract' }
+    MonitoredTaskMessage = if ($governorLocalUsage) { 'forbidden_without_independent_corroboration' } else { 'eligible_after_target_verification' }
+    UserActionRequired = $false
   }
 }
 
@@ -1718,6 +1906,7 @@ function Acknowledge-OutboxEvent {
   $State.outbox = @($State.outbox | Where-Object { [string]$_.eventId -ne $AcknowledgedEventId })
   $acknowledged = @($State.outbox).Count -lt $before
   if ($acknowledged) {
+    $State.health.acknowledgedEvents = [int64]$State.health.acknowledgedEvents + 1
     $State.revision = [int64]$State.revision + 1
     Write-State $State $ResolvedStatePath
   }
@@ -1784,6 +1973,15 @@ function New-InterventionRecord {
 function Get-InterventionPayload {
   param($Record, [string]$ActionName, [string]$Decision, [string]$ClaimTokenValue = $null)
   $contract = Get-InterventionContract ([string]$Record.type)
+  $failureReason = [string]$Record.failureReason
+  $nextHostAction = switch ($failureReason) {
+    'ambiguous_target' { 'retry_host_discovery_next_cycle' }
+    'target_not_live' { 'retry_host_discovery_next_cycle' }
+    'transport_unavailable' { 'retain_condition_without_user_handoff' }
+    'governor_usage_uncorroborated' { 'apply_governor_local_throttle_only' }
+    'user_authority_required' { 'surface_once_for_user_authority' }
+    default { if ($Decision -eq 'send') { 'send_once_to_verified_target' } else { 'none' } }
+  }
   $payload = [ordered]@{
     ok = $true
     action = $ActionName
@@ -1801,10 +1999,13 @@ function Get-InterventionPayload {
     selfTargetAllowed = $false
     maxSendAttempts = 2
     requiresIndependentVerification = $true
+    nextHostAction = $nextHostAction
+    userActionRequired = ($failureReason -eq 'user_authority_required')
+    routineFailureHandling = 'governor_local_fail_closed'
     replyFormat = ('CHRONOS INTERVENTION RESULT id={0} version={1} state=<acknowledged|outcome_reported|declined|user_authority_required|remediation_failed>' -f [string]$Record.interventionId, [int]$Record.version)
   }
   if (-not [string]::IsNullOrWhiteSpace($ClaimTokenValue)) { $payload.claimToken = $ClaimTokenValue }
-  if ([string]$Record.failureReason -ne 'none') { $payload.reason = [string]$Record.failureReason }
+  if ($failureReason -ne 'none') { $payload.reason = $failureReason }
   return $payload
 }
 
@@ -2152,6 +2353,21 @@ function Invoke-Cycle {
     $continuity = $hasPriorContinuity -and $hasEpoch -and $hasSequence -and $priorEpoch -eq $epochHash -and $sequence -gt [int64]$collector.lastSequence
     $previousForDetector = if ($continuity) { $State.previous[$family] } else { @{} }
     $detector = Invoke-Detector $family $Snapshot $previousForDetector $EvidenceNow
+    if ($family -eq 'heartbeat') {
+      $runtimeState = Get-Value $detector.Snapshot (Get-StableHash 'heartbeat-engine') @{}
+      $State.health.runtimeBudgetMs = [double](Get-Value $runtimeState 'runtimeBudgetMs' 0)
+      $State.health.runtimeObservedMs = [double](Get-Value $runtimeState 'runtimeMs' 0)
+      $State.health.runtimeOverrunMs = [double](Get-Value $runtimeState 'runtimeOverrunMs' 0)
+      $State.health.runtimeOverrunPercent = [double](Get-Value $runtimeState 'runtimeOverrunPercent' 0)
+      $State.health.runtimeBaselineMs = [double](Get-Value $runtimeState 'runtimeBaselineMs' 0)
+      $State.health.runtimeClassification = [string](Get-Value $runtimeState 'runtimeClassification' 'unobserved')
+      $State.health.runtimeOverrunStreak = [int](Get-Value $runtimeState 'runtimeOverrunStreak' 0)
+      $State.health.runtimeBackoffApplied = ([bool](Get-Value $runtimeState 'runtimeBackoffApplied' $false) -or @($detector.Candidates).Count -gt 0)
+      if (@($detector.Candidates).Count -eq 0) {
+        $collector.backoffUntilUtc = $null
+        $State.health.backoffUntilUtc = $null
+      }
+    }
     $counterContinuity = $continuity -and (Test-FamilyCounterContinuity $family $State.previous[$family] $detector.Snapshot)
     $seen = @{}
     foreach ($candidate in @($detector.Candidates)) {
@@ -2266,7 +2482,8 @@ function Write-Status {
   $activeInterventions = @($State.interventions | Where-Object { -not (Test-InterventionTerminal ([string]$_.state)) })
   $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
   $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
-  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs)
+  $backoffUntil = if ([string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) { 'none' } else { [string]$State.health.backoffUntilUtc }
+  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} completedCycles={19} stateChanges={20} acknowledgedEvents={21} failedCycles={22} duplicateRuns={23} runtimeBudgetMs={24} runtimeObservedMs={25} runtimeOverrunMs={26} runtimeOverrunPercent={27} runtimeBaselineMs={28} runtimeClassification={29} runtimeOverrunStreak={30} runtimeBackoffApplied={31} backoffUntil={32}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil)
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }
@@ -2296,14 +2513,12 @@ function New-HeartbeatMutex {
 
 $mutex = $null
 $acquired = $false
+$state = $null
+$resolved = $null
 try {
   if ($Action -notin @('cycle', 'status', 'acknowledge', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
   $resolved = Resolve-StatePath $StatePath $Scope
-  if ($Action -eq 'status') {
-    $state = Read-State $resolved.Path $resolved.ScopeHash
-    Write-Status $state ([DateTimeOffset]::UtcNow)
-    exit 0
-  }
+  Initialize-StateStore $resolved.Path
   $input = $null
   $deliveryNow = [DateTimeOffset]::UtcNow
   $evidenceNow = $deliveryNow
@@ -2317,14 +2532,20 @@ try {
   }
   $mutex = New-HeartbeatMutex $resolved.Path
   $abandoned = $false
-  try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true; $abandoned = $true }
+  $mutexWaitMilliseconds = if ($Action -eq 'cycle') { 0 } else { 1000 }
+  try { $acquired = $mutex.WaitOne($mutexWaitMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true; $abandoned = $true }
   if (-not $acquired) {
     if ($Action -eq 'cycle') { exit 0 }
     throw 'heartbeat_mutex_busy'
   }
   # Always reopen and validate authoritative state after acquisition. This is
   # mandatory after an abandoned mutex because the prior owner may have died.
+  Import-LegacyStateIfPresent $resolved
   $state = Read-State $resolved.Path $resolved.ScopeHash
+  if ($Action -eq 'status') {
+    Write-Status $state ([DateTimeOffset]::UtcNow)
+    exit 0
+  }
   if ($Action -eq 'acknowledge') {
     $acknowledged = Acknowledge-OutboxEvent $state $EventId $resolved.Path
     $payload = [ordered]@{ ok = $true; action = 'acknowledge'; eventId = $EventId; acknowledged = $acknowledged }
@@ -2365,6 +2586,18 @@ try {
 } catch {
   $code = [string]$_.Exception.Message
   if ($code -notmatch '^heartbeat_[a-z_]+$') { $code = 'heartbeat_internal_error' }
+  if ($Action -eq 'cycle' -and $acquired -and $null -ne $resolved) {
+    try {
+      $committed = Read-State $resolved.Path $resolved.ScopeHash
+      $committed.health.failedCycles = [int64]$committed.health.failedCycles + 1
+      $committed.health.lastError = $code
+      $committed.revision = [int64]$committed.revision + 1
+      Write-State $committed $resolved.Path
+    } catch {
+      # Preserve the original privacy-safe cycle error if failure accounting
+      # cannot be committed.
+    }
+  }
   Write-SafeError $code $Action
   exit 1
 } finally {

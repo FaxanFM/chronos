@@ -262,7 +262,8 @@ try {
   Assert-Silent (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-a'; totalTokens = 1000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'Normal agent progress.'
   $warning = Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-a'; totalTokens = 31000; tokensSinceMeaningfulChange = 30000; repeatedEquivalentActions = 4; minutesSinceMeaningfulChange = 25 }) }
   $warningEvent = Assert-Event $warning 'AGENT_STALL' 'governor'
-  Assert-Equal $warningEvent.Owner '/root/dev' 'Agent owner must remain a Governor triage hint.'
+  Assert-True (@($warningEvent).Count -eq 1) ("Agent event helper returned multiple values: $((@($warningEvent) | ForEach-Object { if ($null -eq $_) { '<null>' } else { $_.GetType().FullName + ':' + [string]$_ } }) -join '|')")
+  Assert-Equal $warningEvent.Owner '/root/dev' ("Agent owner must remain a Governor triage hint. Envelope: $($warning.Text)")
   Assert-Equal $warningEvent.Severity 'WARNING' 'Initial stall severity.'
   Assert-Silent (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-a'; totalTokens = 32000; tokensSinceMeaningfulChange = 30000; repeatedEquivalentActions = 4; minutesSinceMeaningfulChange = 26 }) }) 'Unchanged stall dedupe.'
   $escalated = Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-a'; totalTokens = 160000; tokensSinceMeaningfulChange = 140000; repeatedEquivalentActions = 10; minutesSinceMeaningfulChange = 45 }) }
@@ -301,7 +302,18 @@ try {
   Assert-Silent (Invoke-Heartbeat $cadence @{ agents = @(@{ id = 'cadence-agent'; active = $true; progressHash = 'b'; totalTokens = 41000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) } -At ($t1.AddSeconds(10)) -NoForce) 'Not-due family must remain silent.'
   $status = Invoke-RawModule @('-Action', 'status', '-StatePath', $cadence.State)
   Assert-True ($status.Text -match 'open=1') 'Cadence skip incorrectly resolved the condition.'
+  Assert-True ($status.Text -match 'completedCycles=3 stateChanges=\d+ acknowledgedEvents=0 failedCycles=0 duplicateRuns=0') 'Compact status omitted autonomous Governor progress counters.'
   Assert-Resolution (Invoke-Heartbeat $cadence @{ agents = @(@{ id = 'cadence-agent'; active = $true; progressHash = 'b'; totalTokens = 41000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) } -At ($t1.AddMinutes(6)) -NoForce) 'AGENT_STALL' 'governor'
+
+  # Compact status owns the Governor progress counters; no hidden host ledger is required.
+  $counterStatus = New-Case 'counter-status'
+  $counterRun = @{ runId = 'counter-run'; agents = @() }
+  Assert-Silent (Invoke-Heartbeat $counterStatus $counterRun.Clone()) 'Counter baseline.'
+  Assert-Silent (Invoke-Heartbeat $counterStatus $counterRun.Clone()) 'Duplicate counter run.'
+  $failedCounterRun = Invoke-Heartbeat $counterStatus @{ runId = 'counter-failure'; sourceSequence = 1; agents = @() }
+  Assert-FailedSafely $failedCounterRun 'heartbeat_source_out_of_order' 'Failed-cycle counter input.'
+  $counterStatusResult = Invoke-RawModule @('-Action', 'status', '-StatePath', $counterStatus.State)
+  Assert-True ($counterStatusResult.Text -match 'completedCycles=1 stateChanges=3 acknowledgedEvents=0 failedCycles=1 duplicateRuns=1') 'Compact status counters did not survive success, duplicate, and failed cycles.'
 
   # Guardian runaway uses deltas and approval postconditions.
   $guardian = New-Case 'guardian'
@@ -314,11 +326,20 @@ try {
   $postconditionEvent = Assert-Event (Invoke-Heartbeat $postcondition @{ guardian = @{ reviewerSessionId = 'reviewer-2'; reviewCount = 1; reviewsPerHour = 1; reviewerUsageRatio = .1; equivalentApprovalRequests = 1; approvalExecutionCount = 0; allowedPendingPostconditionCount = 1 } }) 'GUARDIAN_RUNAWAY' 'governor'
   Assert-Equal $postconditionEvent.Severity 'HIGH' 'Allowed-and-pending postcondition severity.'
 
-  # Usage burn: high expected work stays quiet; abnormal no-progress velocity alerts.
+  # Usage burn: Governor progress uses supervision counters, not repository edits.
   $usage = New-Case 'usage'
-  Assert-Silent (Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; dominantThread = 'thread-usage'; totalTokens = 100000; ratePerMinute = 12000; baselineRatePerMinute = 5000; meaningfulProgress = $true; progressHash = 'usage-a'; reviewerShare = .2 } }) 'High usage with progress.'
-  $usageEvent = Assert-Event (Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; dominantThread = 'thread-usage'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'usage-a'; reviewerShare = .91; projectedExhaustionMinutes = 30 } }) 'USAGE_BURN' 'governor'
+  Assert-Silent (Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'thread-usage'; totalTokens = 100000; ratePerMinute = 12000; baselineRatePerMinute = 5000; meaningfulProgress = $true; progressHash = 'usage-a'; reviewerShare = .2; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'High Governor usage with progress.'
+  Assert-Silent (Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'thread-usage'; totalTokens = 200000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'usage-a'; reviewerShare = .91; projectedExhaustionMinutes = 30; completedCycles = 2; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'A completed Governor supervision cycle is meaningful progress.'
+  $usageEvent = Assert-Event (Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'thread-usage'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'usage-a'; reviewerShare = .91; projectedExhaustionMinutes = 30; completedCycles = 2; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 1 } }) 'USAGE_BURN' 'governor'
   Assert-True (($usageEvent.Evidence -join ' ') -match 'reviewerShare=0.91') 'Usage evidence did not identify reviewer share.'
+  Assert-Equal $usageEvent.GovernorLocalAction 'throttle_recurrence_to_idle_cadence' 'Governor burn did not return its bounded local action.'
+  Assert-True ($usageEvent.GovernorCadenceMinutes -eq 360 -and $usageEvent.RequiredHostAction -eq 'update_governor_recurrence_and_verify' -and -not $usageEvent.UserActionRequired) 'Governor burn attempted to make routine throttling a user task.'
+  $usageResolutionCycle = Invoke-Heartbeat $usage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'thread-usage'; totalTokens = 310000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'usage-a'; reviewerShare = .2; completedCycles = 3; stateChanges = 1; acknowledgedEvents = 1; failedCycles = 0; duplicateRuns = 1 } }
+  Assert-Resolution $usageResolutionCycle 'USAGE_BURN' 'governor'
+  $usageResolved = @((Get-Events $usageResolutionCycle) | Where-Object { $_.Type -eq 'USAGE_BURN' -and $_.Event -eq 'HEARTBEAT_RESOLVED' })[0]
+  Assert-Equal $usageResolved.GovernorLocalAction 'restore_supervision_recommended_cadence' 'Resolved Governor burn did not restore normal cadence policy.'
+  $usageUnsupported = New-Case 'usage-governor-unsupported'
+  Assert-Silent (Invoke-Heartbeat $usageUnsupported @{ usage = @{ owner = 'governor'; dominantThread = 'thread-usage-unsupported'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'unchanged'; reviewerShare = .91; projectedExhaustionMinutes = 30 } }) 'Governor burn without supervision progress counters must remain unsupported.'
 
   # Session explosion requires fork and overlap evidence.
   $sessions = New-Case 'sessions'
@@ -376,13 +397,39 @@ try {
   Assert-Silent (Invoke-Heartbeat $duplicate $duplicateData.Clone()) 'Repeated run ID.'
   $duplicateState = Get-Content -Raw $duplicate.State | ConvertFrom-Json
   Assert-Equal $duplicateState.health.duplicateRuns 1 'Duplicate run accounting.'
+  $runtimeVariance = New-Case 'runtime-variance'
+  Assert-Silent (Invoke-Heartbeat $runtimeVariance @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } }) 'Runtime baseline.'
+  Assert-Silent (Invoke-Heartbeat $runtimeVariance @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 10629; runtimeBudgetMilliseconds = 10000 } }) 'Isolated 6.3 percent overrun.'
+  $varianceStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $runtimeVariance.State)
+  Assert-True ($varianceStatus.Text -match 'engine=healthy' -and $varianceStatus.Text -match 'runtimeBudgetMs=10000' -and $varianceStatus.Text -match 'runtimeObservedMs=10629' -and $varianceStatus.Text -match 'runtimeOverrunMs=629' -and $varianceStatus.Text -match 'runtimeOverrunPercent=6.3' -and $varianceStatus.Text -match 'runtimeClassification=normal_variance' -and $varianceStatus.Text -match 'runtimeBackoffApplied=false') 'Compact status did not explain tolerated runtime variance.'
+  Assert-Silent (Invoke-Heartbeat $runtimeVariance @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 9500; runtimeBudgetMilliseconds = 10000 } }) 'Healthy runtime did not reset overrun streak.'
+
+  $sustainedRuntime = New-Case 'runtime-sustained'
+  $sustainedTime = [DateTimeOffset]::UtcNow
+  Assert-Silent (Invoke-Heartbeat $sustainedRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } } -At $sustainedTime) 'Sustained runtime baseline.'
+  Assert-Silent (Invoke-Heartbeat $sustainedRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 10629; runtimeBudgetMilliseconds = 10000 } } -At ($sustainedTime.AddSeconds(1))) 'First modest overrun.'
+  Assert-Silent (Invoke-Heartbeat $sustainedRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 10777; runtimeBudgetMilliseconds = 10000 } } -At ($sustainedTime.AddSeconds(2))) 'Second modest overrun.'
+  $sustainedEvent = Assert-Event (Invoke-Heartbeat $sustainedRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 10650; runtimeBudgetMilliseconds = 10000 } } -At ($sustainedTime.AddSeconds(3))) 'HEARTBEAT_SELF_HEALTH' 'governor'
+  Assert-True (@($sustainedEvent.Changed) -contains 'classification=sustained_overrun' -and @($sustainedEvent.Evidence) -contains 'runtimeOverrunStreak=3') 'Self-health event did not preserve separate classification evidence fields.'
+  $sustainedStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $sustainedRuntime.State)
+  Assert-True ($sustainedStatus.Text -match 'engine=backoff' -and $sustainedStatus.Text -match 'runtimeClassification=sustained_overrun' -and $sustainedStatus.Text -match 'runtimeOverrunStreak=3' -and $sustainedStatus.Text -match 'runtimeBackoffApplied=true') 'Sustained overrun did not back off with an explainable status.'
+  Assert-Resolution (Invoke-Heartbeat $sustainedRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } } -At ($sustainedTime.AddSeconds(4))) 'HEARTBEAT_SELF_HEALTH' 'governor'
+  $recoveredStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $sustainedRuntime.State)
+  Assert-True ($recoveredStatus.Text -match 'engine=healthy' -and $recoveredStatus.Text -match 'runtimeClassification=within_budget' -and $recoveredStatus.Text -match 'runtimeBackoffApplied=false' -and $recoveredStatus.Text -match 'backoffUntil=none') 'Healthy runtime did not clear the self-health backoff.'
+
+  $materialRuntime = New-Case 'runtime-material'
+  Assert-Silent (Invoke-Heartbeat $materialRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } }) 'Material runtime baseline.'
+  Assert-Event (Invoke-Heartbeat $materialRuntime @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 0; runtimeMilliseconds = 16000; runtimeBudgetMilliseconds = 10000 } }) 'HEARTBEAT_SELF_HEALTH' 'governor' | Out-Null
+  Assert-True ((Invoke-RawModule @('-Action', 'status', '-StatePath', $materialRuntime.State)).Text -match 'runtimeClassification=material_overrun') 'Material overrun classification.'
+
   $selfHealth = New-Case 'self-health'
   $selfTime = [DateTimeOffset]::UtcNow
-  Assert-Event (Invoke-Heartbeat $selfHealth @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 2; runtimeSeconds = 31 } } -At $selfTime) 'HEARTBEAT_SELF_HEALTH' 'governor' | Out-Null
-  Assert-Silent (Invoke-Heartbeat $selfHealth @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 2; runtimeSeconds = 31 } } -At ($selfTime.AddSeconds(1)) -NoForce) 'Self-health backoff.'
+  Assert-Event (Invoke-Heartbeat $selfHealth @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 2; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } } -At $selfTime) 'HEARTBEAT_SELF_HEALTH' 'governor' | Out-Null
+  Assert-Silent (Invoke-Heartbeat $selfHealth @{ heartbeatActivity = @{ origin = 'host'; schedulerDuplicates = 2; runtimeMilliseconds = 9000; runtimeBudgetMilliseconds = 10000 } } -At ($selfTime.AddSeconds(1)) -NoForce) 'Self-health backoff.'
   $selfStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $selfHealth.State)
   Assert-True ($selfStatus.Text -match 'engine=backoff') 'Status did not expose Heartbeat backoff.'
   Assert-True ($selfStatus.Text -match 'activeTypes=8') 'Status did not report eight public heartbeat families.'
+  Assert-True ($selfStatus.Text -match 'stateStoreMode=explicit' -and $selfStatus.Text -match 'stateStoreWriteReady=true') 'Heartbeat status did not expose its successful state-store preflight.'
 
   # Strict input schema accepts token counters but rejects unknown, secret, path, and loose Boolean data.
   $boundaries = New-Case 'boundaries'
@@ -400,6 +447,8 @@ try {
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Secret-shaped field.'
   [IO.File]::WriteAllText($bad, '{"agents":[{"id":"a","active":"false"}],"collectorCoverage":{"agent_stall":"observed"}}', [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Loose Boolean.'
+  [IO.File]::WriteAllText($bad, '{"usage":{"owner":"governor","role":"governor","completedCycles":-1},"collectorCoverage":{"usage":"observed"}}', [Text.UTF8Encoding]::new($false))
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Negative Governor progress counter.'
   [IO.File]::WriteAllText($bad, '{"agents":[{"id":"a","active":true,"unknownField":1}],"collectorCoverage":{"agent_stall":"observed"}}', [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Unknown nested field.'
   [IO.File]::WriteAllText($bad, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"a","sourceSequence":1,"collectorCoverage":{"agent_stall":"partial","agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
@@ -520,7 +569,7 @@ try {
     $process.Dispose()
   }
   Assert-Equal ([regex]::Matches($raceText, 'AGENT_STALL').Count) 1 'Concurrent cycles must emit one stall event.'
-  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 5) 'Concurrent cycles corrupted state.'
+  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 6) 'Concurrent cycles corrupted state.'
 
   # The persisted outbox closes the state/output crash window with stable IDs.
   $outbox = New-Case 'outbox'
@@ -624,31 +673,34 @@ try {
 
   # Governor usage can be diagnosed, but it can never target or wake Governor.
   $selfUsage = New-Case 'intervention-self-usage'
-  Assert-Silent (Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Governor usage baseline.'
-  $selfCycle = Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 } } -NoAcknowledge
+  Assert-Silent (Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Governor usage baseline.'
+  $selfCycle = Invoke-Heartbeat $selfUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 1 } } -NoAcknowledge
   $selfEvent = Assert-Event $selfCycle 'USAGE_BURN' 'governor'
   Assert-Equal $selfEvent.CostImpact 'unknown' 'Usage volume was incorrectly converted into model cost.'
   Assert-Equal $selfEvent.QuotaImpact 'unknown' 'Usage volume was incorrectly converted into quota impact.'
   $selfPlan = Get-InterventionPayload (Invoke-Intervention $selfUsage 'plan' -EventId $selfEvent.EventId -Target 'governor-task' -Generation 'generation-1' -Governor 'governor-task')
   Assert-Equal $selfPlan.decision 'failed_closed' 'Governor self-target was not rejected.'
   Assert-Equal $selfPlan.reason 'self_target_forbidden' 'Governor self-target rejection was not explicit.'
+  Assert-True (-not $selfPlan.userActionRequired -and $selfPlan.routineFailureHandling -eq 'governor_local_fail_closed') 'Self-target failure was incorrectly assigned to the user.'
   Assert-Equal @((Get-Content -Raw $selfUsage.State | ConvertFrom-Json).outbox).Count 0 'Self-origin event remained eligible for repeat delivery.'
 
   $governorUsageLocal = New-Case 'governor-usage-local'
-  Assert-Silent (Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Governor-local usage baseline.'
-  $governorUsageCycle = Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 } } -NoAcknowledge
+  Assert-Silent (Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'governor-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Governor-local usage baseline.'
+  $governorUsageCycle = Invoke-Heartbeat $governorUsageLocal @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'governor-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 1 } } -NoAcknowledge
   $governorUsageEvent = Assert-Event $governorUsageCycle 'USAGE_BURN' 'governor'
   $unrelatedPlan = Get-InterventionPayload (Invoke-Intervention $governorUsageLocal 'plan' -EventId $governorUsageEvent.EventId -Target 'unrelated-task' -Generation 'generation-1' -Governor 'governor-task')
   Assert-Equal $unrelatedPlan.reason 'governor_usage_uncorroborated' 'Governor usage alone was allowed to wake another task.'
+  Assert-Equal $unrelatedPlan.nextHostAction 'apply_governor_local_throttle_only' 'Uncorroborated Governor usage did not remain an autonomous local action.'
+  Assert-True (-not $unrelatedPlan.userActionRequired) 'Uncorroborated Governor usage became a user chore.'
 
   $corroboratedUsage = New-Case 'governor-usage-corroborated'
   Assert-Silent (Invoke-Heartbeat $corroboratedUsage @{
       agents = @(@{ id = 'affected-task'; owner = 'affected-task'; active = $true; progressHash = 'same'; totalTokens = 1000 })
-      usage = @{ owner = 'governor'; dominantThread = 'affected-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' }
+      usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'affected-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 }
     }) 'Corroborated usage baseline.'
   $corroboratedCycle = Invoke-Heartbeat $corroboratedUsage @{
       agents = @(@{ id = 'affected-task'; owner = 'affected-task'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 })
-      usage = @{ owner = 'governor'; dominantThread = 'affected-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8 }
+      usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'affected-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; reviewerShare = .8; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 1 }
     } -NoAcknowledge
   $corroboratedEvents = @(Get-Events $corroboratedCycle)
   $corroboratedUsageEvent = @($corroboratedEvents | Where-Object { $_.Type -eq 'USAGE_BURN' })[0]
@@ -691,19 +743,33 @@ try {
   Assert-Equal $retryFailure2.state 'undelivered' 'Second definite failure did not exhaust the retry budget.'
   Assert-Equal @((Get-Content -Raw $retryBudget.State | ConvertFrom-Json).interventions)[0].attempts 2 'Intervention exceeded its two-attempt bound.'
 
-  # Schema 4 Heartbeat state upgrades in place on the next mutating cycle.
+  # Schema 4 and 5 Heartbeat state upgrade in place on the next mutating cycle.
   $migration = New-Case 'intervention-schema-migration'
   Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema migration baseline.'
   $legacyState = Get-Content -Raw $migration.State | ConvertFrom-Json
   $legacyState.schema = 4
   $legacyState.PSObject.Properties.Remove('interventions')
+  $legacyState.health.PSObject.Properties.Remove('acknowledgedEvents')
+  $legacyState.health.PSObject.Properties.Remove('failedCycles')
   [IO.File]::WriteAllText($migration.State, ($legacyState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema 4 migration cycle.'
-  Assert-Equal (Get-Content -Raw $migration.State | ConvertFrom-Json).schema 5 'Schema 4 state did not migrate to schema 5.'
+  $migratedState = Get-Content -Raw $migration.State | ConvertFrom-Json
+  Assert-Equal $migratedState.schema 6 'Schema 4 state did not migrate to schema 6.'
+  Assert-True ($migratedState.health.acknowledgedEvents -eq 0 -and $migratedState.health.failedCycles -eq 0) 'Schema 4 migration omitted Governor progress counters.'
+
+  $schemaFive = New-Case 'schema-five-migration'
+  Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 5 migration baseline.'
+  $schemaFiveState = Get-Content -Raw $schemaFive.State | ConvertFrom-Json
+  $schemaFiveState.schema = 5
+  $schemaFiveState.health.PSObject.Properties.Remove('acknowledgedEvents')
+  $schemaFiveState.health.PSObject.Properties.Remove('failedCycles')
+  [IO.File]::WriteAllText($schemaFive.State, ($schemaFiveState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 5 migration cycle.'
+  Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 6 'Schema 5 state did not migrate to schema 6.'
 
   $legacyUsage = New-Case 'legacy-usage-migration'
-  Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } }) 'Legacy usage baseline.'
-  $legacyUsageCycle = Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same' } } -NoAcknowledge
+  Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Legacy usage baseline.'
+  $legacyUsageCycle = Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 300000; ratePerMinute = 18000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 1 } } -NoAcknowledge
   $legacyUsageEvent = Assert-Event $legacyUsageCycle 'USAGE_BURN' 'governor'
   $legacyUsageState = Get-Content -Raw $legacyUsage.State | ConvertFrom-Json
   $legacyUsageState.schema = 4

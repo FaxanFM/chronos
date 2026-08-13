@@ -1,7 +1,8 @@
 param(
-  [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'discover', 'release')]
+  [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'release')]
   [string]$Action = 'status',
   [string]$StatePath,
+  [string]$HostInventoryPath,
   [string]$SessionId = $env:CODEX_THREAD_ID,
   [string]$SubjectId,
   [string]$ObservedAtUtc,
@@ -35,6 +36,13 @@ $script:HostReconcileAttemptLimit = 3
 $script:HostRecheckThroughCycle = 2
 $script:Entropy = [Text.Encoding]::UTF8.GetBytes('Chronos.Supervision.Registry.v1')
 $script:InvocationObservedAtUtc = [DateTimeOffset]::UtcNow
+$script:HostInventoryByteLimit = 131072
+$script:StateStoreMode = 'unknown'
+$script:StateStoreMigration = 'not_applicable'
+$script:StateStoreWriteReady = $false
+$script:StateStoreProtection = 'dpapi_ids'
+$script:LegacyDefaultStatePath = $null
+$script:LegacyInstallationScopePath = $null
 
 function Get-Value {
   param($Object, [string]$Name, $Default = $null)
@@ -212,9 +220,15 @@ function Resolve-StatePath {
   $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
   if ([string]::IsNullOrWhiteSpace($localAppData)) { throw 'supervision_state_path_invalid' }
   $localRoot = [IO.Path]::GetFullPath((Join-Path $localAppData 'Chronos\Supervision'))
+  $privateTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision'))
+  $script:LegacyDefaultStatePath = Join-Path $localRoot 'session-registry.json'
+  $script:LegacyInstallationScopePath = Join-Path $localRoot 'installation-scope.json'
   $candidate = if ([string]::IsNullOrWhiteSpace($Requested)) {
-    Join-Path $localRoot 'session-registry.json'
+    $script:StateStoreMode = 'temp_private'
+    $script:StateStoreMigration = 'not_needed'
+    Join-Path $privateTempRoot 'session-registry.json'
   } else {
+    $script:StateStoreMode = 'explicit'
     try { [IO.Path]::GetFullPath($Requested) } catch { throw 'supervision_state_path_invalid' }
   }
   $contained = (Test-ContainedPath $candidate $localRoot) -or (Test-ContainedPath $candidate $tempRoot)
@@ -223,6 +237,46 @@ function Resolve-StatePath {
   }
   if (-not (Test-NoReparseAncestors $candidate)) { throw 'supervision_state_path_invalid' }
   return [IO.Path]::GetFullPath($candidate)
+}
+
+function Initialize-StateStore {
+  param([string]$ResolvedStatePath)
+  $directory = Split-Path -Parent $ResolvedStatePath
+  try {
+    $createdDirectory = -not (Test-Path -LiteralPath $directory)
+    if ($createdDirectory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    $item = Get-Item -LiteralPath $directory -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
+      throw 'supervision_state_store_unwritable'
+    }
+    if ($script:StateStoreMode -eq 'temp_private' -and $createdDirectory) {
+      try {
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security = New-Object Security.AccessControl.DirectorySecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+        [IO.Directory]::SetAccessControl($directory, $security)
+        $script:StateStoreProtection = 'private_acl_dpapi_ids'
+      } catch {
+        $script:StateStoreProtection = 'inherited_acl_dpapi_ids'
+      }
+    }
+    if (-not (Test-Path -LiteralPath $ResolvedStatePath -PathType Leaf)) {
+      $probe = Join-Path $directory ('.supervision-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
+      try {
+        $stream = New-Object IO.FileStream($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Dispose()
+      } finally {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+      }
+    }
+    $script:StateStoreWriteReady = $true
+  } catch {
+    if ([string]$_.Exception.Message -eq 'supervision_state_store_unwritable') { throw }
+    throw 'supervision_state_store_unwritable'
+  }
 }
 
 function Resolve-InstallationScopePath {
@@ -259,10 +313,38 @@ function Read-InstallationScopeId {
   }
 }
 
+function Write-InstallationScopeId {
+  param([string]$Path, [string]$Id)
+  if ($Id -notmatch '^[a-f0-9]{32}$') { throw 'supervision_install_scope_invalid' }
+  $directory = Split-Path -Parent $Path
+  if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+  if (-not (Test-NoReparseAncestors $directory)) { throw 'supervision_install_scope_path_invalid' }
+  $json = ([ordered]@{ schema = 1; id = $Id } | ConvertTo-Json -Compress)
+  $temporary = Join-Path $directory ('.supervision-scope-' + [guid]::NewGuid().ToString('N') + '.tmp')
+  try {
+    [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
+    try {
+      [IO.File]::Move($temporary, $Path)
+    } catch [IO.IOException] {
+      if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'supervision_install_scope_unavailable' }
+    }
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+  }
+  return Read-InstallationScopeId $Path
+}
+
 function Get-OrCreateInstallationScopeId {
   param([string]$ResolvedStatePath)
   $path = Resolve-InstallationScopePath $ResolvedStatePath
   if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
+  if ($script:StateStoreMode -eq 'temp_private' -and
+      -not [string]::IsNullOrWhiteSpace($script:LegacyInstallationScopePath) -and
+      (Test-Path -LiteralPath $script:LegacyInstallationScopePath -PathType Leaf)) {
+    $legacyId = Read-InstallationScopeId $script:LegacyInstallationScopePath
+    $script:StateStoreMigration = 'legacy_scope_imported'
+    return Write-InstallationScopeId $path $legacyId
+  }
   $directory = Split-Path -Parent $path
   if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
   if (-not (Test-NoReparseAncestors $directory)) { throw 'supervision_install_scope_path_invalid' }
@@ -270,22 +352,7 @@ function Get-OrCreateInstallationScopeId {
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
   try { $rng.GetBytes($random) } finally { $rng.Dispose() }
   $id = ([BitConverter]::ToString($random)).Replace('-', '').ToLowerInvariant()
-  $json = ([ordered]@{ schema = 1; id = $id } | ConvertTo-Json -Compress)
-  $temporary = Join-Path $directory ('.supervision-scope-' + [guid]::NewGuid().ToString('N') + '.tmp')
-  try {
-    [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
-    try {
-      [IO.File]::Move($temporary, $path)
-      return $id
-    } catch [IO.IOException] {
-      if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
-      throw 'supervision_install_scope_unavailable'
-    } catch {
-      throw 'supervision_install_scope_unavailable'
-    }
-  } finally {
-    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-  }
+  return Write-InstallationScopeId $path $id
 }
 
 function Normalize-OpaqueId {
@@ -487,9 +554,27 @@ function Write-State {
     } else {
       [IO.File]::Move($temporary, $Path)
     }
+  } catch {
+    if ([string]$_.Exception.Message -match '^supervision_(state_|pending_|install_)') { throw }
+    throw 'supervision_state_store_unwritable'
   } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Import-LegacyStateIfPresent {
+  param([string]$ResolvedStatePath)
+  if ($script:StateStoreMode -ne 'temp_private' -or
+      (Test-Path -LiteralPath $ResolvedStatePath) -or
+      [string]::IsNullOrWhiteSpace($script:LegacyDefaultStatePath) -or
+      -not (Test-Path -LiteralPath $script:LegacyDefaultStatePath -PathType Leaf)) { return }
+  try {
+    $legacy = Read-State $script:LegacyDefaultStatePath -ValidateProtectedIds
+    Write-State $legacy $ResolvedStatePath
+    $script:StateStoreMigration = 'legacy_state_imported'
+  } catch {
+    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
   }
 }
 
@@ -616,6 +701,92 @@ function Remove-PendingHookEvents {
   # Keep the empty parent directory. Fallback writers do not hold the registry
   # mutex, so deleting it here can race a writer between its path check and write.
   foreach ($path in @($Paths)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+}
+
+function Read-HostInventory {
+  param([string]$Path, [DateTimeOffset]$Now)
+  if ([string]::IsNullOrWhiteSpace($Path)) { throw 'supervision_host_inventory_required' }
+  try { $full = [IO.Path]::GetFullPath($Path) } catch { throw 'supervision_host_inventory_invalid' }
+  $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+  if ([IO.Path]::GetExtension($full) -ne '.json' -or -not (Test-ContainedPath $full $tempRoot) -or -not (Test-NoReparseAncestors $full)) {
+    throw 'supervision_host_inventory_invalid'
+  }
+  try {
+    $item = Get-Item -LiteralPath $full -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt $script:HostInventoryByteLimit) { throw 'invalid' }
+    $bytes = [IO.File]::ReadAllBytes($full)
+    $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    Assert-StrictJson $text 'supervision_host_inventory_invalid'
+    $inventory = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+    Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'tasks')
+    if (-not (Test-IsInteger $inventory.schemaVersion) -or [int]$inventory.schemaVersion -ne 1 -or -not ($inventory.complete -is [bool])) { throw 'invalid' }
+    $captured = ConvertTo-UtcTimestamp $inventory.capturedAtUtc
+    if ($captured -gt $Now.AddMinutes(5) -or $captured -lt $Now.AddMinutes(-15)) { throw 'invalid' }
+    $tasks = @($inventory.tasks)
+    if ($tasks.Count -gt $script:SessionLimit) { throw 'invalid' }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $normalized = [Collections.Generic.List[object]]::new()
+    $activeStates = @('active', 'running', 'waiting', 'blocked', 'needs_attention', 'pending', 'idle', 'ready')
+    $endedStates = @('completed', 'failed', 'cancelled', 'archived', 'ended')
+    foreach ($task in $tasks) {
+      Assert-ExactKeys $task @('id', 'status', 'generation')
+      $id = Normalize-OpaqueId (Get-Value $task 'id') 'supervision_host_inventory_invalid'
+      if (-not $seen.Add($id)) { throw 'invalid' }
+      $status = [string](Get-Value $task 'status' '')
+      if ($status -notin @($activeStates + $endedStates)) { throw 'invalid' }
+      $generation = $null
+      if ($task.Contains('generation') -and $null -ne $task.generation) {
+        $generation = Normalize-OpaqueId $task.generation 'supervision_host_inventory_invalid'
+      }
+      $normalized.Add([pscustomobject]@{
+        Id = $id
+        Active = ($status -in $activeStates)
+        Generation = $generation
+      }) | Out-Null
+    }
+    return [pscustomobject]@{ CapturedAt = $captured; Complete = [bool]$inventory.complete; Tasks = @($normalized) }
+  } catch {
+    if ([string]$_.Exception.Message -match '^supervision_host_inventory_') { throw }
+    throw 'supervision_host_inventory_invalid'
+  }
+}
+
+function Invoke-HostInventoryReconciliation {
+  param($State, $Inventory, [string]$CurrentGovernorId, [DateTimeOffset]$Now)
+  $currentHash = Get-TextHash $CurrentGovernorId
+  if ($null -eq $State.governor -or [string]$State.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
+  $present = @{}
+  $added = 0
+  $reactivated = 0
+  $ended = 0
+  foreach ($task in @($Inventory.Tasks)) {
+    $hash = Get-TextHash ([string]$task.Id)
+    $present[$hash] = $true
+    $existing = if ($State.sessions.Contains($hash)) { $State.sessions[$hash] } else { $null }
+    if ([bool]$task.Active) {
+      if ($null -eq $existing) {
+        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null (Get-TextHash 'workspace-unavailable') 'unavailable' 'active' 'fallback' $Now $Inventory.CapturedAt 3 -AllowReactivation) { $added++ }
+      } elseif ([string]$existing.state -eq 'ended') {
+        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null ([string]$existing.workspaceHash) ([string]$existing.model) 'active' ([string]$existing.source) $Now $Inventory.CapturedAt 3 -AllowReactivation) { $reactivated++ }
+      } else {
+        $existing.lastSeenUtc = $Now.ToString('o')
+        $existing.lastEventUtc = $Inventory.CapturedAt.ToString('o')
+        $existing.lastEventRank = 3
+      }
+    } elseif ($null -ne $existing -and [string]$existing.state -eq 'active' -and $hash -ne $currentHash) {
+      Set-RecordEndedByHash $State $hash $Now $Inventory.CapturedAt
+      if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
+    }
+  }
+  if ([bool]$Inventory.Complete) {
+    foreach ($hash in @($State.sessions.Keys)) {
+      $record = $State.sessions[$hash]
+      if ([string]$record.kind -ne 'task' -or [string]$record.state -ne 'active' -or $hash -eq $currentHash -or $present.ContainsKey($hash)) { continue }
+      Set-RecordEndedByHash $State ([string]$hash) $Now $Inventory.CapturedAt
+      if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
+    }
+  }
+  return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; Ended = $ended; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
 }
 
 function New-RegistryMutex {
@@ -847,18 +1018,29 @@ function Get-DiscoveryPayload {
     nextBatchOffset = $nextBatchOffset
     changes = @($changes)
     resultTruncated = ($activeCount -gt ($activeTasks.Count + $activeAgents.Count))
-    registryCoverage = 'lifecycle_hooks'
+    registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
+    hookExecutionObservation = if ([long]$State.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
+    hookTrustObservation = 'host_verification_required'
+    lastHookUtc = $State.health.lastHookUtc
     livenessAuthority = 'host_task_tools'
     taskTransport = 'host_required'
+    requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
+    routineUserAction = 'none'
     hostEquivalenceKey = $script:HostEquivalenceKey
     equivalenceScope = 'installation'
-    installationScopePersistence = 'separate_local_anchor'
+    installationScopePersistence = 'state_root_anchor'
+    stateStoreMode = $script:StateStoreMode
+    stateStoreWriteReady = $script:StateStoreWriteReady
+    stateStoreProtection = $script:StateStoreProtection
+    stateStoreMigration = $script:StateStoreMigration
     hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
     hostRecheckThroughCycle = $script:HostRecheckThroughCycle
     hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
     localMutexScope = 'machine_state_root'
     workerRecurrence = 'disabled'
     modelCalls = 'governor_only'
+    recommendedGovernorModel = 'gpt-5.6-terra'
+    recommendedGovernorReasoningEffort = 'medium'
     recommendedCadenceMinutes = if ($activeCount -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
     maximumModelCallsPerDay = if ($activeCount -gt 0) { [int](1440 / $script:GovernorActiveCadenceMinutes) } else { [int](1440 / $script:GovernorIdleCadenceMinutes) }
     governorCycleCount = $cycleCount
@@ -918,6 +1100,7 @@ try {
     $preparedProtectedId = if ([string]$preparedHookEvent.event -eq 'SessionStart') { [string]$preparedHookEvent.protectedSessionId } elseif ([string]$preparedHookEvent.event -eq 'SubagentStart') { [string]$preparedHookEvent.protectedAgentId } else { $null }
   }
   $resolved = Resolve-StatePath $StatePath
+  Initialize-StateStore $resolved
   $mutex = New-RegistryMutex $resolved
   $mutexWaitMilliseconds = if ($Action -eq 'hook' -and [string](Get-Value $hookData 'hook_event_name' '') -eq 'SessionEnd') {
     $script:SynchronousHookMutexWaitMilliseconds
@@ -932,6 +1115,7 @@ try {
     }
     throw 'supervision_mutex_busy'
   }
+  Import-LegacyStateIfPresent $resolved
   if ($Action -ne 'hook') {
     $installationScopeId = Get-OrCreateInstallationScopeId $resolved
     $script:HostEquivalenceKey = $script:GovernorEquivalencePrefix + ':' + $installationScopeId
@@ -974,17 +1158,28 @@ try {
       droppedEntries = [long]$state.health.droppedEntries
       ignoredStaleEvents = [long]$state.health.ignoredStaleEvents
       registryCapacity = if ([long]$state.health.droppedEntries -gt 0) { 'exhausted' } else { 'available' }
-      registryCoverage = 'lifecycle_hooks'
+      registryCoverage = if ([long]$state.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
+      hookExecutionObservation = if ([long]$state.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
+      hookTrustObservation = 'host_verification_required'
+      lastHookUtc = $state.health.lastHookUtc
       taskTransport = 'host_required'
+      requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
+      routineUserAction = 'none'
       hostEquivalenceKey = $script:HostEquivalenceKey
       equivalenceScope = 'installation'
-      installationScopePersistence = 'separate_local_anchor'
+      installationScopePersistence = 'state_root_anchor'
+      stateStoreMode = $script:StateStoreMode
+      stateStoreWriteReady = $script:StateStoreWriteReady
+      stateStoreProtection = $script:StateStoreProtection
+      stateStoreMigration = $script:StateStoreMigration
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
       hostRecheckThroughCycle = $script:HostRecheckThroughCycle
       hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
       localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
+      recommendedGovernorModel = 'gpt-5.6-terra'
+      recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
       maximumModelCallsPerDay = if (($activeTasks + $activeAgents) -gt 0) { [int](1440 / $script:GovernorActiveCadenceMinutes) } else { [int](1440 / $script:GovernorIdleCadenceMinutes) }
       governorCycleCount = if ($null -ne $state.governor) { [long]$state.governor.cycleCount } else { 0L }
@@ -1036,6 +1231,22 @@ try {
     if (-not $confirmed -or $state.sessions[$subjectHash].state -ne 'active') { throw 'supervision_event_order_conflict' }
     Write-State $state $resolved
     Write-SafeOutput ([ordered]@{ ok = $true; action = 'confirm-active'; revision = [long]$state.revision; subjectHash = $subjectHash.Substring(0, 16); state = 'active' })
+    exit 0
+  }
+  if ($Action -eq 'reconcile-host') {
+    if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
+    $inventory = Read-HostInventory $HostInventoryPath $now
+    $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
+    $state.governor.lastSeenUtc = $now.ToString('o')
+    $payload = Get-DiscoveryPayload $state 'reconcile-host' $current $SinceRevision $now
+    $payload['hostInventoryObserved'] = [int]$reconciled.Observed
+    $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
+    $payload['hostTasksAdded'] = [int]$reconciled.Added
+    $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated
+    $payload['hostTasksEnded'] = [int]$reconciled.Ended
+    $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
+    Write-State $state $resolved
+    Write-SafeOutput $payload
     exit 0
   }
   if ($Action -eq 'release') {

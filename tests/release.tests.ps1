@@ -60,7 +60,10 @@ try {
     '60 minutes while monitored work is active and 360 minutes while idle',
     '336 cycles or 14 days',
     '-SupervisionConfirmRecurrenceStopped',
-    '%LOCALAPPDATA%\Chronos\Supervision\session-registry.json',
+    '%TEMP%\Chronos\Supervision\session-registry.json',
+    'one compact host task-list call',
+    'gpt-5.6-terra',
+    'routine user action',
     'DPAPI does not protect against another process already running as that'
   )) {
     if (-not $supervisionContract.Contains($required)) {
@@ -73,6 +76,8 @@ try {
     'A send with an unknown outcome does not retry',
     'A task report is not proof of recovery',
     'same subject and observation window',
+    'GovernorLocalAction',
+    'acknowledges the event only after one active recurrence with that cadence is verified',
     'Chronos does not infer price, quota impact, or efficiency from a model name',
     'The initial attempt plus one retry is the hard limit'
   )) {
@@ -184,13 +189,13 @@ try {
       if ($entry.LastWriteTime.DateTime -ne [DateTime]::new(1980, 1, 1, 0, 0, 0, [DateTimeKind]::Unspecified)) {
         throw "Release entry has a non-reproducible timestamp: $($entry.FullName)"
       }
-      if ($entry.Name -eq 'LICENSE' -or [System.IO.Path]::GetExtension($entry.Name).ToLowerInvariant() -in @('.json', '.md', '.ps1', '.yaml', '.yml', '.txt')) {
+      if ($entry.Name -eq 'LICENSE' -or [System.IO.Path]::GetExtension($entry.Name).ToLowerInvariant() -in @('.json', '.md', '.ps1', '.cmd', '.yaml', '.yml', '.txt')) {
         $reader = [System.IO.StreamReader]::new($entry.Open(), [System.Text.Encoding]::UTF8)
         try { $entryText = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
       }
     }
-    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
+    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
       if ($names -notcontains $required) { throw "Release is missing $required." }
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {
@@ -224,12 +229,18 @@ try {
     if ($parseErrors) { throw "Packaged script failed Windows PowerShell 5.1 parsing: $($installedScript.FullName)" }
   }
   $installedHeartbeat = Join-Path $installRoot "skills\chronos\scripts\chronos.ps1"
+  $installedLauncher = Join-Path $installRoot "skills\chronos\scripts\chronos.cmd"
   $installedState = Join-Path $testRoot "installed-heartbeat-state.json"
   $installedOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action heartbeat -HeartbeatStatePath $installedState `
     -HeartbeatScope "release-install-smoke" 2>&1)
   if ($LASTEXITCODE -ne 0 -or ($installedOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
     throw "Extracted package Heartbeat status smoke test failed.`n$($installedOutput -join "`n")"
+  }
+  $launcherOutput = @(& $installedLauncher -Action heartbeat -HeartbeatStatePath $installedState `
+    -HeartbeatScope "release-install-smoke" 2>&1)
+  if ($LASTEXITCODE -ne 0 -or ($launcherOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
+    throw "Extracted package launcher did not apply the supported Windows PowerShell invocation.`n$($launcherOutput -join "`n")"
   }
   $installedSupervisionState = Join-Path $testRoot "installed-supervision-state.json"
   $installedSupervisionOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
@@ -242,7 +253,7 @@ try {
   $installedSupervisionData = $installedSupervisionLine[0].Substring('CHRONOS SUPERVISION '.Length) | ConvertFrom-Json
   if ($installedSupervisionData.hostEquivalenceKey -notmatch '^chronos-supervision-v1:[a-f0-9]{32}$' -or
       $installedSupervisionData.equivalenceScope -ne 'installation' -or
-      $installedSupervisionData.installationScopePersistence -ne 'separate_local_anchor' -or
+      $installedSupervisionData.installationScopePersistence -ne 'state_root_anchor' -or
       $installedSupervisionData.hostReconcileAttemptLimit -ne 3 -or
       $installedSupervisionData.hostRecheckThroughCycle -ne 2 -or
       $installedSupervisionData.hostPostcondition -ne 'one_live_governor_one_active_recurrence_zero_duplicates') {

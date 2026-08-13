@@ -71,10 +71,10 @@ an unrelated payload does not count.
 
 ## Heartbeat Engine
 
-`chronos.ps1 -Action heartbeat` invokes an internal deterministic transition
+`chronos.cmd -Action heartbeat` invokes an internal deterministic transition
 engine. The Codex host supplies one bounded normalized snapshot across the
 monitored task set and chooses the recurring cadence. The recommended topology
-uses one Governor task on `gpt-5.6-luna` with Medium reasoning. Monitored tasks
+uses one Governor task on `gpt-5.6-terra` with Medium reasoning. Monitored tasks
 remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
 It does not infer cost or quota impact from a model name.
@@ -106,6 +106,14 @@ does not retry. A definite failure can retry once. A task report cannot resolve
 the detector condition. Native planning compares the requested target hash with
 the event class's persisted subject or owner hash and fails closed on a policy
 mismatch.
+
+Governor-origin usage is a separate local control path. It is comparable only
+when consecutive samples contain supervision cycle, state-change,
+acknowledgement, failure, and duplicate-run counters. Completed coordination
+counts as progress without a Git change. A confirmed local burn condition asks
+the host to change only the Governor recurrence to 360 minutes and verify one
+active recurrence. It does not open a task intervention without an independent
+same-subject, same-window condition.
 
 The engine is not a scheduler, task transport, security boundary, telemetry
 client, or general transcript store. Semantic interpretation and event delivery
@@ -169,8 +177,9 @@ host uses the resulting scoped equivalence key to reconcile one Governor per
 installation. This is necessary because a Governor on one PC cannot consume
 another PC's local registry. The anchor survives session-registry recovery.
 
-`chronos.ps1 -Action supervise` exposes status, single-Governor claim,
-discovery, host-confirmed reactivation, and two-phase release. Registry liveness
+`chronos.cmd -Action supervise` exposes status, single-Governor claim,
+discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
+and two-phase release. Registry liveness
 is advisory; host task status is authoritative. Terminal lifecycle state has
 precedence over delayed asynchronous starts. Bootstrap reconciles matching host
 automations first, reuses a role-verified Governor, otherwise creates one fresh
@@ -178,8 +187,9 @@ task without inherited history, and uses a mutex-protected claim as the
 same-machine ownership fence. A scoped host equivalence key, stable host-ID
 ordering, a three-attempt budget, an exact postcondition, and two initial
 convergence rechecks handle competing setup tasks. It does not automatically
-fork a working task. The host owns
-task creation, Luna Medium selection, one optional recurrence, compact rotating
+fork a working task. Each Governor cycle supplies one bounded host inventory so
+missed or disabled hooks do not require manual task registration. The host owns
+task creation, Terra Medium selection, one optional recurrence, compact rotating
 task batches, and delivery. Worker tasks run no Chronos model cycle. The
 recurrence is bounded to 336 cycles or 14 days. See
 [Supervision](SUPERVISION.md).
@@ -191,12 +201,12 @@ beneath the current user's temporary application-data directory, keyed by a
 hash of Git's canonical common directory. An invoked Heartbeat cycle persists
 bounded per-scope transition, cadence, coverage, deduplication, and engine-health
 metadata plus hashed, bounded delivery and intervention records beneath the
-user's local Chronos application-data directory. Intervention state contains
+user's Windows temporary Chronos directory. Intervention state contains
 hashes, enums, counters, and timestamps. It does not persist the raw collector
 snapshot or raw route, subject, owner, or task IDs.
 
 Passive supervision persists one bounded registry beneath the current user's
-local application-data directory. Raw task and agent IDs are DPAPI protected
+Windows temporary Chronos directory. Raw task and agent IDs are DPAPI protected
 for that user; workspace identity is hashed. DPAPI does not defend against a
 different process already running as the same user. Decrypted IDs are returned
 only by local supervision status or Governor discovery for host routing and can enter that
@@ -213,7 +223,7 @@ started when fingerprinting exceeds its time or byte limit.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.8.1 does not change the existing inspector warning thresholds,
+of failure. v0.8.2 does not change the existing inspector warning thresholds,
 critical thresholds, scoring weights, or predictive claims. Heartbeat transition
 rules are a separate engineering subsystem and must retain explicit coverage and
 evidence. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

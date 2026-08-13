@@ -28,7 +28,7 @@ name alone is not an equivalence key. Never copy a key from another machine.
 1. Reconcile host state before trusting local state. Inspect every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
    ID, creation time when available, target task, and equivalence key. Also run
-   `chronos.ps1 -Action supervise -SupervisionAction status`.
+   `chronos.cmd -Action supervise -SupervisionAction status`.
 2. Build one host candidate set. Keep only live targets whose compact assignment
    contains the complete current `hostEquivalenceKey` and confirms the dedicated role. Sort valid
    automation candidates by creation time ascending, then immutable automation
@@ -41,9 +41,10 @@ name alone is not an equivalence key. Never copy a key from another machine.
    the candidate state and retry on the next setup pulse.
 3. If no valid Governor exists and the host exposes `create_thread`, create one
    fresh task titled `Chronos Governor`. Do not fork the current task or copy its
-   history. Request `gpt-5.6-luna` with Medium reasoning only when the host
-   advertises that exact task-model choice. Never silently substitute a more
-   expensive model.
+   history. Request `gpt-5.6-terra` with Medium reasoning only when the host
+   advertises that exact task-model choice. Field validation requires reliable
+   tool use and recovery judgment in the coordinator role. Never silently
+   substitute another model.
 4. Have the selected task run `-SupervisionAction initialize`. The registry
    mutex fences only one machine and state root. If another local task already
    won, the loser must stop, create no automation, and may be archived after host
@@ -92,34 +93,50 @@ The dedicated task should receive this compact, self-contained assignment:
 ```text
 Chronos equivalence key: <complete hostEquivalenceKey from status>. Act as the
 single Chronos Governor. Claim local Chronos supervision. Reconcile the passive
-lifecycle registry with host task status and monitor active tasks from this one
-inbox. On a new, materially worse, or eligible resolution transition, use the
-bounded Chronos intervention state machine. Contact only the exact verified
-affected task. Use compact batched task waits when available. Do not edit
-repositories, read transcripts, run checks inside worker tasks, create another
-Governor, broadcast routine status, or assign remediation to the user. Keep
-worker recurrence disabled.
+lifecycle registry with one compact host task inventory and monitor active tasks
+from this one inbox. On a new, materially worse, or eligible resolution
+transition, use the bounded Chronos intervention state machine. Apply a returned
+Governor-local recurrence action yourself and verify its postcondition. Contact
+only the exact verified affected task. Use compact batched task waits when
+available. Do not edit repositories, read transcripts, run checks inside worker
+tasks, create another Governor, broadcast routine status, or assign remediation
+to the user. Keep worker recurrence disabled.
 ```
 
 Plugin lifecycle hooks register only `SessionStart`, `SessionEnd`,
 `SubagentStart`, and `SubagentStop`. They run headless, return no model context,
 and require the normal one-time Codex hook trust review. If hooks are disabled
-or untrusted, continue with host task-list discovery and label registry coverage
-unavailable. Brief registry contention uses a bounded protected fallback event;
+or untrusted, continue with one compact host task-list inventory and reconcile
+it through `-SupervisionAction reconcile-host`; do not ask the user to register
+or relay tasks. Brief registry contention uses a bounded protected fallback event;
 `status` and `discover` reconcile and remove it under the registry lock. Never
 bypass hook trust.
 
 For each Governor cycle, apply the bounded cycle-zero/one host convergence check
-when required, run `-SupervisionAction discover`, then treat host task tools as
-liveness authority. Prefer one `list_threads` call and compact
-`wait_threads` snapshots from the rotating `checkBatch`, which contains at most
-eight entries. If an ended registry entry is confirmed live by the host, use
+when required, then call the host task list exactly once. Write only opaque task
+IDs, safe status categories, optional opaque generations, capture time, and a
+completeness flag to a bounded JSON file under `%TEMP%`; never write titles,
+paths, or transcript content. Run `-SupervisionAction reconcile-host` with that
+file, remove the file, and treat the returned inventory as liveness authority.
+Use compact `wait_threads` snapshots from the rotating `checkBatch`, which
+contains at most eight entries. If host inventory is unavailable, fail closed
+for task-directed sends, retain pending state, and retry next cycle without a
+user handoff. If an ended registry entry is confirmed live by the host, use
 `-SupervisionAction confirm-active -SupervisionSubjectId <id>`; an async start
 hook cannot revive terminal state by itself. Do not repeatedly read full tasks
 or transcripts. A normal cycle must end without messaging monitored tasks. If
 `rotationRequired=true`, reconcile a fresh Governor or pause the recurrence
 before the current cycle ends. See the public
 [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
+
+Before building a Governor `usage` record, run `chronos.cmd -Action heartbeat`
+once and copy its five named counters exactly: `completedCycles`,
+`stateChanges`, `acknowledgedEvents`, `failedCycles`, and `duplicateRuns`.
+Combine them only with the current compact Inspector usage fields for this
+Governor. Never synthesize a missing counter as zero. If any counter or usage
+field is unavailable, mark usage coverage `partial` or `unsupported` and do not
+open or resolve a Governor usage condition. This compact status read uses no
+model call and replaces host-maintained progress bookkeeping.
 
 ## Autonomous Intervention
 
@@ -129,7 +146,11 @@ script sends a message itself.
 
 For one Governor cycle:
 
-1. Collect all due Heartbeat events before sending any task message.
+1. Collect all due Heartbeat events before sending any task message. Process a
+   returned `GovernorLocalAction` first. Update only this Governor's recurrence,
+   re-list it, and acknowledge the event only after exactly one active matching
+   recurrence has the returned cadence. If the update cannot be verified, leave
+   the event pending for its bounded retry and do not ask the user to relay it.
 2. Resolve each event against current host task inventory. Follow the event's
    `TargetPolicy`. Require exactly one live, authorized target and its current
    host generation. Never target the Governor, a self-origin run, an unrelated
@@ -180,6 +201,10 @@ PC, or reset, clean, merge, push, publish, or delete repository data.
 usage event stays Governor-local. It may target another task only when a second
 event proves stall, review amplification, or machine degradation for the same
 subject within the same observation window. It can never target the Governor.
+`throttle_recurrence_to_idle_cadence` means set only the Governor recurrence to
+360 minutes and verify the one-recurrence postcondition. On
+`restore_supervision_recommended_cadence`, reconcile the 60-minute active or
+360-minute idle cadence and verify it before closing the local action.
 
 When ownership is ambiguous, the target is not live, transport is unavailable,
 or user authority is required, call `-HeartbeatInterventionAction fail-closed`.

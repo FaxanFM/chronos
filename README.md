@@ -82,6 +82,9 @@ paths, identifiers, prompts, commands, credentials, or private source.
   monitored tasks. When action is required, the Governor sends one fixed,
   bounded instruction to the exact verified affected task. Stable event IDs,
   one active intervention per target, and bounded retries prevent wake storms.
+- Treats an isolated modest Governor-cycle overrun as normal runtime variance.
+  Only sustained or material self-degradation causes a 15-minute collector
+  backoff, and compact status explains the budget, baseline, overrun, and reason.
 - Passively registers task and subagent lifecycle changes through four reviewed,
   headless hooks. No per-turn hook, worker recurrence, transcript read, or
   model-visible hook output is used. Brief registry contention uses a bounded
@@ -139,7 +142,7 @@ To set up low-overhead monitoring, ask once:
 
 ```text
 Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Luna with Medium reasoning if available.
+fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
 ```
 
 Review and trust the packaged lifecycle hook once through Codex `/hooks`.
@@ -151,16 +154,17 @@ equivalence key, deterministic winner order, and three-attempt reconciliation
 budget keep simultaneous setup attempts on that PC converged on one task and one recurrence.
 Different PCs retain separate Governors for their separate local registries.
 Only the first two Governor pulses repeat that check; normal cycles do not.
-Only that task owns host recurrence. It discovers
-task and subagent starts or stops from a small encrypted local registry, then
-uses host task status as the liveness authority. If hooks are disabled, it
-falls back to host task discovery without blocking work. See
+Only that task owns host recurrence. It discovers task and subagent starts or
+stops from a small encrypted local registry, then reconciles one compact host
+inventory as the liveness authority. If hooks are disabled, that inventory is
+the automatic fallback; the user does not register tasks or relay routine
+findings. See
 [Supervision](docs/SUPERVISION.md) for setup, routing, usage, and privacy limits.
 
 For long-running or asynchronous work, ask:
 
 ```text
-Enable Chronos Heartbeats in one Governor task using GPT-5.6 Luna with Medium reasoning.
+Enable Chronos Heartbeats in one Governor task using GPT-5.6 Terra with Medium reasoning.
 Monitor the other tasks without waking them unless Governor decides intervention is needed.
 ```
 
@@ -172,8 +176,9 @@ events enter one Governor inbox. The Governor verifies one exact live target,
 coalesces simultaneous events for that task, and communicates directly through
 host task tools. It does not ask the user to relay routine remediation. A task
 reply remains pending until Chronos or an independent host check verifies the
-postcondition. Governor self-usage never causes a self-message. Chronos does not
-infer cost or quota impact from model names. See
+postcondition. Governor self-usage changes only the Governor recurrence after
+the host verifies the new cadence; it never causes a self-message or a routine
+user chore. Chronos does not infer cost or quota impact from model names. See
 [Heartbeats](docs/HEARTBEATS.md) for the collector contract, coverage limits,
 routing, delivery, deduplication, and stored fields.
 

@@ -28,6 +28,7 @@ function Invoke-Supervision {
     [string]$Session = '',
     [long]$SinceRevision = 0,
     [string]$Subject = '',
+    [string]$HostInventory = '',
     [switch]$ConfirmRecurrenceStopped,
     [switch]$Force
   )
@@ -38,6 +39,7 @@ function Invoke-Supervision {
   )
   if ($Session) { $arguments += @('-SupervisionSessionId', $Session) }
   if ($Subject) { $arguments += @('-SupervisionSubjectId', $Subject) }
+  if ($HostInventory) { $arguments += @('-SupervisionHostInventoryPath', $HostInventory) }
   if ($ConfirmRecurrenceStopped) { $arguments += '-SupervisionConfirmRecurrenceStopped' }
   if ($Force) { $arguments += '-Force' }
   $output = @(& powershell.exe @arguments 2>&1)
@@ -159,7 +161,10 @@ try {
   Assert-True ($emptyData.recommendedCadenceMinutes -eq 360 -and $emptyData.maximumModelCallsPerDay -eq 4 -and $emptyData.workerRecurrence -eq 'disabled') 'Idle cadence, cost bound, or worker recurrence regressed.'
   Assert-True ($emptyData.hostEquivalenceKey -match '^chronos-supervision-v1:[a-f0-9]{32}$' -and $emptyData.hostReconcileAttemptLimit -eq 3 -and $emptyData.hostRecheckThroughCycle -eq 2) 'Host convergence identity, retry budget, or bounded recheck regressed.'
   Assert-True ($emptyData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates' -and $emptyData.localMutexScope -eq 'machine_state_root') 'Host postcondition or local-lock scope regressed.'
-  Assert-True ($emptyData.equivalenceScope -eq 'installation' -and $emptyData.installationScopePersistence -eq 'separate_local_anchor') 'Installation equivalence scope or persistence boundary regressed.'
+  Assert-True ($emptyData.equivalenceScope -eq 'installation' -and $emptyData.installationScopePersistence -eq 'state_root_anchor') 'Installation equivalence scope or persistence boundary regressed.'
+  Assert-True ($emptyData.stateStoreMode -eq 'explicit' -and $emptyData.stateStoreWriteReady -and $emptyData.routineUserAction -eq 'none') 'State-store preflight or autonomous routine-failure contract regressed.'
+  Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
+  Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-5.6-terra' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select Terra Medium.'
   $scopePath = Join-Path (Split-Path -Parent $state) 'installation-scope.json'
   Assert-True (Test-Path -LiteralPath $scopePath -PathType Leaf) 'Status did not create a stable installation-scope anchor.'
   $scopeText = Get-Content -Raw -LiteralPath $scopePath
@@ -171,6 +176,37 @@ try {
   $otherState = Join-Path $otherStateDirectory 'registry.json'
   $otherEmptyData = Get-Payload (Invoke-Supervision $otherState)
   Assert-True ($otherEmptyData.hostEquivalenceKey -ne $emptyData.hostEquivalenceKey) 'Independent installation roots shared a Governor equivalence key.'
+
+  $hostState = Join-Path $root 'host-reconcile-registry.json'
+  $hostGovernor = 'thread-host-governor'
+  $hostInitialize = Invoke-Supervision $hostState 'initialize' $hostGovernor
+  Assert-True ($hostInitialize.ExitCode -eq 0) 'Host reconciliation fixture could not claim its Governor.'
+  $hostInventoryPath = Join-Path $root 'host-inventory.json'
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1
+    capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+    complete = $true
+    tasks = @(
+      [ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' },
+      [ordered]@{ id = 'thread-missed-hook'; status = 'waiting'; generation = 'generation-missed' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $hostReconcile = Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath
+  Assert-True ($hostReconcile.ExitCode -eq 0) "Host inventory reconciliation failed: $($hostReconcile.Text)"
+  $hostReconcileData = Get-Payload $hostReconcile
+  Assert-True ($hostReconcileData.hostInventoryObserved -eq 2 -and $hostReconcileData.hostTasksAdded -eq 1 -and $hostReconcileData.activeTasks -eq 1) 'Host inventory did not add the task missed by lifecycle hooks.'
+  Assert-True ($hostReconcileData.requiredHostAction -eq 'wait_compact_batch_then_evaluate_heartbeat' -and $hostReconcileData.routineUserAction -eq 'none') 'Reconciliation did not return the autonomous next host step.'
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1
+    capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+    complete = $true
+    tasks = @([ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $hostClose = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
+  Assert-True ($hostClose.hostTasksEnded -eq 1 -and $hostClose.activeTasks -eq 0) 'Complete host inventory did not close an absent task.'
+  [IO.File]::WriteAllText($hostInventoryPath, '{"schemaVersion":1,"capturedAtUtc":"2000-01-01T00:00:00Z","complete":true,"tasks":[]}', [Text.UTF8Encoding]::new($false))
+  $staleInventory = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
+  Assert-True (-not $staleInventory.ok -and $staleInventory.error -eq 'supervision_host_inventory_invalid') 'Stale host inventory did not fail closed.'
 
   $scopeRaceDirectory = Join-Path $root 'first-scope-race'
   New-Item -ItemType Directory -Path $scopeRaceDirectory -Force | Out-Null
@@ -246,7 +282,8 @@ try {
   Assert-True ($discoveryData.activeTasks -eq 0 -and $discoveryData.activeAgents -eq 1) 'Discovery did not exclude Governor or include active agent.'
   Assert-True ($discoveryData.agents[0].taskId -eq $worker -and $discoveryData.agents[0].model -eq 'gpt-5.6-luna') 'Discovery did not recover the runtime agent identity.'
   Assert-True ($discoveryData.recommendedCadenceMinutes -eq 60 -and $discoveryData.maximumModelCallsPerDay -eq 24 -and $discoveryData.modelCalls -eq 'governor_only') 'Active cadence or model-call ownership regressed.'
-  Assert-True ($discoveryData.hostEquivalenceKey -eq $emptyData.hostEquivalenceKey -and $discoveryData.equivalenceScope -eq 'installation' -and $discoveryData.installationScopePersistence -eq 'separate_local_anchor' -and $discoveryData.hostReconcileAttemptLimit -eq 3 -and $discoveryData.hostRecheckThroughCycle -eq 2 -and $discoveryData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Discovery omitted deterministic host convergence controls.'
+  Assert-True ($discoveryData.hostEquivalenceKey -eq $emptyData.hostEquivalenceKey -and $discoveryData.equivalenceScope -eq 'installation' -and $discoveryData.installationScopePersistence -eq 'state_root_anchor' -and $discoveryData.hostReconcileAttemptLimit -eq 3 -and $discoveryData.hostRecheckThroughCycle -eq 2 -and $discoveryData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Discovery omitted deterministic host convergence controls.'
+  Assert-True ($discoveryData.hookExecutionObservation -eq 'observed' -and $discoveryData.registryCoverage -eq 'lifecycle_hooks_observed' -and $discoveryData.lastHookUtc) 'Observed hooks were not exposed distinctly.'
   Assert-True (@($discoveryData.checkBatch).Count -eq 1 -and $discoveryData.checkBatch[0].taskId -eq $worker) 'Governor check batch did not contain the active worker.'
 
   $cursor = [long]$discoveryData.revision

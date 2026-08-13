@@ -29,8 +29,9 @@ Governor. If none exists, the host creates one fresh task without inherited
 history. Chronos does not automatically fork a working task because copied
 context can increase quota pressure and obscure ownership.
 
-The host requests Luna Medium for the dedicated Governor when available.
-Monitored tasks can use any runtime model and run no Chronos recurrence. Four
+The host requests Terra Medium for the dedicated Governor when available.
+Field validation found that the coordinator role needs reliable tool use and
+recovery judgment. Monitored tasks can use any runtime model and run no Chronos recurrence. Four
 reviewed lifecycle hooks record only task and subagent start or end hints; host
 task tools remain the liveness authority. Bootstrap reconciles matching host
 automations for the random installation-scoped equivalence key before creating

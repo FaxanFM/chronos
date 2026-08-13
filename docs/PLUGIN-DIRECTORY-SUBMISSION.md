@@ -8,12 +8,13 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-GitHub release candidate: v0.8.1 adds privacy-bounded passive task discovery and
-single-Governor bootstrap guidance. It has not been submitted, approved, or
-published in the OpenAI Plugin Directory. The release artifact is
-`chronos-v0.8.1.zip` with SHA-256
-`e64552de2295b3658d7f60986c34492c1c1c3fe62351141abc4fe8a41e1be745`.
-Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.1.
+GitHub release candidate: v0.8.2 makes single-Governor supervision autonomous
+when lifecycle hooks are missing, keeps Governor usage control local, and moves
+runtime state to a sandbox-writable location. It has not been submitted,
+approved, or published in the OpenAI Plugin Directory. The release artifact is
+`chronos-v0.8.2.zip` with SHA-256
+`20382c94866c56f155d8ffc5a9714682b52cc73349c6529efc5c489c5e35cce4`.
+Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.2.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -34,7 +35,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.1.zip` release asset.
+   `chronos-v0.8.2.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -50,7 +51,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.1`
+- Version: `0.8.2`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -242,19 +243,19 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.1 adds passive task discovery through four reviewed
-> lifecycle hooks and a native supervision command. It reuses a host-verified
-> Governor or creates one fresh task without inherited history; it never
-> automatically forks a working task. Worker tasks can use any model and run no
-> Chronos recurrence. The recommended Governor uses GPT-5.6 Luna with Medium
-> reasoning when available. The host reconciles one recurrence, defaults to at
-> most 24 Governor turns per active day or four per idle day, and rotates or
-> pauses after 336 cycles or 14 days. Hooks are headless, run only at task or subagent
-> start or end, return no model context, and store only bounded local protected
-> identifiers and hashes. The Codex host owns task creation, scheduling, model
-> selection, and delivery. Chronos installs no service, makes no network
-> request, and sends no publisher telemetry. Existing Inspector thresholds,
-> Heartbeat detectors, and read-only Governor policy are unchanged.
+> Chronos for Codex v0.8.2 keeps one Terra Medium Governor per machine and
+> leaves monitored tasks passive on their existing models. Each Governor cycle
+> reconciles one bounded host task inventory, so missing or disabled lifecycle
+> hooks do not require manual registration. Default Heartbeat and supervision
+> state now uses the sandbox-writable Windows temporary directory, with safe
+> legacy-state import. Comparable supervision counters prevent repository-idle
+> Governor work from being mislabeled as no-progress token burn. A confirmed
+> Governor usage condition changes only its own recurrence, verifies the new
+> cadence, and restores the normal cadence on recovery. `chronos.cmd` applies
+> the required Windows PowerShell invocation flags. Chronos installs no service,
+> makes no network request, and sends no publisher telemetry. Existing Inspector
+> thresholds, Heartbeat detector thresholds, and read-only Governor policy are
+> unchanged.
 
 ## Assets and Evidence
 
@@ -291,7 +292,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.7.7 published; v0.8.1 not submitted**. Retained evidence
+Review status: **v0.7.7 published; v0.8.2 not submitted**. Retained evidence
 confirms that v0.7.7 is visible in the directory. It does not establish exact
 submission, approval, publication, or region values.
 

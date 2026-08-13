@@ -46,7 +46,7 @@ approval aggregates remain unsupported as account billing evidence.
 ## Heartbeats
 
 `tests/heartbeat.tests.ps1` exercises the native Heartbeat action through the
-installed `chronos.ps1` command surface. Both Windows CI jobs build and extract
+installed `chronos.cmd` and `chronos.ps1` command surfaces. Both Windows CI jobs build and extract
 the release ZIP, then run this complete suite against that package. The same
 suite accepts a source plugin root for local development. State-containment
 cases use a path outside both approved roots and separately verify that
@@ -65,18 +65,22 @@ counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
-adaptation, persisted-state privacy, schema 4 to 5 migration, one-active-record
+adaptation, persisted-state privacy, schema 4 and 5 to 6 migration, one-active-record
 per target, eight-event coalescing, higher-severity replacement, fixed action
 contracts, self-target rejection, same-subject and same-window Governor-usage
 corroboration, transport acceptance versus task acknowledgement, ambiguous-send
 non-retry, two-attempt definite-failure retry, exact reporter and generation
-binding, task-report non-resolution, independent postcondition verification, and
-PowerShell 5.1 compatibility.
+binding, task-report non-resolution, independent postcondition verification,
+Governor status-counter exposure, success, duplicate, and failed-cycle
+accounting, Governor supervision-counter progress, missing-counter containment,
+Governor-local throttle and restore actions, isolated 6.3 percent runtime
+variance, sustained modest overruns, material overruns, runtime recovery,
+explainable compact backoff status, and PowerShell 5.1 compatibility.
 
 These tests validate deterministic transition, Governor-inbox, and intervention
 state decisions. They do not prove that the host collected complete evidence,
 called `send_message_to_thread`, delivered an event to the correct installed
-task, or configured the recommended Luna Medium Governor. Missing host data
+task, or configured the recommended Terra Medium Governor. Missing host data
 remains partial or unsupported. An external autonomy canary must prove one exact
 target wake, no unrelated wake, ambiguous-send containment, duplicate
 suppression, task-to-Governor response, independent recovery, Governor self-loop
@@ -86,13 +90,16 @@ silent normal cycles.
 ## Passive Supervision
 
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native
-`chronos.ps1 -Action supervise` wrapper, empty status, lifecycle start and end,
+`chronos.cmd` and `chronos.ps1 -Action supervise` wrappers, empty status,
+lifecycle start and end,
 strict UTF-8 and BOM-framed hook input,
 Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
 cadence, stable and isolated opaque installation equivalence keys, malformed
 scope rejection, reconciliation retry budget and postcondition,
-cycle and age limits, current-user protected identifiers, transcript
+cycle and age limits, bounded complete and incomplete host inventory
+reconciliation, missed-hook task recovery, absent-task closure, stale inventory
+rejection, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, delayed starts after terminal
@@ -106,7 +113,7 @@ scheduler, process-launch, and network primitives.
 These tests validate local discovery and persistence. They do not prove that a
 user trusted the hook, that host task and automation tools are available, that
 a task remains live, that a host reconciled exactly one recurrence, or that the
-host selected Luna Medium. Those behaviors require an installed-package host
+host selected Terra Medium. Those behaviors require an installed-package host
 canary. The registry remains advisory.
 
 ## Release
@@ -116,7 +123,8 @@ tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
 per-file manifest hashes and sizes, pre-materialization package limits, required
 plugin files, repository-file exclusion, and a matching artifact checksum. It
 also extracts the exact ZIP as a fresh install, verifies the two-skill inventory
-and version, and runs the packaged Heartbeat and supervision status commands.
+and version, and runs the packaged `.cmd` Heartbeat and supervision status
+commands so execution-policy handling is part of the release gate.
 
 Tagged CI runs inspector, Heartbeat, supervision, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the

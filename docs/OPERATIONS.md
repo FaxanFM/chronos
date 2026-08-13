@@ -33,11 +33,12 @@ It matches the independently audited candidate. The signed tag, two remote
 Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
-The v0.8.1 release-candidate ZIP SHA-256 is
-`e64552de2295b3658d7f60986c34492c1c1c3fe62351141abc4fe8a41e1be745`.
-It packages the passive supervision hooks and registry. Treat this value as
-provisional until the signed release workflow publishes and verifies the
-immutable asset.
+The v0.8.2 release-candidate ZIP SHA-256 is
+`e10a9f3d0ac17325bd9d357ae544b08ddad5cc8514928052cf6e4bc84a4794c5`.
+It packages the autonomous host-inventory fallback, sandbox-writable state,
+Governor-local usage control, and the execution-policy-safe launcher. Treat
+this value as provisional until the signed release workflow publishes and
+verifies the immutable asset.
 
 ## Published Release
 
@@ -77,16 +78,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.1.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.1.zip -R FaxanFM/chronos
-gh release verify v0.8.1 -R FaxanFM/chronos
-gh release verify-asset v0.8.1 .\chronos-v0.8.1.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.2.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.2.zip -R FaxanFM/chronos
+gh release verify v0.8.2 -R FaxanFM/chronos
+gh release verify-asset v0.8.2 .\chronos-v0.8.2.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.1.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.2.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -110,7 +111,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.1 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.2 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the
@@ -135,7 +136,7 @@ dedicated role. Otherwise reuse a claimed Governor after the same check, or
 create one fresh task without inherited history. Do not automatically fork a
 working task. After the mutex-protected claim succeeds, reconcile one matching
 automation, stop every duplicate, and re-list host state before reporting
-success. Use `-Action supervise -SupervisionAction status` for compact registry
+success. Use `chronos.cmd -Action supervise -SupervisionAction status` for compact registry
 health.
 
 `supervision_governor_conflict` means another record owns the role. Do not use
@@ -150,14 +151,16 @@ brief hook contention. Do not edit or delete the fallback directory. A malformed
 entry is removed and increments the degraded counter; capacity pressure is
 reported without evicting the committed registry.
 
-The default registry is `%LOCALAPPDATA%\Chronos\Supervision\session-registry.json`.
+The default registry is `%TEMP%\Chronos\Supervision\session-registry.json`.
 The sibling `installation-scope.json` contains only a schema number and random
 opaque installation ID. Keep it during ordinary registry recovery so the host
 can match the existing Governor. Removing the entire supervision directory is
 a full identity reset and requires explicit host reconciliation before another
 Governor is created.
-Loss of the registry disables the discovery hint but does not affect Codex
-tasks. Reconcile existing host automations before recreating a claim so registry
+On first use, a valid legacy LocalAppData registry and installation-scope anchor
+are imported into the temporary state root. Loss of the registry disables the
+discovery hint but does not affect Codex tasks. Reconcile existing host
+automations before recreating a claim so registry
 loss cannot justify a duplicate task or recurrence. `engine=degraded` with
 `registryCapacity=exhausted` means Chronos retained the existing 256 records and
 refused a new hint; use host task tools as authority.
@@ -172,7 +175,7 @@ first can orphan a recurrence and is prohibited. See [Supervision](SUPERVISION.m
 ## Heartbeat Recovery
 
 Use one recurring Governor task for the monitored task set. Configure that task
-with `gpt-5.6-luna` and Medium reasoning when the host offers it. The default is
+with `gpt-5.6-terra` and Medium reasoning when the host offers it. The default is
 60 minutes while work is active and 360 minutes while idle, at most 24 or four
 Governor turns per day. Rotate or pause after 336 cycles or 14 days. Do not
 create a recurrence in every monitored task. Monitored tasks can use any
@@ -181,7 +184,7 @@ Chronos emits only to the Governor inbox. `Owner` and `Subject` are routing
 evidence, not authority. The Governor can use the host task transport for one
 fixed-template intervention to one exact verified affected task.
 
-Run `chronos.ps1 -Action heartbeat` without an input path to inspect compact
+Run `chronos.cmd -Action heartbeat` without an input path to inspect compact
 Heartbeat health. `outboxPending` counts transitions that the host has not yet
 acknowledged. `outboxExhausted` counts records that used the initial attempt and
 one retry. Deduplicate each event by `EventId`. Use `plan` or `fail-closed` for
@@ -204,13 +207,21 @@ later observed Heartbeat cycle or an allowed independent host inventory, narrow
 test, or Git check. `target_policy_mismatch` means the requested task did not
 match the event class's persisted subject or owner hash; keep it failed closed.
 
-Never target the Governor. Governor-origin token volume stays local unless a
-second event concerns the same affected task and observation window. Chronos
-does not infer model price or quota effect. When a target is ambiguous or user
-authority is required, record `fail-closed`; do not broadcast or assign the
-action to the user.
+Never target the Governor. Governor-origin token volume is comparable only when
+both samples include the five supervision progress counters. A confirmed local
+condition changes only the Governor recurrence to 360 minutes. Re-list the
+automation and acknowledge the event only after one matching active recurrence
+has that cadence. A later comparable resolution restores the current active or
+idle supervision cadence. A monitored-task message still requires a second
+event concerning the same affected task and observation window. Chronos does
+not infer model price or quota effect. When a target is ambiguous, transport is
+unavailable, or routine remediation fails, keep it Governor-local; do not
+broadcast or assign the action to the user. Surface only genuine user authority.
 
-When a host supplies `-HeartbeatStatePath`, it must also supply the same stable
+Default Heartbeat state is under
+`%TEMP%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json`. A valid legacy
+LocalAppData state file is imported on first use. When a host supplies
+`-HeartbeatStatePath`, it must also supply the same stable
 `-HeartbeatScope` from every working directory and Windows session. The default
 path and scope need no manual configuration.
 

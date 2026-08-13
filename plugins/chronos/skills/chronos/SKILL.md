@@ -29,10 +29,12 @@ one repeat the installation-scoped host convergence check; normal cycles do not 
 automations.
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action supervise -SupervisionAction status
+"<skill-root>\scripts\chronos.cmd" -Action supervise -SupervisionAction status
 ```
 
-Only the Governor task runs `-SupervisionAction initialize` and `discover`.
+Only the Governor task runs `-SupervisionAction initialize`, `reconcile-host`,
+and `discover`. The `.cmd` launcher always applies the required noninteractive
+Windows PowerShell 5.1 execution-policy flags.
 Host task tools remain the authority for whether a task is live. The registry
 is a privacy-bounded discovery hint, not a task transport or security boundary.
 See the public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
@@ -44,7 +46,7 @@ separate product. A host-side collector supplies a privacy-safe normalized JSON
 snapshot; Chronos persists compact transition and dedupe state, then routes only
 meaningful changes to one Governor inbox. Monitored tasks can use any model and
 do not run Heartbeats. The recommended host configuration is one Governor task
-using `gpt-5.6-luna` with Medium reasoning. The host selects that model; Chronos
+using `gpt-5.6-terra` with Medium reasoning. The host selects that model; Chronos
 cannot change a task's model setting.
 
 `OwningSolThread` is always `governor`. `Owner` and `Subject` are compact routing
@@ -58,12 +60,12 @@ minimum cadence for each observed family. Supply a stable
 can open a condition but will not resolve one.
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action heartbeat -HeartbeatInputPath snapshot.json
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
 ```
 
 Use `-HeartbeatStatePath` only for controlled test or host-managed state. The
 default state is
-`%LOCALAPPDATA%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json`.
+`%TEMP%\Chronos\Heartbeat\<scope-sha256>\heartbeat-state.json`.
 Run the same action without an input path to show compact Heartbeat status.
 After the host deduplicates and successfully delivers an event, pass its stable
 ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain
@@ -85,7 +87,10 @@ gets one retry. Governor/self-origin events never target the Governor.
 Token volume is not price. Do not infer cost, quota impact, or efficiency from a
 model name. Governor-origin `USAGE_BURN` remains Governor-local unless a second
 same-subject, same-window event independently shows stall, review amplification,
-or machine degradation. Do not turn routine findings into user chores.
+or machine degradation. When it returns `GovernorLocalAction`, update only the
+Governor recurrence, verify one active recurrence at the returned cadence, and
+acknowledge the event only after that postcondition holds. Do not message a
+monitored task or turn routine findings into user chores.
 
 Before running Chronos, resolve `<skill-root>` to the directory containing this `SKILL.md`. Do not assume the user's workspace is the skill directory and do not search the whole disk.
 
@@ -94,7 +99,7 @@ Before running Chronos, resolve `<skill-root>` to the directory containing this 
 Inspect only when lag is reported, before extending an already long-running session, or when long-running parallel work finishes:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action inspect
+"<skill-root>\scripts\chronos.cmd" -Action inspect
 ```
 
 Return only the compact `CHRONOS` summary unless details are requested. Do not paste raw process tables into the conversation.
@@ -312,7 +317,7 @@ Older Chronos versions exposed `plan` and `cleanup` actions. They remain
 accepted for command compatibility, but they are advisory-only:
 
 ```powershell
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<skill-root>\scripts\chronos.ps1" -Action plan
+"<skill-root>\scripts\chronos.cmd" -Action plan
 ```
 
 `plan` reports only a candidate count. `cleanup`, including `cleanup -Force`,

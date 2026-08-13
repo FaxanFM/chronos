@@ -58,7 +58,7 @@ foreach ($file in $files) {
 function Get-PackagedBytes {
   param([System.IO.FileInfo]$File)
   $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @(
-    '.json', '.md', '.ps1', '.yaml', '.yml', '.txt'
+    '.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt'
   )
   if ($isText) {
     $content = [System.IO.File]::ReadAllText($File.FullName)

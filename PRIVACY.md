@@ -67,7 +67,9 @@ Codex task or subagent starts or ends. The hook receives the host event object
 but does not read or retain its transcript path. It stores task and agent
 identifiers protected with Windows DPAPI for the current user, SHA-256 indexes,
 workspace hashes, safe model slugs, lifecycle state, counters, and timestamps
-in a bounded file beneath the user's local application-data directory. DPAPI
+in a bounded file beneath the user's Windows temporary Chronos directory. A
+valid legacy LocalAppData registry and installation-scope anchor can be imported
+during an upgrade. DPAPI
 protects the ciphertext for that Windows user; it is not a defense against a
 different process already running as the same user. It does not store raw
 workspace paths, prompts, responses, source code, diffs, commands, tool
@@ -101,8 +103,9 @@ identifiers. The local Heartbeat engine validates and compares that snapshot. It
 rejects credential-shaped values, Windows or Unix absolute-path identifiers,
 and slash-rooted identifiers outside the canonical `/root` Codex worker form. It
 persists only bounded transition, cadence, coverage, deduplication,
-delivery/outbox, intervention, and engine-health metadata in a per-scope file beneath the user's local Chronos
-application-data directory. Raw collector snapshots, prompts, responses, source
+delivery/outbox, intervention, and engine-health metadata in a per-scope file beneath the user's Windows temporary Chronos
+directory. A valid legacy LocalAppData state file can be imported during an
+upgrade. Raw collector snapshots, prompts, responses, source
 code, diffs, commands, tool arguments, tool output, credentials, usernames, and
 absolute paths are not persisted.
 
@@ -155,11 +158,10 @@ it started when bounded fingerprinting exceeds its time or byte limit.
 ## Retention
 
 Chronos health inspection creates no persistent logs, user profiles, background
-services, or operating-system scheduled tasks. Governor and passive-supervision
-metadata remain local until the user removes them or local application-data
-maintenance does so. Heartbeat transition state
-remains local until the user removes it or local application-data maintenance
-does so. Chronos performs no automatic workspace cleanup. The plugin does not
+services, or operating-system scheduled tasks. Governor, passive-supervision,
+and Heartbeat transition metadata remain in the current user's Windows
+temporary Chronos directory until the user or operating-system temporary-file
+maintenance removes them. Chronos performs no automatic workspace cleanup. The plugin does not
 create or retain a host automation when Heartbeats are not explicitly enabled.
 When enabled, the Codex host reconciles one named Governor recurrence. The
 default is at most 24 Governor turns per active day or four per idle day. It is
