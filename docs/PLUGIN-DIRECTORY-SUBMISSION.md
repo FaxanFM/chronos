@@ -8,13 +8,13 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-GitHub release candidate: v0.8.2 makes single-Governor supervision autonomous
+GitHub release candidate: v0.8.3 makes single-Governor supervision autonomous
 when lifecycle hooks are missing, keeps Governor usage control local, and moves
 runtime state to a sandbox-writable location. It has not been submitted,
 approved, or published in the OpenAI Plugin Directory. The release artifact is
-`chronos-v0.8.2.zip` with SHA-256
-`20382c94866c56f155d8ffc5a9714682b52cc73349c6529efc5c489c5e35cce4`.
-Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.2.
+`chronos-v0.8.3.zip` with SHA-256
+`aa588ad96316bd5494370b24e62478245f9b096350a8147c6b9954a858132b1d`.
+Release record: https://github.com/FaxanFM/chronos/releases/tag/v0.8.3.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -35,7 +35,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.2.zip` release asset.
+   `chronos-v0.8.3.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -51,7 +51,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.2`
+- Version: `0.8.3`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -243,7 +243,7 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.2 keeps one Terra Medium Governor per machine and
+> Chronos for Codex v0.8.3 keeps one Terra Medium Governor per machine and
 > leaves monitored tasks passive on their existing models. Each Governor cycle
 > reconciles one bounded host task inventory, so missing or disabled lifecycle
 > hooks do not require manual registration. Default Heartbeat and supervision
@@ -292,7 +292,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.7.7 published; v0.8.2 not submitted**. Retained evidence
+Review status: **v0.7.7 published; v0.8.3 not submitted**. Retained evidence
 confirms that v0.7.7 is visible in the directory. It does not establish exact
 submission, approval, publication, or region values.
 

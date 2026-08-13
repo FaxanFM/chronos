@@ -19,6 +19,7 @@ $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Js
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
+$supervisionTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Chronos\Supervision\release-tests-" + [guid]::NewGuid())
 $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -242,7 +243,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or ($launcherOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
     throw "Extracted package launcher did not apply the supported Windows PowerShell invocation.`n$($launcherOutput -join "`n")"
   }
-  $installedSupervisionState = Join-Path $testRoot "installed-supervision-state.json"
+  $installedSupervisionState = Join-Path $supervisionTestRoot "installed-supervision-state.json"
   $installedSupervisionOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action supervise -SupervisionAction status `
     -SupervisionStatePath $installedSupervisionState 2>&1)
@@ -327,6 +328,11 @@ try {
   $resolvedTest = [System.IO.Path]::GetFullPath($testRoot)
   if ($resolvedTest.StartsWith($resolvedTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
     Remove-Item -LiteralPath $resolvedTest -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $resolvedSupervisionTest = [System.IO.Path]::GetFullPath($supervisionTestRoot)
+  $approvedSupervisionRoot = [System.IO.Path]::GetFullPath((Join-Path $resolvedTemp 'Chronos\Supervision'))
+  if ($resolvedSupervisionTest.StartsWith($approvedSupervisionRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Remove-Item -LiteralPath $resolvedSupervisionTest -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 

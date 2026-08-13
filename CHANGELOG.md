@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.3
+
+- Fix the supervision state-store containment defect found by the external
+  v0.8.2 canary. An explicit state path elsewhere under `%TEMP%` is now
+  rejected; only `%TEMP%\Chronos\Supervision` and the private LocalAppData
+  supervision root are accepted.
+- Run supervision fixtures inside the approved private subtree and add a
+  regression that rejects a sibling path under `%TEMP%`. This reproduces the
+  installed-package geometry that the earlier repository-relative fixture
+  missed.
+- Keep the v0.8.2 autonomy behavior and frozen diagnostic heuristics unchanged.
+
 ## v0.8.2
 
 - Move default Heartbeat and supervision state to the sandbox-writable Windows

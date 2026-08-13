@@ -33,8 +33,8 @@ It matches the independently audited candidate. The signed tag, two remote
 Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
-The v0.8.2 release-candidate ZIP SHA-256 is
-`e10a9f3d0ac17325bd9d357ae544b08ddad5cc8514928052cf6e4bc84a4794c5`.
+The v0.8.3 release-candidate ZIP SHA-256 is
+`aa588ad96316bd5494370b24e62478245f9b096350a8147c6b9954a858132b1d`.
 It packages the autonomous host-inventory fallback, sandbox-writable state,
 Governor-local usage control, and the execution-policy-safe launcher. Treat
 this value as provisional until the signed release workflow publishes and
@@ -78,16 +78,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.2.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.2.zip -R FaxanFM/chronos
-gh release verify v0.8.2 -R FaxanFM/chronos
-gh release verify-asset v0.8.2 .\chronos-v0.8.2.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.3.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.3.zip -R FaxanFM/chronos
+gh release verify v0.8.3 -R FaxanFM/chronos
+gh release verify-asset v0.8.3 .\chronos-v0.8.3.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.2.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.3.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -111,7 +111,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.2 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.3 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the

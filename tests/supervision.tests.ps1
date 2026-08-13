@@ -6,7 +6,8 @@ $module = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\session-regist
 $wrapper = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\chronos.ps1'
 $hooksPath = Join-Path $repo 'plugins\chronos\hooks\hooks.json'
 $governorSkillPath = Join-Path $repo 'plugins\chronos\skills\chronos-governor\SKILL.md'
-$root = Join-Path ([IO.Path]::GetTempPath()) ('chronos-supervision-tests-' + [guid]::NewGuid().ToString('N'))
+$approvedTempRoot = Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Supervision'
+$root = Join-Path $approvedTempRoot ('tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 
 function Assert-True {
@@ -454,6 +455,14 @@ try {
   $outsideResult = Invoke-Supervision $outside
   Assert-True ($outsideResult.ExitCode -eq 1 -and (Get-Payload $outsideResult).error -eq 'supervision_state_path_invalid') 'Outside state path was accepted.'
   Assert-True (-not (Test-Path -LiteralPath $outside)) 'Outside state file was created.'
+
+  $outsideTemp = Join-Path ([IO.Path]::GetTempPath()) ('chronos-supervision-outside-' + [guid]::NewGuid().ToString('N') + '.json')
+  $outsideTempFull = [IO.Path]::GetFullPath($outsideTemp)
+  $approvedTempFull = [IO.Path]::GetFullPath($approvedTempRoot).TrimEnd('\')
+  Assert-True (-not $outsideTempFull.StartsWith($approvedTempFull + '\', [StringComparison]::OrdinalIgnoreCase)) 'Outside-temp fixture unexpectedly entered the private Chronos state root.'
+  $outsideTempResult = Invoke-Supervision $outsideTemp
+  Assert-True ($outsideTempResult.ExitCode -eq 1 -and (Get-Payload $outsideTempResult).error -eq 'supervision_state_path_invalid') 'State path elsewhere under TEMP was accepted.'
+  Assert-True (-not (Test-Path -LiteralPath $outsideTemp)) 'Rejected TEMP state file was created.'
 
   $raceState = Join-Path $root 'race.json'
   $race = [Collections.Generic.List[object]]::new()

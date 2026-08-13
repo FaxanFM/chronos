@@ -231,7 +231,7 @@ function Resolve-StatePath {
     $script:StateStoreMode = 'explicit'
     try { [IO.Path]::GetFullPath($Requested) } catch { throw 'supervision_state_path_invalid' }
   }
-  $contained = (Test-ContainedPath $candidate $localRoot) -or (Test-ContainedPath $candidate $tempRoot)
+  $contained = (Test-ContainedPath $candidate $localRoot) -or (Test-ContainedPath $candidate $privateTempRoot)
   if ([IO.Path]::GetExtension($candidate) -ne '.json' -or -not $contained) {
     throw 'supervision_state_path_invalid'
   }
