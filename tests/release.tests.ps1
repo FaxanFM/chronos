@@ -38,6 +38,13 @@ try {
   if ([string]$manifest.interface.shortDescription.Length -gt 30) {
     throw "Directory short description must be at most 30 characters."
   }
+  $defaultPrompts = @($manifest.interface.defaultPrompt)
+  if ($defaultPrompts.Count -gt 3) {
+    throw "Directory defaultPrompt must contain at most three prompts."
+  }
+  if ($defaultPrompts.Count -ne @($defaultPrompts | Where-Object { $_ -is [string] -and $_.Trim() }).Count) {
+    throw "Directory defaultPrompt entries must be non-empty strings."
+  }
   if ($manifest.interface.PSObject.Properties['screenshots']) {
     throw "Skills-only packages must not declare interface screenshots."
   }

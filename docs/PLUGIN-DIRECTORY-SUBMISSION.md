@@ -8,16 +8,16 @@ submission, and the public listing was verified at version 0.7.7. The
 authoritative reproducible ZIP SHA-256 is
 `b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
 
-GitHub release candidate: v0.8.5 keeps single-Governor supervision autonomous,
+GitHub release candidate: v0.8.6 keeps single-Governor supervision autonomous,
 recovers from prior Heartbeat state owned by an inaccessible sandbox identity,
 and reports that condition without claiming access to unreadable contents. It
 has not been submitted, approved, or published in the OpenAI Plugin Directory.
-The release artifact is `chronos-v0.8.5.zip` with SHA-256
-`d4fe75f79acf8e5394497fe96f2a8ef9c2fa935052a268ee8ac0ed5a116761d2`.
+The release artifact is `chronos-v0.8.6.zip` with SHA-256
+`948fcc4bab8775791f7ec303dd8830aa08e2db2cf2ba9c0a41038351de4ae37e`.
 No tag or GitHub release is created until local, CI, audit, and external canary
 gates pass.
 Release record after gated publication:
-https://github.com/FaxanFM/chronos/releases/tag/v0.8.5.
+https://github.com/FaxanFM/chronos/releases/tag/v0.8.6.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -38,7 +38,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.5.zip` release asset.
+   `chronos-v0.8.6.zip` release asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -54,7 +54,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.5`
+- Version: `0.8.6`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -246,7 +246,7 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.5 keeps one Terra Medium Governor per machine and
+> Chronos for Codex v0.8.6 keeps one Terra Medium Governor per machine and
 > leaves monitored tasks passive on their existing models. Each Governor cycle
 > reconciles one bounded host task inventory, so missing or disabled lifecycle
 > hooks do not require manual registration. Default Heartbeat and supervision
@@ -295,7 +295,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.7.7 published; v0.8.5 not submitted**. Retained evidence
+Review status: **v0.7.7 published; v0.8.6 not submitted**. Retained evidence
 confirms that v0.7.7 is visible in the directory. It does not establish exact
 submission, approval, publication, or region values.
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.6
+
+- Limit `interface.defaultPrompt` to the three prompts accepted by the OpenAI
+  Plugin Platform. Keep resource inspection, token and approval diagnosis, and
+  dedicated-Governor supervision as the default entry points.
+- Add a release regression that rejects more than three default prompts and
+  rejects empty or non-string prompt entries before packaging.
+- Keep Chronos runtime behavior, frozen diagnostic heuristics, local-only
+  privacy model, and one-Governor topology unchanged from v0.8.5.
+
 ## v0.8.5
 
 - Distinguish an inaccessible prior Heartbeat scope from absent prior state

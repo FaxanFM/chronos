@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Detect Codex degradation, approval loops, quota amplification, workflow regressions, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
     "name": "Dravara, LLC",
@@ -24,8 +24,7 @@
     "defaultPrompt": [
       "Use Chronos to inspect current Codex resource health.",
       "Use Chronos to explain current token and approval pressure.",
-      "Enable Chronos supervision in one dedicated Governor task.",
-      "Use Chronos to check Heartbeat transitions for this long-running task."
+      "Enable Chronos supervision in one dedicated Governor task."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",
