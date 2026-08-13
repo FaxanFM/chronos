@@ -461,6 +461,11 @@ and reports `prior_state_unavailable_new_root`. Compact status reports the
 state-store mode, write preflight, protection mode, and migration result without
 returning a path. A host can supply
 `-HeartbeatScope` for a stable explicit scope.
+Compact status also reports `priorStateDisposition` and
+`priorStateWriteAttempted`. `unavailable_preserved` with `false` means Chronos
+detected an inaccessible prior scope and made no migration write, rename,
+delete, ownership, or permission-change attempt. It does not claim that Chronos
+read or independently verified the protected file contents or ACL.
 An explicit `-HeartbeatStatePath` must stay beneath the versioned TEMP root or
 the LocalAppData Heartbeat root. A sibling elsewhere under TEMP is rejected
 before Chronos creates a directory or file.

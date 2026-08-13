@@ -71,6 +71,9 @@ LocalAppData Heartbeat root.
 Chronos imports readable prior state without modifying its source directory. If
 the prior sandbox-owned directory is inaccessible, it starts safely in the new
 namespace and reports that migration result in compact status.
+`priorStateDisposition=unavailable_preserved` and
+`priorStateWriteAttempted=false` mean Chronos made no write or ownership-change
+attempt against that prior state; they do not claim access to protected data.
 Run the same action without an input path to show compact Heartbeat status.
 After the host deduplicates and successfully delivers an event, pass its stable
 ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain

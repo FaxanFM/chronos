@@ -67,8 +67,10 @@ outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
 adaptation, persisted-state privacy, schema 4 and 5 to 6 migration, denied
-prior-state recovery when the Windows host enforces the simulated ACL and
-read-only import when it does not, one-active-record
+prior-state recovery when the Windows host enforces the simulated ACL even when
+an older LocalAppData fallback is readable, prior-scope junction rejection,
+read-only import when the ACL denial is not enforced, explicit no-prior-write
+status, accessible empty-scope negative control, one-active-record
 per target, eight-event coalescing, higher-severity replacement, fixed action
 contracts, self-target rejection, same-subject and same-window Governor-usage
 corroboration, transport acceptance versus task acknowledgement, ambiguous-send

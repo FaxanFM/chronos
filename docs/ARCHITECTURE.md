@@ -223,7 +223,7 @@ started when fingerprinting exceeds its time or byte limit.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.8.4 does not change the existing inspector warning thresholds,
+of failure. v0.8.5 does not change the existing inspector warning thresholds,
 critical thresholds, scoring weights, or predictive claims. Heartbeat transition
 rules are a separate engineering subsystem and must retain explicit coverage and
 evidence. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

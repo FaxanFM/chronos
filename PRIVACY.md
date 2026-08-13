@@ -111,6 +111,10 @@ is left unchanged while Chronos starts in its new versioned namespace. Raw
 collector snapshots, prompts, responses, source
 code, diffs, commands, tool arguments, tool output, credentials, usernames, and
 absolute paths are not persisted.
+Compact migration status can report that a prior scoped directory was
+unavailable and preserved and that Chronos attempted no prior-state write. It
+does not expose the path, owner, ACL, file names, or contents and does not claim
+independent verification of data it could not read.
 
 The Heartbeat PowerShell code does not create a scheduler, call a model, send a
 message, or make a network request. It sends no publisher telemetry. It emits a

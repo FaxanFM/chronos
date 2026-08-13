@@ -33,8 +33,8 @@ It matches the independently audited candidate. The signed tag, two remote
 Windows package-install checks, artifact attestation, immutable publication,
 and post-publication asset verification all passed.
 
-The v0.8.4 release-candidate ZIP SHA-256 is
-`52fdc6553cd90c258598a7cd476152f109c51cac3a88d96199564a611c85dac3`.
+The v0.8.5 release-candidate ZIP SHA-256 is
+`d4fe75f79acf8e5394497fe96f2a8ef9c2fa935052a268ee8ac0ed5a116761d2`.
 It packages the autonomous host-inventory fallback, sandbox-writable state,
 Governor-local usage control, and the execution-policy-safe launcher. Treat
 this value as provisional until the signed release workflow publishes and
@@ -78,16 +78,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.4.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.4.zip -R FaxanFM/chronos
-gh release verify v0.8.4 -R FaxanFM/chronos
-gh release verify-asset v0.8.4 .\chronos-v0.8.4.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.5.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.5.zip -R FaxanFM/chronos
+gh release verify v0.8.5 -R FaxanFM/chronos
+gh release verify-asset v0.8.5 .\chronos-v0.8.5.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.4.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.5.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -111,7 +111,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.4 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.5 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the
@@ -229,6 +229,12 @@ reports `prior_state_unavailable_new_root`. When a host supplies
 path and scope need no manual configuration. Explicit state must remain beneath
 the versioned TEMP Heartbeat root or the LocalAppData Heartbeat root; unrelated
 TEMP siblings fail closed before directory creation.
+
+For an inaccessible prior scope, require compact status to show
+`priorStateDisposition=unavailable_preserved` and
+`priorStateWriteAttempted=false`. This attests only to the Chronos migration
+code path. Compare host-visible before/after metadata when available; do not
+take ownership or weaken permissions to inspect protected contents.
 
 Preserve a state file that returns `heartbeat_state_invalid`,
 `heartbeat_source_out_of_order`, `heartbeat_outbox_capacity`, or

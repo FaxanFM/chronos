@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.8.5
+
+- Distinguish an inaccessible prior Heartbeat scope from absent prior state
+  even when Windows normalizes the protected child lookup to `ObjectNotFound`.
+  Chronos performs a bounded read-only directory probe and reports
+  `prior_state_unavailable_new_root` when access is denied.
+- Treat the prior TEMP scope as authoritative when it exists but is inaccessible
+  or invalid. Chronos does not fall back to older LocalAppData state and import
+  stale conditions, interventions, outbox records, or deduplication history.
+- Reject reparse points in every ancestor of a prior-state candidate before
+  probing or importing it. A junction at the hashed prior TEMP directory cannot
+  redirect migration to state outside the approved namespace.
+- Add `priorStateDisposition` and `priorStateWriteAttempted` to compact
+  Heartbeat status. These fields state the migration code path and attest that
+  Chronos did not attempt to write, rename, delete, take ownership of, or change
+  permissions on prior state. They do not claim to verify unreadable contents
+  or ACLs.
+- Keep the v0.8.4 operational upgrade recovery, state-path containment, frozen
+  diagnostic heuristics, and one-Governor topology unchanged.
+
 ## v0.8.4
 
 - Recover safely when a prior Heartbeat state directory was created under a

@@ -832,6 +832,10 @@ try {
   $upgradeHash = Get-TestStableHash $upgradeScope
   $priorUpgradeDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat' $upgradeHash)
   $priorUpgradeState = Join-Path $priorUpgradeDirectory 'heartbeat-state.json'
+  $savedLocalAppData = $env:LOCALAPPDATA
+  $env:LOCALAPPDATA = Join-Path $root 'upgrade-local-appdata'
+  $legacyUpgradeDirectory = Join-Path $env:LOCALAPPDATA (Join-Path 'Chronos\Heartbeat' $upgradeHash)
+  $legacyUpgradeState = Join-Path $legacyUpgradeDirectory 'heartbeat-state.json'
   $newUpgradeDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $upgradeHash)
   $newUpgradeState = Join-Path $newUpgradeDirectory 'heartbeat-state.json'
   $upgradeSeedState = Join-Path $root 'upgrade-seed-state.json'
@@ -841,6 +845,8 @@ try {
   Assert-Equal $priorSeed.ExitCode 0 'Could not seed prior default Heartbeat state.'
   New-Item -ItemType Directory -Path $priorUpgradeDirectory -Force | Out-Null
   Copy-Item -LiteralPath $upgradeSeedState -Destination $priorUpgradeState -Force
+  New-Item -ItemType Directory -Path $legacyUpgradeDirectory -Force | Out-Null
+  Copy-Item -LiteralPath $upgradeSeedState -Destination $legacyUpgradeState -Force
   $priorAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
   $denyRights = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData
@@ -860,7 +866,10 @@ try {
     $upgradeStatus = Invoke-RawModule @('-Action', 'status', '-Scope', $upgradeScope)
     Assert-Equal $upgradeStatus.ExitCode 0 'Inaccessible prior default state blocked new Heartbeat status.'
     $expectedMigration = if ($denyEffective) { 'prior_state_unavailable_new_root' } else { 'prior_temp_state_imported' }
+    $expectedDisposition = if ($denyEffective) { 'unavailable_preserved' } else { 'read_only_imported' }
     Assert-True ($upgradeStatus.Text -match ('stateStoreMigration=' + $expectedMigration)) "Prior-state handling did not match the host's enforced ACL semantics. Expected $expectedMigration."
+    Assert-True ($upgradeStatus.Text -match ('priorStateDisposition=' + $expectedDisposition)) "Prior-state disposition did not match the host's enforced ACL semantics. Expected $expectedDisposition."
+    Assert-True ($upgradeStatus.Text -match 'priorStateWriteAttempted=false') 'Prior-state handling reported a legacy write attempt.'
     $upgradeCycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $upgradeInput, '-Scope', $upgradeScope)
     Assert-Equal $upgradeCycle.ExitCode 0 'Inaccessible prior default state blocked a live Heartbeat cycle.'
     Assert-True (Test-Path -LiteralPath $newUpgradeState -PathType Leaf) 'Live Heartbeat cycle did not persist in the versioned namespace.'
@@ -868,7 +877,53 @@ try {
   } finally {
     Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $priorAcl -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $priorUpgradeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $legacyUpgradeDirectory -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $newUpgradeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    $env:LOCALAPPDATA = $savedLocalAppData
+  }
+
+  # An accessible empty prior scope is not mislabeled as inaccessible state.
+  $emptyPriorScope = 'heartbeat-empty-prior-' + [guid]::NewGuid().ToString('N')
+  $emptyPriorHash = Get-TestStableHash $emptyPriorScope
+  $emptyPriorDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat' $emptyPriorHash)
+  $emptyPriorV2Directory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $emptyPriorHash)
+  New-Item -ItemType Directory -Path $emptyPriorDirectory -Force | Out-Null
+  try {
+    $emptyPriorStatus = Invoke-RawModule @('-Action', 'status', '-Scope', $emptyPriorScope)
+    Assert-Equal $emptyPriorStatus.ExitCode 0 'Accessible empty prior scope blocked Heartbeat status.'
+    Assert-True ($emptyPriorStatus.Text -match 'stateStoreMigration=namespace_v2_new_root') 'Accessible empty prior scope was mislabeled as inaccessible state.'
+    Assert-True ($emptyPriorStatus.Text -match 'priorStateDisposition=not_found') 'Accessible empty prior scope did not report prior state as absent.'
+    Assert-True ($emptyPriorStatus.Text -match 'priorStateWriteAttempted=false') 'Empty prior-scope handling reported a legacy write attempt.'
+  } finally {
+    Remove-Item -LiteralPath $emptyPriorDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $emptyPriorV2Directory -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # A junction at the authoritative prior scope cannot redirect migration to
+  # otherwise valid state outside the prior Heartbeat namespace.
+  $priorJunctionScope = 'heartbeat-prior-junction-' + [guid]::NewGuid().ToString('N')
+  $priorJunctionHash = Get-TestStableHash $priorJunctionScope
+  $priorJunctionDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat' $priorJunctionHash)
+  $priorJunctionV2Directory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $priorJunctionHash)
+  $priorJunctionTarget = Join-Path $root 'prior-junction-target'
+  $priorJunctionSeed = Join-Path $root 'prior-junction-seed.json'
+  $priorJunctionInput = Join-Path $root 'prior-junction-input.json'
+  [IO.File]::WriteAllText($priorJunctionInput, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"prior-junction","sourceSequence":1,"runId":"prior-junction-1","origin":"test","forceCadence":true,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  Assert-Equal (Invoke-RawModule @('-Action', 'cycle', '-InputPath', $priorJunctionInput, '-StatePath', $priorJunctionSeed, '-Scope', $priorJunctionScope)).ExitCode 0 'Could not seed prior-junction state.'
+  New-Item -ItemType Directory -Path $priorJunctionTarget -Force | Out-Null
+  Copy-Item -LiteralPath $priorJunctionSeed -Destination (Join-Path $priorJunctionTarget 'heartbeat-state.json') -Force
+  New-Item -ItemType Directory -Path (Split-Path -Parent $priorJunctionDirectory) -Force | Out-Null
+  New-Item -ItemType Junction -Path $priorJunctionDirectory -Target $priorJunctionTarget | Out-Null
+  try {
+    $priorJunctionStatus = Invoke-RawModule @('-Action', 'status', '-Scope', $priorJunctionScope)
+    Assert-Equal $priorJunctionStatus.ExitCode 0 'Prior-state junction blocked safe Heartbeat initialization.'
+    Assert-True ($priorJunctionStatus.Text -match 'stateStoreMigration=prior_state_invalid_rebuilt') 'Prior-state junction was not rejected as invalid.'
+    Assert-True ($priorJunctionStatus.Text -match 'priorStateDisposition=invalid_preserved') 'Prior-state junction did not preserve the invalid authoritative source.'
+    Assert-True ($priorJunctionStatus.Text -match 'priorStateWriteAttempted=false') 'Prior-state junction handling reported a legacy write attempt.'
+  } finally {
+    if (Test-Path -LiteralPath $priorJunctionDirectory) { [IO.Directory]::Delete($priorJunctionDirectory) }
+    Remove-Item -LiteralPath $priorJunctionTarget -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $priorJunctionV2Directory -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   # The wrapper status path is concise and does not need an input snapshot.

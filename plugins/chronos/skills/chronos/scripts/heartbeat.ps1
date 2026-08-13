@@ -57,6 +57,8 @@ $script:StateStoreMode = 'unknown'
 $script:StateStoreMigration = 'not_applicable'
 $script:StateStoreWriteReady = $false
 $script:StateStoreProtection = 'hashed_metadata'
+$script:PriorStateDisposition = 'not_applicable'
+$script:PriorStateWriteAttempted = $false
 
 if (-not ('ChronosHeartbeatPathIdentity' -as [type])) {
   $pathIdentitySource = @'
@@ -717,6 +719,7 @@ function Resolve-StatePath {
     return [pscustomobject]@{
       Path = (Join-Path $privateTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
       ScopeHash = $scopeHash
+      PriorTempDirectory = (Join-Path $priorTempRoot $scopeHash)
       PriorTempPath = (Join-Path $priorTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
       LegacyPath = (Join-Path $localRoot (Join-Path $scopeHash 'heartbeat-state.json'))
     }
@@ -726,7 +729,7 @@ function Resolve-StatePath {
   if ([IO.Path]::GetExtension($full) -ne '.json') { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-ContainedPath $full $localRoot) -and -not (Test-ContainedPath $full $privateTempRoot)) { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-NoReparseAncestors $full)) { throw 'heartbeat_state_path_invalid' }
-  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); PriorTempPath = $null; LegacyPath = $null }
+  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); PriorTempDirectory = $null; PriorTempPath = $null; LegacyPath = $null }
 }
 
 function Initialize-StateStore {
@@ -1113,21 +1116,66 @@ function Write-State {
 function Import-LegacyStateIfPresent {
   param($Resolved)
   if ($script:StateStoreMode -ne 'temp_private' -or
-      (Test-Path -LiteralPath $Resolved.Path)) { return }
+      (Test-Path -LiteralPath $Resolved.Path)) {
+    if ($script:StateStoreMode -eq 'temp_private') { $script:PriorStateDisposition = 'not_checked_existing_v2' }
+    return
+  }
   $unavailable = $false
   $invalid = $false
   foreach ($candidate in @(
-    [pscustomobject]@{ Path = [string]$Resolved.PriorTempPath; Imported = 'prior_temp_state_imported' },
-    [pscustomobject]@{ Path = [string]$Resolved.LegacyPath; Imported = 'legacy_state_imported' }
+    [pscustomobject]@{ Path = [string]$Resolved.PriorTempPath; Directory = [string]$Resolved.PriorTempDirectory; Imported = 'prior_temp_state_imported'; DetectDirectory = $true },
+    [pscustomobject]@{ Path = [string]$Resolved.LegacyPath; Directory = $null; Imported = 'legacy_state_imported'; DetectDirectory = $false }
   )) {
     if ([string]::IsNullOrWhiteSpace($candidate.Path)) { continue }
+    if (-not (Test-NoReparseAncestors $candidate.Path)) {
+      $invalid = $true
+      if ($candidate.DetectDirectory) { break }
+      continue
+    }
     try {
       $item = Get-Item -LiteralPath $candidate.Path -Force -ErrorAction Stop
     } catch {
-      if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) { $unavailable = $true }
+      $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+        $_.Exception -is [UnauthorizedAccessException] -or
+        $_.Exception.InnerException -is [UnauthorizedAccessException]
+      if ($accessDenied) { $unavailable = $true }
+      elseif ($_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::ObjectNotFound -and $candidate.DetectDirectory) {
+        # Windows can normalize a child lookup beneath a sandbox-owned directory
+        # to ObjectNotFound. The exact scoped directory is a safe existence
+        # signal; Chronos never changes or takes ownership of it.
+        try {
+          $priorDirectory = Get-Item -LiteralPath $candidate.Directory -Force -ErrorAction Stop
+          if (-not $priorDirectory.PSIsContainer -or ($priorDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $invalid = $true }
+          else {
+            try {
+              # Force one bounded directory enumeration. An accessible empty
+              # directory means the old state is absent; an access failure means
+              # Windows hid the child beneath an unavailable scoped directory.
+              [void]@(Get-ChildItem -LiteralPath $candidate.Directory -Force -ErrorAction Stop | Select-Object -First 1)
+            } catch {
+              $enumerationDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+                $_.Exception -is [UnauthorizedAccessException] -or
+                $_.Exception.InnerException -is [UnauthorizedAccessException]
+              if ($enumerationDenied) { $unavailable = $true }
+              else { $invalid = $true }
+            }
+          }
+        } catch {
+          $directoryAccessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+            $_.Exception -is [UnauthorizedAccessException] -or
+            $_.Exception.InnerException -is [UnauthorizedAccessException]
+          if ($directoryAccessDenied) { $unavailable = $true }
+          elseif ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) { $invalid = $true }
+        }
+      } elseif ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) { $invalid = $true }
+      if ($candidate.DetectDirectory -and ($unavailable -or $invalid)) { break }
       continue
     }
-    if ($item.PSIsContainer) { $invalid = $true; continue }
+    if ($item.PSIsContainer) {
+      $invalid = $true
+      if ($candidate.DetectDirectory) { break }
+      continue
+    }
     try {
       $probe = New-Object IO.FileStream($candidate.Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
       $probe.Dispose()
@@ -1136,23 +1184,33 @@ function Import-LegacyStateIfPresent {
           $_.Exception -is [UnauthorizedAccessException] -or
           $_.Exception.InnerException -is [UnauthorizedAccessException]) { $unavailable = $true }
       else { $invalid = $true }
+      if ($candidate.DetectDirectory) { break }
       continue
     }
     try {
       $legacy = Read-State $candidate.Path $Resolved.ScopeHash
       Write-State $legacy $Resolved.Path
       $script:StateStoreMigration = $candidate.Imported
+      $script:PriorStateDisposition = 'read_only_imported'
       return
     } catch {
       if ($_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
           $_.Exception -is [UnauthorizedAccessException] -or
           $_.Exception.InnerException -is [UnauthorizedAccessException]) { $unavailable = $true }
       else { $invalid = $true }
+      if ($candidate.DetectDirectory) { break }
     }
   }
-  if ($unavailable) { $script:StateStoreMigration = 'prior_state_unavailable_new_root' }
-  elseif ($invalid) { $script:StateStoreMigration = 'prior_state_invalid_rebuilt' }
-  else { $script:StateStoreMigration = 'namespace_v2_new_root' }
+  if ($unavailable) {
+    $script:StateStoreMigration = 'prior_state_unavailable_new_root'
+    $script:PriorStateDisposition = 'unavailable_preserved'
+  } elseif ($invalid) {
+    $script:StateStoreMigration = 'prior_state_invalid_rebuilt'
+    $script:PriorStateDisposition = 'invalid_preserved'
+  } else {
+    $script:StateStoreMigration = 'namespace_v2_new_root'
+    $script:PriorStateDisposition = 'not_found'
+  }
 }
 
 function New-DetectorResult {
@@ -2507,7 +2565,7 @@ function Write-Status {
   $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
   $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
   $backoffUntil = if ([string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) { 'none' } else { [string]$State.health.backoffUntilUtc }
-  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} completedCycles={19} stateChanges={20} acknowledgedEvents={21} failedCycles={22} duplicateRuns={23} runtimeBudgetMs={24} runtimeObservedMs={25} runtimeOverrunMs={26} runtimeOverrunPercent={27} runtimeBaselineMs={28} runtimeClassification={29} runtimeOverrunStreak={30} runtimeBackoffApplied={31} backoffUntil={32}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil)
+  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} priorStateDisposition={19} priorStateWriteAttempted={20} completedCycles={21} stateChanges={22} acknowledgedEvents={23} failedCycles={24} duplicateRuns={25} runtimeBudgetMs={26} runtimeObservedMs={27} runtimeOverrunMs={28} runtimeOverrunPercent={29} runtimeBaselineMs={30} runtimeClassification={31} runtimeOverrunStreak={32} runtimeBackoffApplied={33} backoffUntil={34}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil)
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }
