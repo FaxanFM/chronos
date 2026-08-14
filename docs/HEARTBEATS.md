@@ -160,7 +160,7 @@ secret-shaped values, and absolute paths are not accepted collector fields.
 
 Required per record: `id`, `active`.
 
-Supported fields: `generation`, `owner`, `owningSolThread`, `progressHash`, `lastToolHash`,
+Supported fields: `generation`, `owner`, `ownerGeneration`, `owningSolThread`, `progressHash`, `lastToolHash`,
 `lastCommandHash`, `lastFileChangeUtc`, `lastGitHash`, `lastTestHash`,
 `repeatedEquivalentActions`, `minutesSinceMeaningfulChange`,
 `tokensSinceMeaningfulChange`, `totalTokens`, `longRunningOperation`,
@@ -225,7 +225,7 @@ evidence. A child count by itself is not a session-explosion diagnosis.
 
 Required per record: `name`, `status`.
 
-Supported fields: `generation`, `owner`, `owningSolThread`, `commit`, `repairAttempts`,
+Supported fields: `generation`, `owner`, `ownerGeneration`, `owningSolThread`, `commit`, `repairAttempts`,
 `failureCount`, `required`, `ran`, `environmentStatuses`, and `buildId`.
 
 Chronos persists whether a regression became active. A known failing baseline
@@ -252,7 +252,7 @@ disabled when version differences are intentional.
 
 Required per record: `id`, `status`.
 
-Supported fields: `generation`, `owner`, `owningSolThread`, `dependsOn`,
+Supported fields: `generation`, `owner`, `ownerGeneration`, `owningSolThread`, `dependsOn`,
 `dependencyStatus`, `ageHours`, `requiredCommit`, `requiredPush`,
 `requiredValidation`, `validationStatus`, `acknowledgedBug`, `assigned`, and
 `updatedAt`.
@@ -261,7 +261,11 @@ The actionable-task detector requires a persisted dependency transition from
 incomplete to complete. A first snapshot that already says complete does not
 wake an owner. Unassigned old work and incomplete release handoffs use separate
 conditions. When the host provides `generation`, a reused task ID starts a new
-condition identity and cannot resolve or coalesce the prior generation.
+condition identity and cannot resolve or coalesce the prior generation. For an
+owner-targeted intervention, `ownerGeneration` identifies the owner's live host
+generation separately from the child or test record's `generation`. If subject
+generation is known but the distinct owner's generation is not, planning fails
+closed until host discovery supplies it.
 
 ### Git and build state
 
@@ -479,8 +483,10 @@ The current workspace is not part of the default identity, so a Governor
 working-directory change does not split Heartbeat state. Those values are not stored in the file. The default state
 directory retains the current user's inherited TEMP permissions; Chronos does
 not replace them with a transient sandbox identity. On first use after an
-upgrade, Chronos imports valid readable state from the prior TEMP namespace or
-legacy LocalAppData location. If prior state is inaccessible, Chronos does not
+upgrade, Chronos first checks the v0.8.6 CWD-derived default namespace for the
+current working directory, then the prior TEMP namespace and legacy
+LocalAppData location. A valid source is read and upgraded in memory, rebound
+only in the new destination, and never modified in place. If prior state is inaccessible, Chronos does not
 take ownership or change its permissions. It starts in the versioned namespace
 and reports `prior_state_unavailable_new_root`. Compact status reports the
 state-store mode, write preflight, protection mode, and migration result without

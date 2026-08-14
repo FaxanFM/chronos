@@ -15,6 +15,9 @@
   claim reconciliation so one Governor can resume provably unsent work after
   interruption without waking unrelated tasks. Expired or legacy claimed sends
   become `delivery_unknown` and never retry without proof of a definite failure.
+- Bind subject and owner generations separately so owner-targeted remediation
+  cannot compare a parent task with its child's generation. Missing owner
+  generation fails closed when subject generation is already known.
 - Restrict public intervention verification to the correct lifecycle states
   and allowlisted host evidence. Internal detector recovery remains a native
   cycle-only transition.
@@ -27,6 +30,9 @@
   JSON-encoded function-call arguments.
 - Correct current documentation for the immutable v0.8.6 publication, opt-in
   automatic hooks and recurrence, and bounded local pseudonymous state.
+- Discover the v0.8.6 CWD-derived default namespace during upgrade and import
+  schema migration read-only. Prior source content and timestamps are preserved;
+  only the new stable namespace receives the upgraded, rebound state.
 - Keep inspector thresholds, scoring weights, predictive claims, telemetry
   policy, disabled shared-folder writes, and one-Governor topology unchanged.
 

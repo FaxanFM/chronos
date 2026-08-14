@@ -680,6 +680,19 @@ try {
   Assert-Equal $staleGenerationPlan.decision 'failed_closed' 'A stale event was rebound to a replacement task generation.'
   Assert-Equal $staleGenerationPlan.reason 'target_generation_mismatch' 'Stale generation rejection was not explicit.'
 
+  # Owner-targeted events bind the owner's generation, not the child record's.
+  $ownerGeneration = New-Case 'intervention-owner-generation'
+  $ownerGenerationCycle = Invoke-Heartbeat $ownerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; ownerGeneration = 'parent-g9'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
+  $ownerGenerationEvent = Assert-Event $ownerGenerationCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
+  $ownerGenerationPlan = Get-InterventionPayload (Invoke-Intervention $ownerGeneration 'plan' -EventId $ownerGenerationEvent.EventId -Target 'parent-task' -Generation 'parent-g9' -Governor 'governor-task')
+  Assert-Equal $ownerGenerationPlan.decision 'send' 'A truthful owner generation was compared with the child generation.'
+
+  $staleOwnerGeneration = New-Case 'intervention-stale-owner-generation'
+  $staleOwnerCycle = Invoke-Heartbeat $staleOwnerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; ownerGeneration = 'parent-g9'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
+  $staleOwnerEvent = Assert-Event $staleOwnerCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
+  $staleOwnerPlan = Get-InterventionPayload (Invoke-Intervention $staleOwnerGeneration 'plan' -EventId $staleOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g10' -Governor 'governor-task')
+  Assert-Equal $staleOwnerPlan.reason 'target_generation_mismatch' 'A replacement owner generation accepted stale child evidence.'
+
   # Eight events for one task are coalesced before any host wake is claimed.
   $coalesce = New-Case 'intervention-coalesce'
   $coalesceTasks = @(1..8 | ForEach-Object { @{ id = ('coalesce-item-' + $_); owner = 'coalesce-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false } })
@@ -954,6 +967,51 @@ try {
   Assert-True (@($boundedState.events).Count -le 50) 'Event retention exceeded its bound.'
   Assert-True ((Get-Item $bounded.State).Length -le 262144) 'Heartbeat state exceeded its byte limit.'
   Assert-True ((Get-Content -Raw $bounded.State) -notmatch 'z-5-64') 'Raw task identifiers were persisted.'
+
+  # The v0.8.6 CWD-scoped default is imported into the stable default without
+  # modifying the source, even when the source requires schema migration.
+  $savedUserProfile = $env:USERPROFILE
+  $savedHomeEnvironment = $env:HOME
+  $savedComputerName = $env:COMPUTERNAME
+  $defaultUpgradeHome = Join-Path $root 'default-upgrade-home'
+  $env:USERPROFILE = $defaultUpgradeHome
+  $env:HOME = $defaultUpgradeHome
+  $env:COMPUTERNAME = 'CHRONOS-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
+  $defaultCodexHome = Join-Path $defaultUpgradeHome '.codex'
+  $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($defaultCodexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
+  $currentDefaultScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($defaultCodexHome))
+  $priorDefaultHash = Get-TestStableHash $priorDefaultScope
+  $currentDefaultHash = Get-TestStableHash $currentDefaultScope
+  $priorDefaultDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $priorDefaultHash)
+  $priorDefaultState = Join-Path $priorDefaultDirectory 'heartbeat-state.json'
+  $currentDefaultDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $currentDefaultHash)
+  $currentDefaultState = Join-Path $currentDefaultDirectory 'heartbeat-state.json'
+  $defaultUpgradeInput = Join-Path $root 'default-upgrade-input.json'
+  [IO.File]::WriteAllText($defaultUpgradeInput, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"default-upgrade","sourceSequence":1,"runId":"default-upgrade-1","origin":"test","forceCadence":true,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  try {
+    $seedDefault = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput, '-StatePath', $priorDefaultState, '-Scope', $priorDefaultScope)
+    Assert-Equal $seedDefault.ExitCode 0 'Could not seed the v0.8.6 default namespace.'
+    $priorDefaultData = Get-Content -Raw $priorDefaultState | ConvertFrom-Json
+    $priorDefaultData.schema = 6
+    [IO.File]::WriteAllText($priorDefaultState, ($priorDefaultData | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+    $priorDefaultHashBefore = (Get-FileHash -LiteralPath $priorDefaultState -Algorithm SHA256).Hash
+    $priorDefaultTimestampBefore = (Get-Item -LiteralPath $priorDefaultState).LastWriteTimeUtc
+    $defaultUpgradeStatus = Invoke-RawModule @('-Action', 'status')
+    Assert-Equal $defaultUpgradeStatus.ExitCode 0 'Default v0.8.6 namespace import failed.'
+    Assert-True ($defaultUpgradeStatus.Text -match 'stateStoreMigration=prior_v2_default_state_imported') 'Default v0.8.6 namespace was not discovered.'
+    Assert-True (Test-Path -LiteralPath $currentDefaultState -PathType Leaf) 'Stable default state was not created.'
+    Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).scopeHash $currentDefaultHash 'Imported state did not rebind only in the new namespace.'
+    Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).schema 7 'Imported state was not upgraded in the destination.'
+    Assert-Equal (Get-Content -Raw $priorDefaultState | ConvertFrom-Json).schema 6 'Prior state was upgraded in place.'
+    Assert-Equal (Get-FileHash -LiteralPath $priorDefaultState -Algorithm SHA256).Hash $priorDefaultHashBefore 'Prior state content changed during import.'
+    Assert-Equal (Get-Item -LiteralPath $priorDefaultState).LastWriteTimeUtc $priorDefaultTimestampBefore 'Prior state timestamp changed during import.'
+  } finally {
+    Remove-Item -LiteralPath $priorDefaultDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $currentDefaultDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    $env:USERPROFILE = $savedUserProfile
+    $env:HOME = $savedHomeEnvironment
+    $env:COMPUTERNAME = $savedComputerName
+  }
 
   # A protected v0.8.2 default directory cannot strand a later sandbox
   # identity. The versioned namespace starts clean and reports the skipped
