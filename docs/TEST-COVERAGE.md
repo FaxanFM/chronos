@@ -117,8 +117,9 @@ live mutex contention, atomic bounded fallback slots, stale reservation
 recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 full 256-record capacity behavior, silent hook output,
-headless Windows commands, lifecycle-only event coverage, and absence of
-scheduler, process-launch, and network primitives.
+headless Windows commands, lifecycle-only event coverage, rejection of
+unsupported background-hook flags, and absence of scheduler, process-launch,
+and network primitives.
 
 These tests validate local discovery and persistence. They do not prove that a
 user trusted the hook, that host task and automation tools are available, that

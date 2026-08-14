@@ -9,7 +9,6 @@
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
             "commandWindows": "\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%PLUGIN_ROOT%\\skills\\chronos\\scripts\\session-registry.ps1\" -Action hook",
-            "async": true,
             "timeout": 3
           }
         ]
@@ -34,7 +33,6 @@
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
             "commandWindows": "\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%PLUGIN_ROOT%\\skills\\chronos\\scripts\\session-registry.ps1\" -Action hook",
-            "async": true,
             "timeout": 3
           }
         ]
@@ -47,7 +45,6 @@
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
             "commandWindows": "\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%PLUGIN_ROOT%\\skills\\chronos\\scripts\\session-registry.ps1\" -Action hook",
-            "async": true,
             "timeout": 3
           }
         ]

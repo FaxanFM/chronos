@@ -122,7 +122,7 @@ Use compact `wait_threads` snapshots from the rotating `checkBatch`, which
 contains at most eight entries. If host inventory is unavailable, fail closed
 for task-directed sends, retain pending state, and retry next cycle without a
 user handoff. If an ended registry entry is confirmed live by the host, use
-`-SupervisionAction confirm-active -SupervisionSubjectId <id>`; an async start
+`-SupervisionAction confirm-active -SupervisionSubjectId <id>`; a delayed start
 hook cannot revive terminal state by itself. Do not repeatedly read full tasks
 or transcripts. A normal cycle must end without messaging monitored tasks. If
 `rotationRequired=true`, reconcile a fresh Governor or pause the recurrence

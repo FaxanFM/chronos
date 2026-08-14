@@ -169,7 +169,7 @@ loss cannot justify a duplicate task or recurrence. `engine=degraded` with
 `registryCapacity=exhausted` means Chronos retained the existing 256 records and
 refused a new hint; use host task tools as authority.
 
-Delayed asynchronous starts cannot revive terminal records. After host task
+Delayed start events cannot revive terminal records. After host task
 status proves that an ended task is active again, the Governor can use
 `-SupervisionAction confirm-active -SupervisionSubjectId <id>`. To disable
 supervision, call `release`, stop and verify all matching host recurrences, then

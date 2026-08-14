@@ -2,6 +2,9 @@
 
 ## v0.8.7
 
+- Remove background execution flags from packaged lifecycle hooks because
+  current Windows Codex hosts can skip handlers marked `async`. Keep all four
+  lifecycle-only handlers headless, silent, and bounded to three seconds.
 - Fix Rule Governor false-safe classifications for interpreter options whose
   following value is not a fixed command or script payload. Unknown layouts
   now fail conservative; curl URL prefixes remain broad because trailing
@@ -201,8 +204,8 @@ unchanged.
   handling, host-confirmed reactivation, visible capacity pressure, two-phase
   release, crash-reconciling bootstrap instructions, and deterministic Windows
   supervision tests.
-- Keep hook lock waits to 100 ms for asynchronous events and 250 ms for
-  synchronous events. On contention, queue one bounded DPAPI-protected event and
+- Keep hook lock waits to 100 ms for start and subagent events and 250 ms for
+  session-end events. On contention, queue one bounded DPAPI-protected event and
   merge it during the next hook or Governor status so burst starts are not lost.
 - Decode hook standard input as strict UTF-8 with optional BOM detection so
   lifecycle registration behaves consistently in interactive Codex and hosted

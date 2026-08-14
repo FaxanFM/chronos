@@ -134,7 +134,8 @@ try {
   }
   Assert-True ($hookText.Contains('-WindowStyle Hidden')) 'Windows hook commands must be headless.'
   Assert-True ($hookText.Contains('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')) 'Windows hooks must use the system PowerShell path.'
-  Assert-True ($hookText.Contains('"async": true')) 'Non-ending lifecycle hooks must be asynchronous.'
+  Assert-True (-not $hookText.Contains('"async"')) 'Packaged hooks must not request background execution that the target Codex host skips.'
+  Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 4) 'Every lifecycle hook must retain the three-second host ceiling.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
   Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
   $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath

@@ -231,6 +231,13 @@ try {
   if (($installedSkills -join "`n") -ne "chronos`nchronos-governor") {
     throw "Extracted package must contain exactly the chronos and chronos-governor skills."
   }
+  $installedHookText = Get-Content -Raw -LiteralPath (Join-Path $installRoot 'hooks\hooks.json')
+  if ($installedHookText.Contains('"async"')) {
+    throw 'Extracted package requests background hooks that the target Codex host skips.'
+  }
+  if (([regex]::Matches($installedHookText, '"timeout"\s*:\s*3')).Count -ne 4) {
+    throw 'Extracted package must cap every lifecycle hook at three seconds.'
+  }
   foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
     $parseErrors = $null
     [Management.Automation.Language.Parser]::ParseFile($installedScript.FullName, [ref]$null, [ref]$parseErrors) | Out-Null

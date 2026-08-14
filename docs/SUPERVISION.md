@@ -32,13 +32,14 @@ No worker prompt or worker-side script is required. The plugin registers only:
 - `SubagentStart`
 - `SubagentStop`
 
-The start and subagent hooks run asynchronously. `SessionEnd` follows the Codex
-synchronous event contract. Every hook is headless, has a three-second host
-timeout, exits without model-visible output, and never runs for prompts, turns,
-approvals, or tools. Synchronous mutex acquisition is capped at 250 ms;
-asynchronous acquisition is capped at 100 ms. If the registry is busy, the hook
-writes one bounded protected fallback event and exits zero. The next hook or
-Governor status merges the event under the registry mutex.
+All four hooks use bounded synchronous command handlers for compatibility with
+Codex hosts that skip plugin handlers marked `async`. Every hook is headless,
+has a three-second host timeout, exits without model-visible output, and never
+runs for prompts, turns, approvals, or tools. `SessionEnd` mutex acquisition is
+capped at 250 ms; start and subagent acquisition is capped at 100 ms. If the
+registry is busy, the hook writes one bounded protected fallback event and
+exits zero. The next hook or Governor status merges the event under the
+registry mutex.
 
 ## Governor Selection
 
@@ -142,7 +143,7 @@ tasks only when the inventory declares itself complete. It returns the rotating
 `checkBatch`, which contains at most eight entries and covers larger registries
 fairly over successive cycles. Inventory or transport failure remains
 Governor-local; the routine user action is none.
-Terminal hook state has precedence: a delayed asynchronous start cannot revive
+Terminal hook state has precedence: a delayed start event cannot revive
 an ended task or agent. Only `confirm-active`, after host verification, can do
 that. Do not poll full transcripts, repeatedly read unchanged tasks, or send
 routine messages to monitored tasks.

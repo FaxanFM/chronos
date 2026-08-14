@@ -155,10 +155,10 @@ must match the model persisted by `plan`. A difference fails with
 
 The installed plugin bundles four lifecycle hooks: `SessionStart`,
 `SessionEnd`, `SubagentStart`, and `SubagentStop`. Codex applies its normal
-hash-based trust review before these non-managed hooks can run. Start and
-subagent hooks are asynchronous; the host requires `SessionEnd` to be
-synchronous. All return exit zero without output so they add no model context
-and never block work on a registry failure.
+hash-based trust review before these non-managed hooks can run. All four use
+bounded synchronous command handlers because some supported Codex hosts skip
+plugin handlers marked `async`. All return exit zero without output so they add
+no model context and fail silent on a registry error.
 
 The hooks invoke the internal `session-registry.ps1` module. It maintains a
 bounded local discovery index with current-user Windows DPAPI protected task
@@ -182,7 +182,7 @@ another PC's local registry. The anchor survives session-registry recovery.
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
 is advisory; host task status is authoritative. Terminal lifecycle state has
-precedence over delayed asynchronous starts. Bootstrap reconciles matching host
+precedence over delayed start events. Bootstrap reconciles matching host
 automations first, reuses a role-verified Governor, otherwise creates one fresh
 task without inherited history, and uses a mutex-protected claim as the
 same-machine ownership fence. A scoped host equivalence key, stable host-ID
