@@ -4,16 +4,17 @@
 
 - Fix Rule Governor false-safe classifications for interpreter options whose
   following value is not a fixed command or script payload. Unknown layouts
-  now fail conservative; a recognized PowerShell `-File` operand remains
-  constrained.
+  now fail conservative; curl URL prefixes remain broad because trailing
+  transfers are allowed; a recognized PowerShell `-File` operand remains constrained.
 - Make supervision lifecycle transitions monotonic by timestamp and rank,
   persist host task generation, fail closed when the shared Global mutex is
   unavailable, atomically reserve bounded pending-event slots, verify forced
   Governor takeover, and durably write the installation-scope anchor.
 - Bind Heartbeat conditions and interventions to task generation and compatible
   test environment/suite identity. Add bounded intervention list and expired
-  claim reclaim actions so one Governor can resume after interruption without
-  waking unrelated tasks.
+  claim reconciliation so one Governor can resume provably unsent work after
+  interruption without waking unrelated tasks. Expired or legacy claimed sends
+  become `delivery_unknown` and never retry without proof of a definite failure.
 - Restrict public intervention verification to the correct lifecycle states
   and allowlisted host evidence. Internal detector recovery remains a native
   cycle-only transition.
@@ -22,7 +23,8 @@
   and hard-linked state files.
 - Return an explicit retry contract when a unique Heartbeat cycle cannot obtain
   its mutex. Remove working-directory input from the default Heartbeat identity
-  and apply strict JSON ambiguity checks to bounded rollout records.
+  and apply strict JSON ambiguity checks to bounded rollout records and nested
+  JSON-encoded function-call arguments.
 - Correct current documentation for the immutable v0.8.6 publication, opt-in
   automatic hooks and recurrence, and bounded local pseudonymous state.
 - Keep inspector thresholds, scoring weights, predictive claims, telemetry

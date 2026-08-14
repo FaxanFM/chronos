@@ -757,7 +757,10 @@ function ConvertFrom-StructuredArguments {
   param($Value)
   if ($null -eq $Value) { return $null }
   if ($Value -is [string]) {
-    try { return ($Value | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+    try {
+      if (-not (Test-RolloutJsonUnambiguous $Value)) { return $null }
+      return ($Value | ConvertFrom-Json -ErrorAction Stop)
+    } catch { return $null }
   }
   if ($Value -is [pscustomobject] -or $Value -is [hashtable]) { return $Value }
   $null
@@ -1153,7 +1156,12 @@ function Test-InterpreterRuleHasFixedOperand {
     }
     return $false
   }
-  if ($name -in @('python', 'python3', 'node', 'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'cscript', 'wscript', 'curl')) {
+  if ($name -eq 'curl') {
+    # A URL does not constrain curl to one transfer. Prefix rules allow
+    # trailing URLs and options, so curl allow prefixes remain broad.
+    return $false
+  }
+  if ($name -in @('python', 'python3', 'node', 'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'cscript', 'wscript')) {
     # Only a direct fixed operand is considered constrained. Interpreter
     # options may consume following values, so unknown option layouts fail closed.
     return Test-RuleElementIsFixedOperand $PatternElements[1]
@@ -2300,6 +2308,12 @@ function Get-QuotaHealth {
       }
 
       if ($record.type -eq "response_item" -and $record.payload.type -eq "function_call") {
+        $structuredArgumentText = if ($record.payload.arguments -is [string]) { ([string]$record.payload.arguments).Trim() } else { '' }
+        if ($structuredArgumentText -match '^[\{\[]' -and
+            -not (Test-RolloutJsonUnambiguous $structuredArgumentText)) {
+          $health.MalformedRecords++
+          continue
+        }
         $fileToolCalls++
         $functionName = Get-SafeCategory $record.payload @("name")
         $arguments = ConvertFrom-StructuredArguments $record.payload.arguments

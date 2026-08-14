@@ -788,6 +788,7 @@ try {
       "prefix_rule(pattern=['powershell',['-File','safe.ps1']], decision='allow')",
       "prefix_rule(pattern=[['powershell','pwsh'],'-File','safe.ps1'], decision='allow')",
       "prefix_rule(pattern=[['powershell','pwsh'],'-File',['safe.ps1','other.ps1']], decision='allow')",
+      "prefix_rule(pattern=['curl','https://safe.example'], decision='allow')",
       "prefix_rule(pattern=['powershell'], decision='prompt')",
       "prefix_rule(pattern=['cmd.exe'], decision='forbidden')"
     ),
@@ -796,8 +797,8 @@ try {
   $ruleStructureOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action inspect -CodexHome $ruleStructureHome -SampleSeconds 1
   if ($LASTEXITCODE -ne 0) { throw "Chronos structured rule regression failed." }
-  Assert-Match $ruleStructureOutput " ruleCount=22 ruleMonolithic=0 ruleReusableNarrow=4 ruleBroadInterpreter=18 ruleCredentialShaped=0 " `
-    "Nested alternatives, raw Windows paths, displaced arbitrary-code flags, branch-specific missing operands, constrained files, and non-allow decisions were not classified safely."
+  Assert-Match $ruleStructureOutput " ruleCount=23 ruleMonolithic=0 ruleReusableNarrow=4 ruleBroadInterpreter=19 ruleCredentialShaped=0 " `
+    "Nested alternatives, curl multi-URL prefixes, raw Windows paths, displaced arbitrary-code flags, branch-specific missing operands, constrained files, and non-allow decisions were not classified safely."
   Assert-Match $ruleStructureOutput " ruleFilesEligible=1 ruleFilesSelected=1 ruleCoverageCapped=false ruleParseFailures=0 " `
     "Valid structured rule alternatives must parse without degraded coverage."
 
@@ -825,7 +826,10 @@ try {
         type='function_call'; name='shell_command'; call_id='mirror-request'
         arguments=(@{ sandbox_permissions='require_escalated'; prefix_rule=@('rg','mirror') } | ConvertTo-Json -Compress) } },
     @{ timestamp=$stableStart.AddSeconds(6).ToString('o'); type='event_msg'; payload=@{
-        type='approval_decision'; decision='deferred' } }
+        type='approval_decision'; decision='deferred' } },
+    @{ timestamp=$stableStart.AddSeconds(7).ToString('o'); type='response_item'; payload=@{
+        type='function_call'; name='shell_command'; call_id='ambiguous-nested-arguments'
+        arguments='{"sandbox_permissions":"none","sandbox_permissions":"require_escalated"}' } }
   ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 }
   [System.IO.File]::WriteAllLines(
     (Join-Path $stableApprovalDay 'rollout-stable-approval.jsonl'), $stableRecords,
@@ -835,6 +839,8 @@ try {
     -File $chronosScript -Action inspect -CodexHome $stableApprovalHome -SampleSeconds 1
   Assert-Match $stableOutput " approvalRequestsObserved=3 " `
     "A later same-ID request must count while an exact cross-schema mirror remains deduplicated."
+  Assert-Match $stableOutput " tokenMalformedRecords=1 " `
+    "Duplicate keys inside JSON-encoded function-call arguments must be rejected as malformed."
   Assert-Match $stableOutput " approvalPersistenceRetries=1 approvalPersistenceFailures=0 approvalPersistenceDiagnosis=approval_state_persistence_runaway " `
     "A stable-correlation pending retry after ALLOW must be classified as a persistence runaway."
   Assert-Match $stableOutput " approvalDecisionsObserved=2 approvalAllowedObserved=1 approvalDeniedObserved=0 approvalUnknownDecisions=1 approvalAllowPct=100 " `

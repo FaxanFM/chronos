@@ -147,7 +147,7 @@ The public [architecture](https://github.com/FaxanFM/chronos/blob/main/docs/ARCH
 [test coverage](https://github.com/FaxanFM/chronos/blob/main/docs/TEST-COVERAGE.md),
 [release operations](https://github.com/FaxanFM/chronos/blob/main/docs/OPERATIONS.md),
 and [calibration methodology](https://github.com/FaxanFM/chronos/blob/main/docs/CALIBRATION-METHODOLOGY.md)
-describe the v0.7.1 engineering controls.
+describe the current engineering controls and frozen calibration boundary.
 The public [v0.7.0 audit response](https://github.com/FaxanFM/chronos/blob/main/docs/AUDIT-RESPONSE-2026-08-09.md)
 separates fixed, contained, and deferred findings.
 The public [v0.7.6 final audit response](https://github.com/FaxanFM/chronos/blob/main/docs/V0.7.6-FINAL-AUDIT-RESPONSE.md)

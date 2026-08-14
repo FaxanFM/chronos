@@ -418,7 +418,12 @@ The list is bounded to 16 active records and returns opaque intervention IDs,
 versions, states, target and generation hash prefixes, fixed templates,
 postconditions, attempt counts, timestamps, and `permittedNextAction`. For an
 expired `send_claimed` record, call `reclaim` with its opaque ID, version, and
-the same Governor ID. Reclaim never retries an ambiguous `delivery_unknown`.
+the same Governor ID. Reclaim converts the record to `delivery_unknown`; it
+does not retry because the host send might already have succeeded. Only an
+explicitly recorded definite transport failure can consume the second attempt.
+During schema-6 migration, provably unsent queued work is visible to the one
+current Governor and can be adopted only after its target and generation match.
+A legacy claimed send becomes visible `delivery_unknown` and is never retried.
 
 Plan an event:
 
@@ -469,8 +474,9 @@ Default state is stored at:
 %TEMP%\Chronos\Heartbeat-v2\<scope-sha256>\heartbeat-state.json
 ```
 
-The default scope combines the machine, Codex home, and current workspace only
-to create the hash. Those values are not stored in the file. The default state
+The default scope combines the machine and Codex home only to create the hash.
+The current workspace is not part of the default identity, so a Governor
+working-directory change does not split Heartbeat state. Those values are not stored in the file. The default state
 directory retains the current user's inherited TEMP permissions; Chronos does
 not replace them with a transient sandbox identity. On first use after an
 upgrade, Chronos imports valid readable state from the prior TEMP namespace or
@@ -489,7 +495,7 @@ An explicit `-HeartbeatStatePath` must stay beneath the versioned TEMP root or
 the LocalAppData Heartbeat root. A sibling elsewhere under TEMP is rejected
 before Chronos creates a directory or file.
 
-The state file uses schema `6` and contains only bounded hashed identity, normalized counters,
+The state file uses schema `7` and contains only bounded hashed identity, normalized counters,
 statuses, timestamps, cadence, coverage, condition state, compact event
 metadata, delivery metadata, and engine health. It retains at most 256
 conditions, 50 compact event records, 64 unacknowledged outbox records, 64

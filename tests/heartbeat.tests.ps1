@@ -670,6 +670,16 @@ try {
   $ownerPlan = Get-InterventionPayload (Invoke-Intervention $subjectOrOwnerBinding 'plan' -EventId $subjectOrOwnerEvent.EventId -Target 'binding-root' -Generation 'generation-1' -Governor 'governor-task')
   Assert-Equal $ownerPlan.decision 'send' 'A verified owner was rejected for a subject-or-owner event.'
 
+  # Pending evidence is bound to the generation observed by the collector.
+  $staleGeneration = New-Case 'intervention-stale-generation'
+  Assert-Silent (Invoke-Heartbeat $staleGeneration @{ agents = @(@{ id = 'stale-target'; generation = 'generation-one'; owner = 'stale-target'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Stale-generation baseline.'
+  $staleGenerationCycle = Invoke-Heartbeat $staleGeneration @{ agents = @(@{ id = 'stale-target'; generation = 'generation-one'; owner = 'stale-target'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 }) } -NoAcknowledge
+  $staleGenerationEvent = Assert-Event $staleGenerationCycle 'AGENT_STALL' 'governor'
+  Assert-Silent (Invoke-Heartbeat $staleGeneration @{ agents = @(@{ id = 'stale-target'; generation = 'generation-two'; owner = 'stale-target'; active = $true; progressHash = 'new'; totalTokens = 61000 }) }) 'Replacement generation observation.'
+  $staleGenerationPlan = Get-InterventionPayload (Invoke-Intervention $staleGeneration 'plan' -EventId $staleGenerationEvent.EventId -Target 'stale-target' -Generation 'generation-two' -Governor 'governor-task')
+  Assert-Equal $staleGenerationPlan.decision 'failed_closed' 'A stale event was rebound to a replacement task generation.'
+  Assert-Equal $staleGenerationPlan.reason 'target_generation_mismatch' 'Stale generation rejection was not explicit.'
+
   # Eight events for one task are coalesced before any host wake is claimed.
   $coalesce = New-Case 'intervention-coalesce'
   $coalesceTasks = @(1..8 | ForEach-Object { @{ id = ('coalesce-item-' + $_); owner = 'coalesce-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false } })
@@ -719,9 +729,10 @@ try {
   @($claimedState.interventions | Where-Object { $_.interventionId -eq $generationTwoPlan.interventionId })[0].claimExpiresAt = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
   [IO.File]::WriteAllText($generationCase.State, ($claimedState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   $reclaimList = Get-InterventionPayload (Invoke-Intervention $generationCase 'list' -Governor 'governor-task')
-  Assert-Equal $reclaimList.interventions[0].permittedNextAction 'reclaim' 'Expired persisted claim was not recoverable after Governor restart.'
+  Assert-Equal $reclaimList.interventions[0].permittedNextAction 'mark_delivery_unknown' 'Expired persisted claim did not expose its ambiguous delivery state.'
   $reclaimed = Get-InterventionPayload (Invoke-Intervention $generationCase 'reclaim' -InterventionId $generationTwoPlan.interventionId -Version 1 -Governor 'governor-task')
-  Assert-Equal $reclaimed.state 'retry_queued' 'Expired first claim did not return to the bounded retry queue.'
+  Assert-Equal $reclaimed.state 'delivery_unknown' 'Expired claimed send was incorrectly made retryable.'
+  Assert-FailedSafely (Invoke-Intervention $generationCase 'claim' -InterventionId $generationTwoPlan.interventionId -Version 1 -Target 'generation-target' -Generation 'generation-two' -Governor 'governor-task') 'heartbeat_intervention_transition_invalid' 'An ambiguous expired send was retried.'
 
   $incompatible = New-Case 'intervention-incompatible-contract'
   Assert-Silent (Invoke-Heartbeat $incompatible @{ agents = @(@{ id = 'incompatible-target'; owner = 'incompatible-target'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Incompatible-contract baseline.'
@@ -864,6 +875,39 @@ try {
   [IO.File]::WriteAllText($schemaFive.State, ($schemaFiveState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 6 migration cycle.'
   Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 7 'Schema 6 state did not migrate to schema 7.'
+
+  $legacyQueued = New-Case 'schema-six-queued-intervention'
+  $legacyQueuedCycle = Invoke-Heartbeat $legacyQueued @{ tasks = @(@{ id = 'legacy-queued-target'; owner = 'legacy-queued-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }) } -NoAcknowledge
+  $legacyQueuedEvent = @(Get-Events $legacyQueuedCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })[0]
+  $legacyQueuedPlan = Get-InterventionPayload (Invoke-Intervention $legacyQueued 'plan' -EventId $legacyQueuedEvent.EventId -Target 'legacy-queued-target' -Generation 'legacy-generation' -Governor 'old-governor')
+  $legacyQueuedState = Get-Content -Raw $legacyQueued.State | ConvertFrom-Json
+  $legacyQueuedState.schema = 6
+  $legacyQueuedRecord = @($legacyQueuedState.interventions | Where-Object { $_.interventionId -eq $legacyQueuedPlan.interventionId })[0]
+  $legacyQueuedRecord.PSObject.Properties.Remove('governorHash')
+  $legacyQueuedRecord.PSObject.Properties.Remove('claimExpiresAt')
+  [IO.File]::WriteAllText($legacyQueued.State, ($legacyQueuedState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  $legacyQueuedList = Get-InterventionPayload (Invoke-Intervention $legacyQueued 'list' -Governor 'replacement-governor')
+  Assert-Equal $legacyQueuedList.count 1 'A schema-6 queued intervention was orphaned during migration.'
+  Assert-Equal $legacyQueuedList.interventions[0].permittedNextAction 'claim' 'A provably unsent legacy intervention was not resumable.'
+  $legacyQueuedClaim = Get-InterventionPayload (Invoke-Intervention $legacyQueued 'claim' -InterventionId $legacyQueuedPlan.interventionId -Version 1 -Target 'legacy-queued-target' -Generation 'legacy-generation' -Governor 'replacement-governor')
+  Assert-Equal $legacyQueuedClaim.state 'send_claimed' 'A matching replacement Governor could not adopt an unsent legacy intervention.'
+
+  $legacyClaimed = New-Case 'schema-six-claimed-intervention'
+  $legacyClaimedCycle = Invoke-Heartbeat $legacyClaimed @{ tasks = @(@{ id = 'legacy-claimed-target'; owner = 'legacy-claimed-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }) } -NoAcknowledge
+  $legacyClaimedEvent = @(Get-Events $legacyClaimedCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })[0]
+  $legacyClaimedPlan = Get-InterventionPayload (Invoke-Intervention $legacyClaimed 'plan' -EventId $legacyClaimedEvent.EventId -Target 'legacy-claimed-target' -Generation 'legacy-generation' -Governor 'old-governor')
+  [void](Get-InterventionPayload (Invoke-Intervention $legacyClaimed 'claim' -InterventionId $legacyClaimedPlan.interventionId -Version 1 -Target 'legacy-claimed-target' -Generation 'legacy-generation' -Governor 'old-governor'))
+  $legacyClaimedState = Get-Content -Raw $legacyClaimed.State | ConvertFrom-Json
+  $legacyClaimedState.schema = 6
+  $legacyClaimedRecord = @($legacyClaimedState.interventions | Where-Object { $_.interventionId -eq $legacyClaimedPlan.interventionId })[0]
+  $legacyClaimedRecord.PSObject.Properties.Remove('governorHash')
+  $legacyClaimedRecord.PSObject.Properties.Remove('claimExpiresAt')
+  [IO.File]::WriteAllText($legacyClaimed.State, ($legacyClaimedState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  $legacyClaimedList = Get-InterventionPayload (Invoke-Intervention $legacyClaimed 'list' -Governor 'replacement-governor')
+  Assert-Equal $legacyClaimedList.count 1 'A schema-6 claimed intervention disappeared during migration.'
+  Assert-Equal $legacyClaimedList.interventions[0].state 'delivery_unknown' 'A legacy claimed send was incorrectly made retryable.'
+  Assert-Equal $legacyClaimedList.interventions[0].permittedNextAction 'reconcile_delivery_without_retry' 'A legacy ambiguous delivery did not remain visible for reconciliation.'
+  Assert-Equal (Get-Content -Raw $legacyClaimed.State | ConvertFrom-Json).schema 7 'Intervention-list did not persist schema-6 migration.'
 
   $legacyUsage = New-Case 'legacy-usage-migration'
   Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Legacy usage baseline.'
