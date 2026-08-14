@@ -104,8 +104,13 @@ function Invoke-Heartbeat {
 
 function Invoke-RawModule {
   param([string[]]$Arguments)
-  $output = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $module @Arguments 2>&1)
-  return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = @($output); Text = ($output -join "`n") }
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $module @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $previousPreference }
+  return [pscustomobject]@{ ExitCode = $exitCode; Output = @($output); Text = ($output -join "`n") }
 }
 
 function Invoke-Intervention {
@@ -147,8 +152,9 @@ function Invoke-Intervention {
 function Get-InterventionPayload {
   param($Result)
   Assert-True ($Result.ExitCode -eq 0) ("Intervention exit code. Output: $($Result.Text)")
-  Assert-True ($Result.Text.StartsWith('CHRONOS INTERVENTION ')) ("Missing intervention envelope: $($Result.Text)")
-  return ($Result.Text.Substring('CHRONOS INTERVENTION '.Length) | ConvertFrom-Json)
+  $prefix = if ($Result.Text.StartsWith('CHRONOS INTERVENTION ')) { 'CHRONOS INTERVENTION ' } elseif ($Result.Text.StartsWith('CHRONOS INTERVENTIONS ')) { 'CHRONOS INTERVENTIONS ' } else { '' }
+  Assert-True (-not [string]::IsNullOrWhiteSpace($prefix)) ("Missing intervention envelope: $($Result.Text)")
+  return ($Result.Text.Substring($prefix.Length) | ConvertFrom-Json)
 }
 
 function Assert-Silent {
@@ -251,6 +257,8 @@ try {
   $parseErrors = $null
   [void][Management.Automation.Language.Parser]::ParseFile($module, [ref]$null, [ref]$parseErrors)
   Assert-Equal @($parseErrors).Count 0 'Heartbeat module must parse on Windows PowerShell.'
+  $heartbeatSource = Get-Content -Raw -LiteralPath $module
+  Assert-True ($heartbeatSource -notmatch 'GetCurrentDirectory') 'Default Heartbeat identity must not vary with the Governor working directory.'
   $governorSkill = Get-Content -Raw -LiteralPath (Join-Path $PluginRoot 'skills\chronos-governor\SKILL.md')
   $compactGovernorSkill = $governorSkill -replace '\s+', ' '
   foreach ($required in @(
@@ -581,7 +589,26 @@ try {
     $process.Dispose()
   }
   Assert-Equal ([regex]::Matches($raceText, 'AGENT_STALL').Count) 1 'Concurrent cycles must emit one stall event.'
-  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 6) 'Concurrent cycles corrupted state.'
+  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 7) 'Concurrent cycles corrupted state.'
+
+  $busy = New-Case 'cycle-busy'
+  $busyInput = Join-Path $busy.Path 'busy.json'
+  $busyReady = Join-Path $busy.Path 'ready.txt'
+  [IO.File]::WriteAllText($busyInput, (@{ schemaVersion = 1; capturedAtUtc = $busy.BaseTime.ToString('o'); sourceEpoch = 'busy'; sourceSequence = 1; runId = 'busy-run'; origin = 'test'; forceCadence = $true; collectorCoverage = @{ agent_stall = 'observed' }; agents = @() } | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+  $busyMutexName = 'Global\ChronosHeartbeat-' + (Get-TestHash (Get-TestCanonicalStateIdentity $busy.State)).Substring(0, 24)
+  $busyCommand = "`$m=New-Object Threading.Mutex(`$false,'$busyMutexName');[void]`$m.WaitOne();[IO.File]::WriteAllText('$($busyReady.Replace("'", "''"))','ready');Start-Sleep -Seconds 7;`$m.ReleaseMutex();`$m.Dispose()"
+  $busyEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($busyCommand))
+  $busyHolder = Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $busyEncoded -PassThru -WindowStyle Hidden
+  try {
+    $busyDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while (-not (Test-Path -LiteralPath $busyReady) -and [DateTime]::UtcNow -lt $busyDeadline) { Start-Sleep -Milliseconds 50 }
+    Assert-True (Test-Path -LiteralPath $busyReady) 'Cycle contention fixture did not acquire the Heartbeat mutex.'
+    $busyResult = Invoke-RawModule @('-InputPath', $busyInput, '-StatePath', $busy.State)
+    Assert-True ($busyResult.ExitCode -ne 0 -and $busyResult.Text -match 'heartbeat_mutex_busy' -and $busyResult.Text -match '"retryRequired":true') 'A unique overlapping cycle was silently discarded instead of returning an explicit retry contract.'
+  } finally {
+    $busyHolder.WaitForExit()
+    $busyHolder.Dispose()
+  }
 
   # The persisted outbox closes the state/output crash window with stable IDs.
   $outbox = New-Case 'outbox'
@@ -665,18 +692,60 @@ try {
   Assert-Equal $unknownDelivery.state 'delivery_unknown' 'Ambiguous transport was not retained as delivery_unknown.'
   Assert-FailedSafely (Invoke-Intervention $coalesce 'claim' -InterventionId $coalescedClaim.interventionId -Version 1 -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task') 'heartbeat_intervention_transition_invalid' 'Ambiguous delivery was retried blindly.'
 
+  # Same task IDs in different host generations never share intervention state.
+  $generationCase = New-Case 'intervention-generation'
+  $generationOneCycle = Invoke-Heartbeat $generationCase @{ tasks = @(
+      @{ id = 'generation-target'; generation = 'generation-one'; owner = 'generation-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }
+    ) } -NoAcknowledge
+  $generationOneEvent = @(Get-Events $generationOneCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })[0]
+  $generationOnePlan = Get-InterventionPayload (Invoke-Intervention $generationCase 'plan' -EventId $generationOneEvent.EventId -Target 'generation-target' -Generation 'generation-one' -Governor 'governor-task')
+  $generationTwoCycle = Invoke-Heartbeat $generationCase @{ tasks = @(
+      @{ id = 'generation-target'; generation = 'generation-two'; owner = 'generation-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }
+    ) } -NoAcknowledge
+  $generationTwoEvent = @(Get-Events $generationTwoCycle | Where-Object { $_.Event -eq 'HEARTBEAT_EVENT' })[0]
+  $generationTwoPlan = Get-InterventionPayload (Invoke-Intervention $generationCase 'plan' -EventId $generationTwoEvent.EventId -Target 'generation-target' -Generation 'generation-two' -Governor 'governor-task')
+  Assert-Equal $generationOnePlan.decision 'send' 'Initial generation plan was not queued.'
+  Assert-Equal $generationTwoPlan.decision 'send' 'A new host generation was coalesced into the old generation.'
+  $generationState = Get-Content -Raw $generationCase.State | ConvertFrom-Json
+  Assert-Equal @($generationState.interventions | Where-Object { $_.state -eq 'superseded' }).Count 1 'Old-generation intervention was not isolated.'
+  Assert-Equal @($generationState.interventions | Where-Object { $_.state -eq 'queued' }).Count 1 'New-generation intervention was not independently queued.'
+
+  $listed = Get-InterventionPayload (Invoke-Intervention $generationCase 'list' -Governor 'governor-task')
+  Assert-Equal $listed.count 1 'A restarted Governor could not enumerate its active intervention.'
+  Assert-Equal $listed.interventions[0].permittedNextAction 'claim' 'Intervention recovery did not expose the bounded next action.'
+  Assert-True ($listed.interventions[0].targetHash -notmatch 'generation-target' -and $listed.interventions[0].generationHash.Length -eq 16) 'Intervention recovery exposed a raw target or omitted generation evidence.'
+  $generationClaim = Get-InterventionPayload (Invoke-Intervention $generationCase 'claim' -InterventionId $generationTwoPlan.interventionId -Version 1 -Target 'generation-target' -Generation 'generation-two' -Governor 'governor-task')
+  $claimedState = Get-Content -Raw $generationCase.State | ConvertFrom-Json
+  @($claimedState.interventions | Where-Object { $_.interventionId -eq $generationTwoPlan.interventionId })[0].claimExpiresAt = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+  [IO.File]::WriteAllText($generationCase.State, ($claimedState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
+  $reclaimList = Get-InterventionPayload (Invoke-Intervention $generationCase 'list' -Governor 'governor-task')
+  Assert-Equal $reclaimList.interventions[0].permittedNextAction 'reclaim' 'Expired persisted claim was not recoverable after Governor restart.'
+  $reclaimed = Get-InterventionPayload (Invoke-Intervention $generationCase 'reclaim' -InterventionId $generationTwoPlan.interventionId -Version 1 -Governor 'governor-task')
+  Assert-Equal $reclaimed.state 'retry_queued' 'Expired first claim did not return to the bounded retry queue.'
+
+  $incompatible = New-Case 'intervention-incompatible-contract'
+  Assert-Silent (Invoke-Heartbeat $incompatible @{ agents = @(@{ id = 'incompatible-target'; owner = 'incompatible-target'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Incompatible-contract baseline.'
+  $incompatibleCycle = Invoke-Heartbeat $incompatible @{
+      agents = @(@{ id = 'incompatible-target'; owner = 'incompatible-target'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 })
+      tasks = @(@{ id = 'incompatible-item'; owner = 'incompatible-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false })
+    } -NoAcknowledge
+  $incompatibleEvents = @(Get-Events $incompatibleCycle)
+  $taskContractEvent = @($incompatibleEvents | Where-Object { $_.Type -eq 'ZOMBIE_TASK' })[0]
+  $stallContractEvent = @($incompatibleEvents | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
+  [void](Get-InterventionPayload (Invoke-Intervention $incompatible 'plan' -EventId $taskContractEvent.EventId -Target 'incompatible-target' -Generation 'generation-1' -Governor 'governor-task'))
+  $deferredContract = Get-InterventionPayload (Invoke-Intervention $incompatible 'plan' -EventId $stallContractEvent.EventId -Target 'incompatible-target' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $deferredContract.decision 'deferred_incompatible' 'An incompatible remediation contract was coalesced by target alone.'
+  Assert-True (@((Get-Content -Raw $incompatible.State | ConvertFrom-Json).outbox | Where-Object { $_.eventId -eq $stallContractEvent.EventId }).Count -eq 1) 'Deferred incompatible evidence was consumed instead of remaining recoverable.'
+
   # A higher-severity event replaces an unsent version instead of adding a wake.
   $replace = New-Case 'intervention-replace'
   Assert-Silent (Invoke-Heartbeat $replace @{ agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 1000 }) }) 'Replacement baseline.'
-  $replaceCycle = Invoke-Heartbeat $replace @{
-      agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 160000; tokensSinceMeaningfulChange = 150000; repeatedEquivalentActions = 10; minutesSinceMeaningfulChange = 45 })
-      tasks = @(@{ id = 'replace-task'; owner = 'replace-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false })
-    } -NoAcknowledge
-  $replaceEvents = @(Get-Events $replaceCycle)
-  $warningReplaceEvent = @($replaceEvents | Where-Object { $_.Type -eq 'ZOMBIE_TASK' })[0]
-  $highReplaceEvent = @($replaceEvents | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
+  $warningCycle = Invoke-Heartbeat $replace @{ agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 }) } -NoAcknowledge
+  $warningReplaceEvent = @((Get-Events $warningCycle) | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
   $warningPlan = Get-InterventionPayload (Invoke-Intervention $replace 'plan' -EventId $warningReplaceEvent.EventId -Target 'replace-target' -Generation 'generation-1' -Governor 'governor-task')
   Assert-Equal $warningPlan.version 1 'Initial warning intervention version.'
+  $highCycle = Invoke-Heartbeat $replace @{ agents = @(@{ id = 'replace-target'; owner = 'replace-target'; active = $true; progressHash = 'same'; totalTokens = 220000; tokensSinceMeaningfulChange = 160000; repeatedEquivalentActions = 10; minutesSinceMeaningfulChange = 45 }) } -NoAcknowledge
+  $highReplaceEvent = @((Get-Events $highCycle) | Where-Object { $_.Type -eq 'AGENT_STALL' })[0]
   $highPlan = Get-InterventionPayload (Invoke-Intervention $replace 'plan' -EventId $highReplaceEvent.EventId -Target 'replace-target' -Generation 'generation-1' -Governor 'governor-task')
   Assert-Equal $highPlan.version 2 'Higher-severity event did not replace the unsent intervention version.'
   $replaceState = Get-Content -Raw $replace.State | ConvertFrom-Json
@@ -726,12 +795,16 @@ try {
   $postCycle = Invoke-Heartbeat $postcondition @{ agents = @(@{ id = 'postcondition-worker'; active = $true; progressHash = 'a'; totalTokens = 60000; tokensSinceMeaningfulChange = 59000; repeatedEquivalentActions = 6; minutesSinceMeaningfulChange = 30 }) } -NoAcknowledge
   $postEvent = Assert-Event $postCycle 'AGENT_STALL' 'governor'
   $postPlan = Get-InterventionPayload (Invoke-Intervention $postcondition 'plan' -EventId $postEvent.EventId -Target 'postcondition-worker' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-FailedSafely (Invoke-Intervention $postcondition 'verify' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -VerificationSource 'host_inventory' -VerificationResult 'resolved') 'heartbeat_intervention_transition_invalid' 'A queued intervention was resolved before remediation.'
   $postClaim = Get-InterventionPayload (Invoke-Intervention $postcondition 'claim' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-FailedSafely (Invoke-Intervention $postcondition 'verify' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -VerificationSource 'host_inventory' -VerificationResult 'resolved') 'heartbeat_intervention_transition_invalid' 'A send-claimed intervention was resolved before delivery.'
   $postTransport = Get-InterventionPayload (Invoke-Intervention $postcondition 'transport' -InterventionId $postPlan.interventionId -Version 1 -ClaimToken $postClaim.claimToken -TransportResult 'accepted')
   Assert-Equal $postTransport.state 'awaiting_task_ack' 'Accepted transport was treated as task acknowledgement.'
   Assert-FailedSafely (Invoke-Intervention $postcondition 'response' -InterventionId $postPlan.interventionId -Version 1 -Target 'wrong-worker' -Generation 'generation-1' -TaskResponse 'outcome_reported') 'heartbeat_intervention_reporter_mismatch' 'A different task advanced the intervention.'
   $reported = Get-InterventionPayload (Invoke-Intervention $postcondition 'response' -InterventionId $postPlan.interventionId -Version 1 -Target 'postcondition-worker' -Generation 'generation-1' -TaskResponse 'outcome_reported')
   Assert-Equal $reported.state 'verification_pending' 'Task outcome did not enter independent verification.'
+  $publicEngine = Invoke-RawModule @('-Action', 'intervention-verify', '-StatePath', $postcondition.State, '-InterventionId', $postPlan.interventionId, '-InterventionVersion', '1', '-TargetId', 'postcondition-worker', '-TargetGeneration', 'generation-1', '-VerificationSource', 'heartbeat_engine', '-VerificationResult', 'resolved')
+  Assert-True ($publicEngine.ExitCode -ne 0) 'The public verification boundary accepted heartbeat_engine impersonation.'
   $reportedState = Get-Content -Raw $postcondition.State | ConvertFrom-Json
   Assert-True (@($reportedState.conditions.PSObject.Properties.Value | Where-Object { $_.type -eq 'AGENT_STALL' -and $_.open }).Count -eq 1) 'Task self-report resolved the detector condition.'
   $resolutionCycle = Invoke-Heartbeat $postcondition @{ agents = @(@{ id = 'postcondition-worker'; active = $true; progressHash = 'b'; totalTokens = 61000; tokensSinceMeaningfulChange = 0; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }
@@ -741,6 +814,19 @@ try {
   $resolvedIntervention = @((Get-Content -Raw $postcondition.State | ConvertFrom-Json).interventions | Where-Object { $_.interventionId -eq $postPlan.interventionId })[0]
   Assert-Equal $resolvedIntervention.state 'verified_resolved' 'Independent detector recovery did not resolve the intervention.'
   Assert-Equal $resolvedIntervention.verificationSource 'heartbeat_engine' 'Task self-report was mistaken for independent verification.'
+
+  # A pass from a different environment identity cannot resolve a regression.
+  $testEnvironment = New-Case 'test-environment-binding'
+  Assert-Silent (Invoke-Heartbeat $testEnvironment @{ tests = @(@{ name = 'environment-bound-test'; owner = 'test-owner'; status = 'passed'; commit = 'aaaaaaaa'; buildId = 'suite-one'; environmentStatuses = @{ machineA = 'passed' }; repairAttempts = 0; failureCount = 0 }) }) 'Environment-bound test baseline.'
+  $environmentFailure = Invoke-Heartbeat $testEnvironment @{ tests = @(@{ name = 'environment-bound-test'; owner = 'test-owner'; status = 'failed'; commit = 'bbbbbbbb'; buildId = 'suite-one'; environmentStatuses = @{ machineA = 'failed' }; repairAttempts = 1; failureCount = 1 }) } -NoAcknowledge
+  $environmentEvent = Assert-Event $environmentFailure 'TEST_REGRESSION' 'governor'
+  $environmentPlan = Get-InterventionPayload (Invoke-Intervention $testEnvironment 'plan' -EventId $environmentEvent.EventId -Target 'test-owner' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $environmentPlan.decision 'send' 'Environment-bound regression was not planned.'
+  [void](Invoke-Heartbeat $testEnvironment @{ tests = @(@{ name = 'environment-bound-test'; owner = 'test-owner'; status = 'passed'; commit = 'cccccccc'; buildId = 'suite-one'; environmentStatuses = @{ machineB = 'passed' }; repairAttempts = 0; failureCount = 0 }) })
+  $environmentState = Get-Content -Raw $testEnvironment.State | ConvertFrom-Json
+  Assert-True (@($environmentState.conditions.PSObject.Properties.Value | Where-Object { $_.type -eq 'TEST_REGRESSION' -and $_.open }).Count -eq 1) 'A pass from an incompatible environment resolved the prior regression.'
+  $environmentResolution = Invoke-Heartbeat $testEnvironment @{ tests = @(@{ name = 'environment-bound-test'; owner = 'test-owner'; status = 'passed'; commit = 'dddddddd'; buildId = 'suite-one'; environmentStatuses = @{ machineA = 'passed' }; repairAttempts = 0; failureCount = 0 }) }
+  Assert-Equal @((Get-Events $environmentResolution) | Where-Object { $_.Event -eq 'HEARTBEAT_RESOLVED' -and $_.Type -eq 'TEST_REGRESSION' }).Count 1 'Compatible environment recovery did not resolve the regression.'
 
   # Only a definite send failure receives one retry.
   $retryBudget = New-Case 'intervention-retry-budget'
@@ -755,7 +841,7 @@ try {
   Assert-Equal $retryFailure2.state 'undelivered' 'Second definite failure did not exhaust the retry budget.'
   Assert-Equal @((Get-Content -Raw $retryBudget.State | ConvertFrom-Json).interventions)[0].attempts 2 'Intervention exceeded its two-attempt bound.'
 
-  # Schema 4 and 5 Heartbeat state upgrade in place on the next mutating cycle.
+  # Legacy Heartbeat state upgrades in place on the next mutating cycle.
   $migration = New-Case 'intervention-schema-migration'
   Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema migration baseline.'
   $legacyState = Get-Content -Raw $migration.State | ConvertFrom-Json
@@ -766,18 +852,18 @@ try {
   [IO.File]::WriteAllText($migration.State, ($legacyState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema 4 migration cycle.'
   $migratedState = Get-Content -Raw $migration.State | ConvertFrom-Json
-  Assert-Equal $migratedState.schema 6 'Schema 4 state did not migrate to schema 6.'
+  Assert-Equal $migratedState.schema 7 'Schema 4 state did not migrate to schema 7.'
   Assert-True ($migratedState.health.acknowledgedEvents -eq 0 -and $migratedState.health.failedCycles -eq 0) 'Schema 4 migration omitted Governor progress counters.'
 
   $schemaFive = New-Case 'schema-five-migration'
   Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 5 migration baseline.'
   $schemaFiveState = Get-Content -Raw $schemaFive.State | ConvertFrom-Json
-  $schemaFiveState.schema = 5
+  $schemaFiveState.schema = 6
   $schemaFiveState.health.PSObject.Properties.Remove('acknowledgedEvents')
   $schemaFiveState.health.PSObject.Properties.Remove('failedCycles')
   [IO.File]::WriteAllText($schemaFive.State, ($schemaFiveState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
-  Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 5 migration cycle.'
-  Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 6 'Schema 5 state did not migrate to schema 6.'
+  Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 6 migration cycle.'
+  Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 7 'Schema 6 state did not migrate to schema 7.'
 
   $legacyUsage = New-Case 'legacy-usage-migration'
   Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Legacy usage baseline.'

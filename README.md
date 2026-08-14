@@ -81,7 +81,7 @@ paths, identifiers, prompts, commands, credentials, or private source.
   materially worse transitions to one Governor inbox. Normal cycles do not wake
   monitored tasks. When action is required, the Governor sends one fixed,
   bounded instruction to the exact verified affected task. Stable event IDs,
-  one active intervention per target, and bounded retries prevent wake storms.
+  one active intervention per target generation, and bounded retries prevent wake storms.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
@@ -218,9 +218,11 @@ focused v0.7.7 correctness repairs and validation boundary.
 
 ## Safety and privacy
 
-- Runs only when requested.
-- Does not collect, transmit, or retain prompts, responses, source, diffs,
-  commands, tool output, credentials, usernames, absolute paths, or personal data.
+- Inspector and Governor commands run when requested. After explicit opt-in,
+  four lifecycle hooks and one host Governor recurrence can run automatically.
+- Does not transmit telemetry or retain raw prompts, responses, source, diffs,
+  commands, tool output, credentials, usernames, or absolute paths. It retains
+  only the bounded local pseudonymous coordination metadata described below.
 - Never blocks, pauses, or ends a Codex task.
 - Never terminates Codex or unrelated user processes and never deletes user
   files. Governor can stop only its own bounded Git fingerprint subprocess.

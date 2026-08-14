@@ -15,6 +15,13 @@ function Assert-True {
   if (-not $Condition) { throw $Message }
 }
 
+function Get-TestHash {
+  param([string]$Value)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
+}
+
 function Get-Payload {
   param($Result)
   $line = @($Result.Output | Where-Object { $_ -like 'CHRONOS SUPERVISION *' } | Select-Object -Last 1)
@@ -209,6 +216,57 @@ try {
   $staleInventory = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
   Assert-True (-not $staleInventory.ok -and $staleInventory.error -eq 'supervision_host_inventory_invalid') 'Stale host inventory did not fail closed.'
 
+  $monotonicState = Join-Path $root 'host-monotonic.json'
+  $monotonicGovernor = 'thread-monotonic-governor'
+  $monotonicTask = 'thread-monotonic-worker'
+  $hookTime = [DateTimeOffset]::UtcNow.AddSeconds(-10)
+  [void](Invoke-Hook $monotonicState @{ session_id = $monotonicGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' } $hookTime.AddSeconds(-10).ToString('o'))
+  [void](Invoke-Supervision $monotonicState 'initialize' $monotonicGovernor)
+  [void](Invoke-Hook $monotonicState @{ session_id = $monotonicTask; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' } $hookTime.ToString('o'))
+  $monotonicHash = Get-TestHash $monotonicTask
+  $beforeInventory = (Get-Content -Raw $monotonicState | ConvertFrom-Json).sessions.$monotonicHash
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = $hookTime.AddSeconds(-5).ToString('o'); complete = $true
+    tasks = @(
+      [ordered]@{ id = $monotonicGovernor; status = 'running'; generation = 'governor-generation' },
+      [ordered]@{ id = $monotonicTask; status = 'running'; generation = 'generation-one' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  [void](Invoke-Supervision -State $monotonicState -Action 'reconcile-host' -Session $monotonicGovernor -HostInventory $hostInventoryPath)
+  $afterOlderInventory = (Get-Content -Raw $monotonicState | ConvertFrom-Json).sessions.$monotonicHash
+  Assert-True ($afterOlderInventory.lastEventUtc -eq $beforeInventory.lastEventUtc -and $afterOlderInventory.recordRevision -eq $beforeInventory.recordRevision) 'Older host inventory rewound lifecycle time or revision.'
+
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = $hookTime.AddSeconds(1).ToString('o'); complete = $true
+    tasks = @(
+      [ordered]@{ id = $monotonicGovernor; status = 'running'; generation = 'governor-generation' },
+      [ordered]@{ id = $monotonicTask; status = 'running'; generation = 'generation-one' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  [void](Invoke-Supervision -State $monotonicState -Action 'reconcile-host' -Session $monotonicGovernor -HostInventory $hostInventoryPath)
+
+  $confirmedMonotonic = Get-Payload (Invoke-Supervision -State $monotonicState -Action 'confirm-active' -Session $monotonicGovernor -Subject $monotonicTask)
+  Assert-True ($confirmedMonotonic.state -eq 'active') 'Monotonic fixture could not establish rank-3 activity.'
+  $confirmedRecord = (Get-Content -Raw $monotonicState | ConvertFrom-Json).sessions.$monotonicHash
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = $confirmedRecord.lastEventUtc; complete = $true
+    tasks = @([ordered]@{ id = $monotonicGovernor; status = 'running'; generation = 'governor-generation' })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  [void](Invoke-Supervision -State $monotonicState -Action 'reconcile-host' -Session $monotonicGovernor -HostInventory $hostInventoryPath)
+  $afterEqualRank = (Get-Content -Raw $monotonicState | ConvertFrom-Json).sessions.$monotonicHash
+  Assert-True ($afterEqualRank.state -eq 'active' -and $afterEqualRank.recordRevision -eq $confirmedRecord.recordRevision) 'Equal-timestamp rank-2 inventory ending overrode rank-3 activity.'
+
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = ([DateTimeOffset]::Parse($confirmedRecord.lastEventUtc).AddSeconds(1).ToString('o')); complete = $true
+    tasks = @(
+      [ordered]@{ id = $monotonicGovernor; status = 'running'; generation = 'governor-generation' },
+      [ordered]@{ id = $monotonicTask; status = 'running'; generation = 'generation-two' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $generationChange = Get-Payload (Invoke-Supervision -State $monotonicState -Action 'reconcile-host' -Session $monotonicGovernor -HostInventory $hostInventoryPath)
+  $generationRecord = (Get-Content -Raw $monotonicState | ConvertFrom-Json).sessions.$monotonicHash
+  Assert-True ($generationChange.hostTaskGenerationsChanged -eq 1 -and $generationRecord.generationHash -eq (Get-TestHash 'generation-two')) 'A reused task ID did not persist its new host generation.'
+
   $scopeRaceDirectory = Join-Path $root 'first-scope-race'
   New-Item -ItemType Directory -Path $scopeRaceDirectory -Force | Out-Null
   $scopeRaceProcesses = [Collections.Generic.List[object]]::new()
@@ -303,6 +361,20 @@ try {
 
   $conflict = Invoke-Supervision $state 'initialize' '019fffff-ffff-7fff-ffff-ffffffffffff'
   Assert-True ($conflict.ExitCode -eq 1 -and (Get-Payload $conflict).error -eq 'supervision_governor_conflict') 'Active Governor conflict did not fail safely.'
+
+  $forceState = Join-Path $root 'force-takeover.json'
+  $forceGovernor = 'thread-force-governor'
+  $forceReplacement = 'thread-force-replacement'
+  [void](Invoke-Hook $forceState @{ session_id = $forceGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
+  [void](Invoke-Hook $forceState @{ session_id = $forceReplacement; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
+  [void](Invoke-Supervision $forceState 'initialize' $forceGovernor)
+  $forceFixture = Get-Content -Raw $forceState | ConvertFrom-Json
+  $forceGovernorHash = Get-TestHash $forceGovernor
+  $forceFixture.sessions.$forceGovernorHash.lastEventUtc = [DateTimeOffset]::UtcNow.AddMinutes(2).ToString('o')
+  [IO.File]::WriteAllText($forceState, ($forceFixture | ConvertTo-Json -Compress -Depth 12), [Text.UTF8Encoding]::new($false))
+  $forcedConflict = Invoke-Supervision -State $forceState -Action 'initialize' -Session $forceReplacement -Force
+  Assert-True ($forcedConflict.ExitCode -eq 1 -and (Get-Payload $forcedConflict).error -eq 'supervision_event_order_conflict') 'Forced takeover replaced a Governor whose terminal transition was rejected.'
+  Assert-True ((Get-Payload (Invoke-Supervision $forceState)).governorTaskId -eq $forceGovernor) 'Failed forced takeover changed Governor ownership.'
 
   $beforeMalformed = (Get-Content -Raw -LiteralPath $state | ConvertFrom-Json).revision
   $malformed = Complete-HookProcess (Start-HookProcess $state '{bad')
@@ -400,19 +472,20 @@ try {
     $capacitySessions[$hash] = [ordered]@{
       idHash = $hash; protectedId = [Convert]::ToBase64String($cipher); kind = 'task'; parentHash = $null
       workspaceHash = $capacityWorkspace; model = 'gpt-5.6-terra'; state = 'active'; source = 'startup'
+      generationHash = $null
       firstSeenUtc = $capacityNow; lastSeenUtc = $capacityNow; endedAtUtc = $null
       lastEventUtc = $capacityNow; lastEventRank = 1; recordRevision = [long]$index
     }
   }
   $sha.Dispose()
   $capacityFixture = [ordered]@{
-    schema = 2; revision = 256L; governor = $null; sessions = $capacitySessions
+    schema = 3; revision = 256L; governor = $null; sessions = $capacitySessions
     health = [ordered]@{ hookRuns = 256L; droppedEntries = 0L; ignoredStaleEvents = 0L; scanOffset = 0L; lastHookUtc = $capacityNow }
   }
   [IO.File]::WriteAllText($capacityState, ($capacityFixture | ConvertTo-Json -Compress -Depth 10), [Text.UTF8Encoding]::new($false))
   [void](Invoke-Hook $capacityState @{ session_id = 'thread-capacity-overflow'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
   $capacity = Get-Payload (Invoke-Supervision $capacityState)
-  Assert-True ($capacity.engine -eq 'degraded' -and $capacity.registryCapacity -eq 'exhausted' -and $capacity.retainedRecords -eq 256 -and $capacity.droppedEntries -eq 1) 'Registry saturation was silent or evicted retained active work.'
+  Assert-True ($capacity.engine -eq 'degraded' -and $capacity.registryCapacity -eq 'exhausted' -and $capacity.retainedRecords -eq 256 -and $capacity.droppedEntries -eq 1) ('Registry saturation was silent or evicted retained active work. ' + ($capacity | ConvertTo-Json -Compress -Depth 4))
 
   $corrupt = Join-Path $root 'corrupt.json'
   [IO.File]::WriteAllText($corrupt, '{bad', [Text.UTF8Encoding]::new($false))
@@ -492,6 +565,13 @@ try {
   $heldMutex = New-Object Threading.Mutex($false, ('Global\ChronosSupervision-' + $mutexHash.Substring(0, 24)))
   try {
     Assert-True ($heldMutex.WaitOne(1000)) 'Test could not acquire the live registry mutex.'
+    $pendingDirectory = $mutexState + '.pending'
+    New-Item -ItemType Directory -Path $pendingDirectory -Force | Out-Null
+    foreach ($slot in 0..255) {
+      $staleReservation = Join-Path $pendingDirectory ('pending-slot-{0:d3}.lock' -f $slot)
+      [IO.File]::WriteAllText($staleReservation, '', [Text.UTF8Encoding]::new($false))
+      (Get-Item -LiteralPath $staleReservation).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
+    }
     $deadlineWatch = [Diagnostics.Stopwatch]::StartNew()
     $contendedEnd = Invoke-Hook $mutexState @{ session_id = 'thread-mutex'; cwd = $cwd; hook_event_name = 'SessionEnd'; reason = 'other'; model = 'gpt-5.6-terra' }
     $deadlineWatch.Stop()
@@ -502,10 +582,11 @@ try {
     try { $heldMutex.ReleaseMutex() | Out-Null } catch {}
     $heldMutex.Dispose()
   }
-  $pendingDirectory = $mutexState + '.pending'
   $pendingFiles = @(Get-ChildItem -LiteralPath $pendingDirectory -File -Force)
-  Assert-True ($pendingFiles.Count -eq 1) 'Contended SessionEnd was not preserved in the bounded fallback queue.'
-  $pendingText = Get-Content -Raw -LiteralPath $pendingFiles[0].FullName
+  $pendingJson = @($pendingFiles | Where-Object { $_.Extension -eq '.json' })
+  $pendingLocks = @($pendingFiles | Where-Object { $_.Extension -eq '.lock' })
+  Assert-True ($pendingJson.Count -eq 1 -and $pendingLocks.Count -eq 0) 'Contended SessionEnd was not preserved by one atomic slot or stale reservations were retained.'
+  $pendingText = Get-Content -Raw -LiteralPath $pendingJson[0].FullName
   Assert-True ($pendingText -notmatch 'thread-mutex|[A-Za-z]:\\') 'Fallback queue persisted a raw task ID or workspace path.'
   $reconciledMutexStatus = Get-Payload (Invoke-Supervision $mutexState)
   Assert-True ($reconciledMutexStatus.activeTasks -eq 0 -and $reconciledMutexStatus.hookRuns -eq 2) 'Governor status did not merge the contended SessionEnd.'
@@ -515,7 +596,7 @@ try {
   Assert-True ($sourceText.Contains('SpecialFolder]::LocalApplicationData')) 'Default supervision state must use LocalAppData, not volatile temp storage.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
   Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'
-  Assert-True ($sourceText.Contains("@('Global', 'Local')")) 'Registry mutex must fall back to the same-user Local namespace when Global is unavailable.'
+  Assert-True (-not $sourceText.Contains("@('Global', 'Local')")) 'A shared registry must not silently fall back from the Global mutex namespace.'
   foreach ($forbidden in @('Register-ScheduledTask', 'New-ScheduledTask', 'Start-Job', 'Start-Process', 'Invoke-WebRequest', 'Invoke-RestMethod', 'HttpClient', 'WebClient')) {
     Assert-True (-not $sourceText.Contains($forbidden)) "Supervision module contains a prohibited host or network primitive: $forbidden"
   }

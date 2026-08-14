@@ -37,6 +37,188 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:StateByteLimit = 262144
+$script:JsonNodeLimit = 32768
+$script:StateCollectionLimit = 256
+$script:StateMigrationPending = $false
+
+if (-not ('ChronosGovernorPathIdentity' -as [type])) {
+  $pathIdentitySource = @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+public static class ChronosGovernorPathIdentity {
+  private const uint FILE_SHARE_READ = 1;
+  private const uint FILE_SHARE_WRITE = 2;
+  private const uint FILE_SHARE_DELETE = 4;
+  private const uint OPEN_EXISTING = 3;
+  private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+  [StructLayout(LayoutKind.Sequential)]
+  private struct BY_HANDLE_FILE_INFORMATION {
+    public uint FileAttributes;
+    public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+    public uint VolumeSerialNumber;
+    public uint FileSizeHigh;
+    public uint FileSizeLow;
+    public uint NumberOfLinks;
+    public uint FileIndexHigh;
+    public uint FileIndexLow;
+  }
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
+    IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION information);
+  public static string FinalDirectoryPath(string path) {
+    using (SafeFileHandle handle = CreateFile(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero)) {
+      if (handle.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+      StringBuilder buffer = new StringBuilder(32768);
+      uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+      if (length == 0 || length >= buffer.Capacity) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+      return buffer.ToString();
+    }
+  }
+  public static uint LinkCount(string path) {
+    using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+      BY_HANDLE_FILE_INFORMATION information;
+      if (!GetFileInformationByHandle(stream.SafeFileHandle, out information))
+        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+      return information.NumberOfLinks;
+    }
+  }
+}
+'@
+  try { [void](Add-Type -TypeDefinition $pathIdentitySource -Language CSharp -ErrorAction Stop) } catch { throw 'governor_runtime_unavailable' }
+}
+
+function Move-JsonWhitespace {
+  param([string]$Text, [ref]$Index)
+  while ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -in @(' ', "`t", "`r", "`n")) { $Index.Value++ }
+}
+
+function Read-StrictJsonString {
+  param([string]$Text, [ref]$Index, [string]$ErrorCode)
+  if ($Index.Value -ge $Text.Length -or $Text[$Index.Value] -ne '"') { Throw-GovernorError $ErrorCode }
+  $start = $Index.Value
+  $Index.Value++
+  while ($Index.Value -lt $Text.Length) {
+    $character = $Text[$Index.Value]
+    if ([int][char]$character -lt 0x20) { Throw-GovernorError $ErrorCode }
+    if ($character -eq '"') {
+      $Index.Value++
+      try {
+        $decoded = $Text.Substring($start, $Index.Value - $start) | ConvertFrom-Json -ErrorAction Stop
+        if (-not ($decoded -is [string])) { Throw-GovernorError $ErrorCode }
+        return $decoded.Normalize([Text.NormalizationForm]::FormC)
+      } catch { Throw-GovernorError $ErrorCode }
+    }
+    if ($character -eq '\') {
+      $Index.Value++
+      if ($Index.Value -ge $Text.Length) { Throw-GovernorError $ErrorCode }
+      $escape = $Text[$Index.Value]
+      if ($escape -eq 'u') {
+        if ($Index.Value + 4 -ge $Text.Length -or $Text.Substring($Index.Value + 1, 4) -notmatch '^[0-9A-Fa-f]{4}$') { Throw-GovernorError $ErrorCode }
+        $Index.Value += 5
+        continue
+      }
+      if ($escape -notin @('"', '\', '/', 'b', 'f', 'n', 'r', 't')) { Throw-GovernorError $ErrorCode }
+    }
+    $Index.Value++
+  }
+  Throw-GovernorError $ErrorCode
+}
+
+function Assert-StrictJsonValue {
+  param([string]$Text, [ref]$Index, [ref]$NodeCount, [int]$Depth, [string]$ErrorCode)
+  if ($Depth -gt 16) { Throw-GovernorError $ErrorCode }
+  Move-JsonWhitespace $Text $Index
+  if ($Index.Value -ge $Text.Length) { Throw-GovernorError $ErrorCode }
+  $NodeCount.Value++
+  if ($NodeCount.Value -gt $script:JsonNodeLimit) { Throw-GovernorError $ErrorCode }
+  $character = $Text[$Index.Value]
+  if ($character -eq '"') { [void](Read-StrictJsonString $Text $Index $ErrorCode); return }
+  if ($character -eq '{') {
+    $Index.Value++
+    Move-JsonWhitespace $Text $Index
+    $keys = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    if ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -eq '}') { $Index.Value++; return }
+    while ($true) {
+      Move-JsonWhitespace $Text $Index
+      $key = Read-StrictJsonString $Text $Index $ErrorCode
+      if (-not $keys.Add($key)) { Throw-GovernorError $ErrorCode }
+      Move-JsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length -or $Text[$Index.Value] -ne ':') { Throw-GovernorError $ErrorCode }
+      $Index.Value++
+      Assert-StrictJsonValue $Text $Index $NodeCount ($Depth + 1) $ErrorCode
+      Move-JsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length) { Throw-GovernorError $ErrorCode }
+      if ($Text[$Index.Value] -eq '}') { $Index.Value++; return }
+      if ($Text[$Index.Value] -ne ',') { Throw-GovernorError $ErrorCode }
+      $Index.Value++
+    }
+  }
+  if ($character -eq '[') {
+    $Index.Value++
+    Move-JsonWhitespace $Text $Index
+    if ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -eq ']') { $Index.Value++; return }
+    while ($true) {
+      Assert-StrictJsonValue $Text $Index $NodeCount ($Depth + 1) $ErrorCode
+      Move-JsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length) { Throw-GovernorError $ErrorCode }
+      if ($Text[$Index.Value] -eq ']') { $Index.Value++; return }
+      if ($Text[$Index.Value] -ne ',') { Throw-GovernorError $ErrorCode }
+      $Index.Value++
+    }
+  }
+  $start = $Index.Value
+  while ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -notin @(',', ']', '}', ' ', "`t", "`r", "`n")) { $Index.Value++ }
+  $token = $Text.Substring($start, $Index.Value - $start)
+  if ($token -notmatch '^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$') { Throw-GovernorError $ErrorCode }
+}
+
+function Assert-StrictJson {
+  param([string]$Text, [string]$ErrorCode)
+  if ([string]::IsNullOrWhiteSpace($Text)) { Throw-GovernorError $ErrorCode }
+  $index = 0
+  $nodeCount = 0
+  Assert-StrictJsonValue $Text ([ref]$index) ([ref]$nodeCount) 0 $ErrorCode
+  Move-JsonWhitespace $Text ([ref]$index)
+  if ($index -ne $Text.Length) { Throw-GovernorError $ErrorCode }
+}
+
+function Test-ContainedPath {
+  param([string]$Path, [string]$Root)
+  try {
+    $full = [IO.Path]::GetFullPath($Path)
+    $base = [IO.Path]::GetFullPath($Root).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+  } catch { return $false }
+  return $full.Equals($base, [StringComparison]::OrdinalIgnoreCase) -or $full.StartsWith($base + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-NoReparseAncestors {
+  param([string]$Path)
+  try { $full = [IO.Path]::GetFullPath($Path) } catch { return $false }
+  $cursorPath = $full
+  while (-not (Test-Path -LiteralPath $cursorPath)) {
+    $parent = Split-Path -Parent $cursorPath
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursorPath) { break }
+    $cursorPath = $parent
+  }
+  $cursor = Get-Item -LiteralPath $cursorPath -Force -ErrorAction SilentlyContinue
+  while ($cursor) {
+    if ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    if ($cursor -is [IO.DirectoryInfo]) { $cursor = $cursor.Parent } else { $cursor = $cursor.Directory }
+  }
+  return $true
+}
 
 function Get-ChronosPluginVersion {
   try {
@@ -707,6 +889,7 @@ function Assert-StateMap {
   if (-not $State.ContainsKey($Name) -or $State[$Name] -isnot [System.Collections.IDictionary]) {
     Throw-GovernorError "state_schema_invalid"
   }
+  if ($State[$Name].Count -gt $script:StateCollectionLimit) { Throw-GovernorError "state_schema_invalid" }
   foreach ($entry in $State[$Name].GetEnumerator()) {
     if (
       [string]::IsNullOrWhiteSpace([string]$entry.Key) -or
@@ -714,6 +897,77 @@ function Assert-StateMap {
     ) {
       Throw-GovernorError "state_schema_invalid"
     }
+  }
+}
+
+function Assert-RecordKeys {
+  param($Record, [string[]]$Allowed)
+  if ($Record -isnot [System.Collections.IDictionary]) { Throw-GovernorError 'state_schema_invalid' }
+  foreach ($key in $Record.Keys) {
+    if ([string]$key -notin $Allowed) { Throw-GovernorError 'state_schema_invalid' }
+  }
+}
+
+function Assert-GovernorStateRecords {
+  param([hashtable]$State)
+  Assert-RecordKeys $State @('version', 'state_revision', 'workers', 'tasks', 'leases', 'plans')
+  $allowed = @{
+    workers = @('worker_id','repository_id','workspace_id','role','requested_model','effective_model','model_verification','model_inventory_hash','model_inventory_index','model_cost_rank','reasoning_effort','access_mode','status','updated_at','legacy_status','quarantined_at')
+    tasks = @('task_id','repository_id','workspace_id','base_commit','head_mode','reference_hash','baseline_fingerprint','baseline_status_hash','branch_hash','access_mode','scopes','attempts','corrections','status','created_at','updated_at','legacy_status','quarantined_at')
+    leases = @('task_id','lease_id','fencing_token','worker_id','repository_id','workspace_id','mutation_attribution_hash','mutation_attribution_verified','base_commit','head_mode','reference_hash','baseline_fingerprint','baseline_status_hash','branch_hash','changed_file_count','result_fingerprint','access_mode','scopes','status','created_at','updated_at','expires_at','policy','legacy_status','quarantined_at')
+    plans = @('task_id','plan_id','token_hash','repository_id','workspace_id','task_class','access_mode','scopes','role','selected_model','model_selection_reason','model_inventory_hash','model_inventory_index','model_cost_rank','reasoning_effort','mutation_attribution_hash','mutation_attribution_verified','plan_base_commit','plan_head_mode','plan_reference_hash','planned_workspace_fingerprint','policy','status','created_at','expires_at','canceled_at','consumed_at','worker_id_hash','quarantined_at')
+  }
+  foreach ($mapName in $allowed.Keys) {
+    foreach ($record in @($State[$mapName].Values)) {
+      Assert-RecordKeys $record $allowed[$mapName]
+      if ($record.Contains('scopes') -and @($record.scopes).Count -gt 64) { Throw-GovernorError 'state_schema_invalid' }
+      if ($record.Contains('policy') -and $null -ne $record.policy) {
+        Assert-RecordKeys $record.policy @('max_concurrent_workers','max_total_attempts','max_corrections','lease_minutes')
+      }
+    }
+  }
+}
+
+function Initialize-GovernorStateStore {
+  if (-not (Test-ContainedPath $script:ResolvedStatePath $script:StateRoot) -or -not (Test-NoReparseAncestors $script:ResolvedStatePath)) {
+    Throw-GovernorError 'state_path_invalid'
+  }
+  $directory = Split-Path -Parent $script:ResolvedStatePath
+  if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+    $missing = [Collections.Generic.List[string]]::new()
+    $cursor = $directory
+    while (-not (Test-Path -LiteralPath $cursor -PathType Container)) {
+      $missing.Add($cursor) | Out-Null
+      $parent = Split-Path -Parent $cursor
+      if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { Throw-GovernorError 'state_path_invalid' }
+      $cursor = $parent
+    }
+    for ($index = $missing.Count - 1; $index -ge 0; $index--) {
+      if (-not (Test-NoReparseAncestors $cursor)) { Throw-GovernorError 'state_path_invalid' }
+      $next = $missing[$index]
+      if (-not (Test-Path -LiteralPath $next -PathType Container)) { New-Item -ItemType Directory -Path $next | Out-Null }
+      $item = Get-Item -LiteralPath $next -Force
+      if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Throw-GovernorError 'state_path_invalid' }
+      $cursor = $next
+    }
+  }
+  Assert-GovernorStatePath
+}
+
+function Assert-GovernorStatePath {
+  if (-not (Test-ContainedPath $script:ResolvedStatePath $script:StateRoot) -or -not (Test-NoReparseAncestors $script:ResolvedStatePath)) { Throw-GovernorError 'state_path_invalid' }
+  $directory = Split-Path -Parent $script:ResolvedStatePath
+  $rootItem = Get-Item -LiteralPath $script:StateRoot -Force -ErrorAction Stop
+  $directoryItem = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+  if (-not $rootItem.PSIsContainer -or -not $directoryItem.PSIsContainer -or
+      ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+      ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Throw-GovernorError 'state_path_invalid' }
+  $canonicalRoot = [ChronosGovernorPathIdentity]::FinalDirectoryPath($script:StateRoot)
+  $canonicalDirectory = [ChronosGovernorPathIdentity]::FinalDirectoryPath($directory)
+  if (-not (Test-ContainedPath $canonicalDirectory $canonicalRoot)) { Throw-GovernorError 'state_path_invalid' }
+  if (Test-Path -LiteralPath $script:ResolvedStatePath -PathType Leaf) {
+    $stateItem = Get-Item -LiteralPath $script:ResolvedStatePath -Force
+    if (($stateItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or [ChronosGovernorPathIdentity]::LinkCount($script:ResolvedStatePath) -ne 1) { Throw-GovernorError 'state_path_invalid' }
   }
 }
 
@@ -727,8 +981,19 @@ function Read-State {
   if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     return New-State
   }
+  if ($legacySource) {
+    if (-not (Test-NoReparseAncestors $sourcePath)) { Throw-GovernorError 'state_store_unreadable' }
+  } else {
+    Assert-GovernorStatePath
+  }
   try {
-    $json = Get-Content -Raw -LiteralPath $sourcePath -ErrorAction Stop
+    $item = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt $script:StateByteLimit) { Throw-GovernorError 'state_invalid_json' }
+    if ([ChronosGovernorPathIdentity]::LinkCount($sourcePath) -ne 1) { Throw-GovernorError 'state_path_invalid' }
+    $bytes = [IO.File]::ReadAllBytes($sourcePath)
+    $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    if ($json.Length -gt 0 -and [int][char]$json[0] -eq 0xFEFF) { $json = $json.Substring(1) }
+    Assert-StrictJson $json 'state_invalid_json'
   } catch [System.UnauthorizedAccessException] {
     Throw-GovernorError "state_store_unreadable"
   } catch [System.Security.SecurityException] {
@@ -758,6 +1023,7 @@ function Read-State {
     $state.version = 3
     if ($null -eq $state.state_revision) { $state.state_revision = [int64]0 }
     if ($null -eq $state.plans) { $state.plans = @{} }
+    $script:StateMigrationPending = $true
   }
   Assert-StateMap $state 'plans'
   $state.state_revision = ConvertTo-StateInt64 $state.state_revision
@@ -765,6 +1031,7 @@ function Read-State {
     if ($plan.access_mode -eq 'write' -and $plan.status -eq 'issued') {
       $plan.status = 'quarantined_legacy_write'
       $plan.quarantined_at = [DateTimeOffset]::UtcNow.ToString('o')
+      $script:StateMigrationPending = $true
     }
   }
   foreach ($lease in @($state.leases.Values)) {
@@ -781,31 +1048,40 @@ function Read-State {
       if ($state.workers.ContainsKey([string]$lease.worker_id)) {
         $state.workers[[string]$lease.worker_id].status = 'blocked_legacy_write'
       }
+      $script:StateMigrationPending = $true
     }
   }
   $state.version = 4
+  Assert-GovernorStateRecords $state
   $state
 }
 
 function Write-State {
   param([hashtable]$State)
+  Initialize-GovernorStateStore
   $directory = Split-Path -Parent $script:ResolvedStatePath
   try {
-    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-      New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    }
+    Assert-GovernorStateRecords $State
     $State.state_revision = [int64]$State.state_revision + [int64]1
     $temporary = $script:ResolvedStatePath + ".tmp-" + [guid]::NewGuid().ToString('N')
     $backup = $script:ResolvedStatePath + ".bak"
     $json = $State | ConvertTo-Json -Depth 10
-    [System.IO.File]::WriteAllText($temporary, $json, [System.Text.UTF8Encoding]::new($false))
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
+    if ($bytes.Length -gt $script:StateByteLimit) { Throw-GovernorError 'state_schema_invalid' }
+    $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    Assert-StrictJson ([Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($temporary))) 'state_invalid_json'
+    Assert-GovernorStatePath
     if (Test-Path -LiteralPath $script:ResolvedStatePath -PathType Leaf) {
+      if ([ChronosGovernorPathIdentity]::LinkCount($script:ResolvedStatePath) -ne 1) { Throw-GovernorError 'state_path_invalid' }
       Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
       [System.IO.File]::Replace($temporary, $script:ResolvedStatePath, $backup, $true)
       Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     } else {
       [System.IO.File]::Move($temporary, $script:ResolvedStatePath)
     }
+    Assert-GovernorStatePath
+    $script:StateMigrationPending = $false
   } catch [System.UnauthorizedAccessException] {
     Throw-GovernorError "state_store_unwritable"
   } catch [System.Security.SecurityException] {
@@ -833,6 +1109,8 @@ function Test-LockOwnerAlive {
 function Try-Recover-StateLock {
   param([string]$LockPath)
   if (-not (Test-Path -LiteralPath $LockPath -PathType Container)) { return $true }
+  $lockItem = Get-Item -LiteralPath $LockPath -Force
+  if (($lockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $LockPath)) { Throw-GovernorError 'state_lock_unavailable' }
   $ownerPath = Join-Path $LockPath 'owner.json'
   $item = if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {
     Get-Item -LiteralPath $ownerPath -Force
@@ -844,7 +1122,13 @@ function Try-Recover-StateLock {
   }
   $owner = $null
   if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {
-    try { $owner = ConvertTo-Hashtable (Get-Content -Raw -LiteralPath $ownerPath | ConvertFrom-Json -ErrorAction Stop) } catch { $owner = $null }
+    try {
+      $ownerItem = Get-Item -LiteralPath $ownerPath -Force
+      if ($ownerItem.Length -gt 4096 -or ($ownerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'invalid' }
+      $ownerText = [Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($ownerPath))
+      Assert-StrictJson $ownerText 'state_lock_owner_invalid'
+      $owner = ConvertTo-Hashtable ($ownerText | ConvertFrom-Json -ErrorAction Stop)
+    } catch { $owner = $null }
   }
   if ($owner -and $owner.lock_id -and (Test-LockOwnerAlive $owner)) { return $false }
   $quarantine = $LockPath + '.stale-' + [guid]::NewGuid().ToString('N')
@@ -858,6 +1142,7 @@ function Try-Recover-StateLock {
 }
 
 function Acquire-StateLock {
+  Initialize-GovernorStateStore
   $lockPath = $script:ResolvedStatePath + ".lock"
   $directory = Split-Path -Parent $lockPath
   try {
@@ -874,6 +1159,8 @@ function Acquire-StateLock {
   foreach ($attempt in 1..40) {
     try {
       [System.IO.Directory]::CreateDirectory($lockPath) | Out-Null
+      $lockItem = Get-Item -LiteralPath $lockPath -Force
+      if (($lockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $lockPath)) { Throw-GovernorError 'state_lock_unavailable' }
       $ownerPath = Join-Path $lockPath 'owner.json'
       $stream = [System.IO.File]::Open($ownerPath, 'CreateNew', 'Write', 'None')
       $lockId = [guid]::NewGuid().ToString('N')
@@ -915,7 +1202,11 @@ function Release-StateLock {
   $ownerPath = Join-Path $Lock.path 'owner.json'
   try {
     if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) { return }
-    $owner = ConvertTo-Hashtable (Get-Content -Raw -LiteralPath $ownerPath | ConvertFrom-Json -ErrorAction Stop)
+    $ownerItem = Get-Item -LiteralPath $ownerPath -Force
+    if ($ownerItem.Length -gt 4096 -or ($ownerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+    $ownerText = [Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($ownerPath))
+    Assert-StrictJson $ownerText 'state_lock_owner_invalid'
+    $owner = ConvertTo-Hashtable ($ownerText | ConvertFrom-Json -ErrorAction Stop)
     if ($owner.lock_id -ne $Lock.lock_id) { return }
     [System.IO.File]::Delete($ownerPath)
     [System.IO.Directory]::Delete($Lock.path, $false)
@@ -971,6 +1262,7 @@ try {
   $workspaceId = Get-TextHash ($script:RepositoryRoot.ToLowerInvariant() + "`n" + $script:GitCommonDir.ToLowerInvariant())
   $script:FailureStage = 'state_path'
   $stateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'Chronos\Governor'
+  $script:StateRoot = [System.IO.Path]::GetFullPath($stateRoot)
   $expectedStatePath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $stateRoot $repositoryId) 'governor-state.json'))
   $script:LegacyStatePath = [System.IO.Path]::GetFullPath((Join-Path $script:GitCommonDir 'chronos/governor-state.json'))
   if ($StatePath) {
@@ -980,6 +1272,21 @@ try {
     }
   }
   $script:ResolvedStatePath = $expectedStatePath
+  try {
+    Initialize-GovernorStateStore
+  } catch [System.UnauthorizedAccessException] {
+    if ($Action -ne 'plan') { throw }
+    Write-GovernorOutput @{ ok = $true; action = 'plan'; decision = 'coordinator'; reason = 'state_store_unwritable'; repository_id = $repositoryId; workspace_id = $workspaceId; worker_spawn_allowed = $false }
+    exit 0
+  } catch [System.Security.SecurityException] {
+    if ($Action -ne 'plan') { throw }
+    Write-GovernorOutput @{ ok = $true; action = 'plan'; decision = 'coordinator'; reason = 'state_store_unwritable'; repository_id = $repositoryId; workspace_id = $workspaceId; worker_spawn_allowed = $false }
+    exit 0
+  } catch [System.IO.IOException] {
+    if ($Action -ne 'plan') { throw }
+    Write-GovernorOutput @{ ok = $true; action = 'plan'; decision = 'coordinator'; reason = 'state_store_unwritable'; repository_id = $repositoryId; workspace_id = $workspaceId; worker_spawn_allowed = $false }
+    exit 0
+  }
 
   if ($MaxConcurrentWorkers -lt 1 -or $MaxConcurrentWorkers -gt 4) { Throw-GovernorError "invalid_concurrency_limit" }
   if ($MaxTotalAttempts -lt 1 -or $MaxTotalAttempts -gt 5) { Throw-GovernorError "invalid_attempt_limit" }
@@ -993,6 +1300,18 @@ try {
   if ($Action -eq 'status') {
     $script:FailureStage = 'state_read'
     $state = Read-State
+    $migrationPersisted = $false
+    if ($script:StateMigrationPending) {
+      $migrationLock = Acquire-StateLock
+      try {
+        $script:StateMigrationPending = $false
+        $state = Read-State
+        if ($script:StateMigrationPending) {
+          Write-State $state
+          $migrationPersisted = $true
+        }
+      } finally { Release-StateLock $migrationLock }
+    }
     $script:FailureStage = 'status_summary'
     $active = @(Get-ActiveLeases $state)
     $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-$StaleMinutes)
@@ -1025,6 +1344,7 @@ try {
       security_boundary = $false
       write_delegation_enabled = $false
       persistent_content = 'metadata-only'
+      migration_persisted = $migrationPersisted
     }
     exit 0
   }

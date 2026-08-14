@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Chronos version
-      placeholder: 0.8.6
+      placeholder: 0.8.7
     validations:
       required: true
   - type: textarea

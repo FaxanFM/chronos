@@ -16,7 +16,7 @@ param(
   [string]$TransportResult = '',
   [ValidateSet('', 'acknowledged', 'outcome_reported', 'declined', 'user_authority_required', 'remediation_failed')]
   [string]$TaskResponse = '',
-  [ValidateSet('', 'heartbeat_engine', 'host_inventory', 'host_test', 'host_git')]
+  [ValidateSet('', 'host_inventory', 'host_test', 'host_git')]
   [string]$VerificationSource = '',
   [ValidateSet('', 'resolved', 'active', 'failed')]
   [string]$VerificationResult = '',
@@ -49,6 +49,7 @@ $script:OutboxLimit = 64
 $script:OutboxRetrySeconds = 900
 $script:OutboxMaxAttempts = 2
 $script:InterventionLimit = 64
+$script:InterventionClaimSeconds = 900
 $script:InputByteLimit = 262144
 $script:InspectorByteLimit = 65536
 $script:StateByteLimit = 262144
@@ -448,8 +449,9 @@ function Assert-StringArray {
 
 function Assert-AgentRecord {
   param($Record)
-  Assert-AllowedKeys $Record @('id', 'owner', 'owningSolThread', 'active', 'repeatedEquivalentActions', 'minutesSinceMeaningfulChange', 'tokensSinceMeaningfulChange', 'longRunningOperation', 'progressHash', 'lastToolHash', 'lastCommandHash', 'lastFileChangeUtc', 'lastGitHash', 'lastTestHash', 'totalTokens', 'operationClass', 'status')
+  Assert-AllowedKeys $Record @('id', 'generation', 'owner', 'owningSolThread', 'active', 'repeatedEquivalentActions', 'minutesSinceMeaningfulChange', 'tokensSinceMeaningfulChange', 'longRunningOperation', 'progressHash', 'lastToolHash', 'lastCommandHash', 'lastFileChangeUtc', 'lastGitHash', 'lastTestHash', 'totalTokens', 'operationClass', 'status')
   Assert-Field $Record 'id' id $true
+  Assert-Field $Record 'generation' opaque
   Assert-Field $Record 'owner' id
   Assert-Field $Record 'owningSolThread' id
   Assert-Field $Record 'active' bool $true
@@ -510,8 +512,9 @@ function Assert-SessionRecord {
 function Assert-TestRecord {
   param($Record)
   $statuses = @('passed', 'failed', 'skipped', 'not_run', 'unavailable', 'unknown')
-  Assert-AllowedKeys $Record @('name', 'owner', 'owningSolThread', 'status', 'commit', 'repairAttempts', 'failureCount', 'required', 'ran', 'environmentStatuses', 'buildId')
+  Assert-AllowedKeys $Record @('name', 'generation', 'owner', 'owningSolThread', 'status', 'commit', 'repairAttempts', 'failureCount', 'required', 'ran', 'environmentStatuses', 'buildId')
   Assert-Field $Record 'name' label $true
+  Assert-Field $Record 'generation' opaque
   Assert-Field $Record 'owner' id
   Assert-Field $Record 'owningSolThread' id
   Assert-Field $Record 'status' enum $true 0 0 $statuses
@@ -554,8 +557,9 @@ function Assert-MachineRecord {
 
 function Assert-TaskRecord {
   param($Record)
-  Assert-AllowedKeys $Record @('id', 'owner', 'owningSolThread', 'status', 'dependsOn', 'dependencyStatus', 'ageHours', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'acknowledgedBug', 'assigned', 'updatedAt')
+  Assert-AllowedKeys $Record @('id', 'generation', 'owner', 'owningSolThread', 'status', 'dependsOn', 'dependencyStatus', 'ageHours', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'acknowledgedBug', 'assigned', 'updatedAt')
   Assert-Field $Record 'id' id $true
+  Assert-Field $Record 'generation' opaque
   Assert-Field $Record 'owner' id
   Assert-Field $Record 'owningSolThread' id
   Assert-Field $Record 'status' enum $true 0 0 @('todo', 'active', 'waiting', 'blocked', 'completed', 'failed', 'cancelled')
@@ -709,15 +713,17 @@ function Resolve-StatePath {
   $privateTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat-v2'
   if ([string]::IsNullOrWhiteSpace($RequestedScope)) {
     $codexHome = Join-Path $HOME '.codex'
-    $RequestedScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
+    $RequestedScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome))
   }
   if ($RequestedScope.Length -gt 4096) { throw 'heartbeat_scope_invalid' }
   if ([string]::IsNullOrWhiteSpace($Requested)) {
     $scopeHash = Get-StableHash $RequestedScope
     $script:StateStoreMode = 'temp_private'
     $script:StateStoreMigration = 'not_needed'
+    $defaultPath = Join-Path $privateTempRoot (Join-Path $scopeHash 'heartbeat-state.json')
+    if (-not (Test-NoReparseAncestors $defaultPath)) { throw 'heartbeat_state_path_invalid' }
     return [pscustomobject]@{
-      Path = (Join-Path $privateTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
+      Path = $defaultPath
       ScopeHash = $scopeHash
       PriorTempDirectory = (Join-Path $priorTempRoot $scopeHash)
       PriorTempPath = (Join-Path $priorTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
@@ -736,8 +742,25 @@ function Initialize-StateStore {
   param([string]$ResolvedStatePath)
   $directory = Split-Path -Parent $ResolvedStatePath
   try {
-    $createdDirectory = -not (Test-Path -LiteralPath $directory)
-    if ($createdDirectory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    if (-not (Test-NoReparseAncestors $directory)) { throw 'heartbeat_state_store_unwritable' }
+    if (-not (Test-Path -LiteralPath $directory)) {
+      $missing = [Collections.Generic.List[string]]::new()
+      $cursor = $directory
+      while (-not (Test-Path -LiteralPath $cursor -PathType Container)) {
+        $missing.Add($cursor) | Out-Null
+        $parent = Split-Path -Parent $cursor
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { throw 'heartbeat_state_store_unwritable' }
+        $cursor = $parent
+      }
+      for ($index = $missing.Count - 1; $index -ge 0; $index--) {
+        if (-not (Test-NoReparseAncestors $cursor)) { throw 'heartbeat_state_store_unwritable' }
+        $next = $missing[$index]
+        if (-not (Test-Path -LiteralPath $next -PathType Container)) { New-Item -ItemType Directory -Path $next | Out-Null }
+        $nextItem = Get-Item -LiteralPath $next -Force
+        if (-not $nextItem.PSIsContainer -or ($nextItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'heartbeat_state_store_unwritable' }
+        $cursor = $next
+      }
+    }
     $item = Get-Item -LiteralPath $directory -Force
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
       throw 'heartbeat_state_store_unwritable'
@@ -902,7 +925,7 @@ function New-DefaultState {
     $previous[$family] = @{}
   }
   return [ordered]@{
-    schema = 6
+    schema = 7
     revision = 0
     scopeHash = $ScopeHash
     previous = $previous
@@ -962,7 +985,7 @@ function Assert-StateRecord {
     $text = [string]$Record[$key]
     if ([string]$key -match 'Hash$' -or [string]$key -in @('eventId', 'interventionId')) {
       if ($text -notmatch '^[a-f0-9]{16,64}$') { throw 'heartbeat_state_invalid' }
-    } elseif ([string]$key -in @('lastAttempt', 'lastRun', 'lastSuccess', 'backoffUntilUtc', 'firstObserved', 'lastObserved', 'lastNotified', 'resolvedAt', 'detected', 'lastCycleUtc', 'lastSuccessUtc', 'createdAt', 'updatedAt')) {
+    } elseif ([string]$key -in @('lastAttempt', 'lastRun', 'lastSuccess', 'backoffUntilUtc', 'firstObserved', 'lastObserved', 'lastNotified', 'resolvedAt', 'detected', 'lastCycleUtc', 'lastSuccessUtc', 'createdAt', 'updatedAt', 'claimExpiresAt')) {
       [void](ConvertTo-UtcTimestamp $text 'heartbeat_state_invalid')
     } elseif ([string]$key -eq 'role') {
       if ($text -notin @('governor', 'worker', 'coordinator', 'unknown')) { throw 'heartbeat_state_invalid' }
@@ -1011,10 +1034,10 @@ function Assert-State {
   if (-not ($State -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   $top = @('schema', 'revision', 'scopeHash', 'previous', 'conditions', 'events', 'outbox', 'interventions', 'collectors', 'health', 'runIds')
   foreach ($key in $State.Keys) { if ($top -notcontains [string]$key) { throw 'heartbeat_state_invalid' } }
-  if ([int]$State.schema -ne 6 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
+  if ([int]$State.schema -ne 7 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
   if (-not ($State.previous -is [System.Collections.IDictionary]) -or -not ($State.conditions -is [System.Collections.IDictionary]) -or -not ($State.collectors -is [System.Collections.IDictionary]) -or -not ($State.health -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   if ($State.conditions.Count -gt $script:ConditionLimit -or @($State.events).Count -gt $script:EventLimit -or @($State.outbox).Count -gt $script:OutboxLimit -or @($State.interventions).Count -gt $script:InterventionLimit -or @($State.runIds).Count -gt $script:RunIdLimit) { throw 'heartbeat_state_invalid' }
-  $snapshotFields = @('active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'role', 'progressCountersObserved', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds', 'runtimeMs', 'runtimeBudgetMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
+  $snapshotFields = @('generationHash', 'active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'role', 'progressCountersObserved', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'suiteHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds', 'runtimeMs', 'runtimeBudgetMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
   foreach ($family in $script:Families) {
     if (-not $State.previous.Contains($family) -or -not ($State.previous[$family] -is [System.Collections.IDictionary]) -or $State.previous[$family].Count -gt 128) { throw 'heartbeat_state_invalid' }
     foreach ($recordKey in $State.previous[$family].Keys) {
@@ -1038,7 +1061,7 @@ function Assert-State {
     if ([string]$item.event -notin @('HEARTBEAT_EVENT', 'HEARTBEAT_RESOLVED')) { throw 'heartbeat_state_invalid' }
   }
   foreach ($item in @($State.interventions)) {
-    Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'state', 'attempts', 'claimHash', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
+    Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'governorHash', 'state', 'attempts', 'claimHash', 'claimExpiresAt', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
     if ([int]$item.version -lt 1 -or [int]$item.attempts -lt 0 -or [int]$item.attempts -gt 2 -or [int]$item.coalescedCount -lt 0) { throw 'heartbeat_state_invalid' }
   }
   Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
@@ -1067,6 +1090,11 @@ function Upgrade-State {
   if ([int](Get-Value $State 'schema' 0) -eq 6) {
     $runtimeDefaults = [ordered]@{ runtimeBudgetMs = 0; runtimeObservedMs = 0; runtimeOverrunMs = 0; runtimeOverrunPercent = 0; runtimeBaselineMs = 0; runtimeClassification = 'unobserved'; runtimeOverrunStreak = 0; runtimeBackoffApplied = $false }
     foreach ($name in $runtimeDefaults.Keys) { if (-not (Has-Value $State.health $name)) { $State.health[$name] = $runtimeDefaults[$name] } }
+    foreach ($item in @($State.interventions)) {
+      if (-not (Has-Value $item 'governorHash')) { $item['governorHash'] = Get-StableHash 'legacy-governor-unknown' }
+      if (-not (Has-Value $item 'claimExpiresAt')) { $item['claimExpiresAt'] = $null }
+    }
+    $State.schema = 7
   }
   return $State
 }
@@ -1273,8 +1301,10 @@ function Get-AgentDetector {
   foreach ($agent in (As-Array (Get-Value $Snapshot 'agents'))) {
     $id = [string]$agent.id
     $idHash = Get-StableHash $id
+    $generationHash = Get-StableHash ([string](Get-Value $agent 'generation' 'generation-unavailable'))
     $progressHash = Get-ProgressHash $agent @('progressHash', 'lastToolHash', 'lastCommandHash', 'lastFileChangeUtc', 'lastGitHash', 'lastTestHash', 'status')
     $current = [ordered]@{
+      generationHash = $generationHash
       active = [bool]$agent.active
       progressHash = $progressHash
       repeated = [int](Get-Value $agent 'repeatedEquivalentActions' 0)
@@ -1285,18 +1315,20 @@ function Get-AgentDetector {
       status = [string](Get-Value $agent 'status' 'unknown')
     }
     $result.Snapshot[$idHash] = $current
-    $identity = Get-ConditionIdentity 'agent_stall' $id 'progress'
+    $conditionReason = 'progress:' + $generationHash
+    $identity = Get-ConditionIdentity 'agent_stall' $id $conditionReason
     Add-RouteHint $result $identity $id (Get-Value $agent 'owner') (Get-Value $agent 'owningSolThread')
     if (-not $current.active -or $current.longRunning) { continue }
     $prior = Get-Value $Previous $idHash
-    $noProgress = $null -ne $prior -and [string]$prior.progressHash -eq $progressHash
+    $compatiblePrior = $null -ne $prior -and [string](Get-Value $prior 'generationHash' '') -eq $generationHash
+    $noProgress = $compatiblePrior -and [string]$prior.progressHash -eq $progressHash
     $tokenDelta = $current.tokens
-    if ($prior -and $current.totalTokens -ge [int64]$prior.totalTokens) { $tokenDelta = [math]::Max($tokenDelta, $current.totalTokens - [int64]$prior.totalTokens) }
+    if ($compatiblePrior -and $current.totalTokens -ge [int64]$prior.totalTokens) { $tokenDelta = [math]::Max($tokenDelta, $current.totalTokens - [int64]$prior.totalTokens) }
     $absoluteExtreme = $current.repeated -ge 8 -and $current.idleMinutes -ge ($StallMinutes * 2)
     $stalled = ($noProgress -and $current.idleMinutes -ge $StallMinutes -and ($current.repeated -ge 3 -or $tokenDelta -ge 20000)) -or $absoluteExtreme
     if (-not $stalled) { continue }
     $severity = if ($current.repeated -ge 20 -or $tokenDelta -ge 500000) { 'CRITICAL' } elseif ($current.repeated -ge 8 -or $tokenDelta -ge 100000) { 'HIGH' } else { 'WARNING' }
-    Add-Candidate $result (New-Candidate 'agent_stall' 'AGENT_STALL' $severity $id (Get-Value $agent 'owner') (Get-Value $agent 'owningSolThread') 'progress' @('meaningfulProgress=unchanged', ('idleMinutes=' + (Format-Number $current.idleMinutes))) @('equivalentActions=' + $current.repeated, 'tokensWithoutProgress=' + $tokenDelta) 'The active agent repeated work without a meaningful state delta.' 'Inspect the blocked operation. Stop or re-scope only the affected work.' $Now)
+    Add-Candidate $result (New-Candidate 'agent_stall' 'AGENT_STALL' $severity $id (Get-Value $agent 'owner') (Get-Value $agent 'owningSolThread') $conditionReason @('meaningfulProgress=unchanged', ('idleMinutes=' + (Format-Number $current.idleMinutes))) @('equivalentActions=' + $current.repeated, 'tokensWithoutProgress=' + $tokenDelta, 'generationHash=' + $generationHash.Substring(0, 16)) 'The active agent repeated work without a meaningful state delta.' 'Inspect the blocked operation. Stop or re-scope only the affected work.' $Now)
   }
   return $result
 }
@@ -1434,6 +1466,15 @@ function Get-EnvironmentStatusValues {
   return @($Value)
 }
 
+function Get-TestEnvironmentIdentityHash {
+  param($Value)
+  if ($Value -is [System.Collections.IDictionary]) {
+    return Get-StableHash (@($Value.Keys | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Sort-Object))
+  }
+  if ($null -eq $Value) { return Get-StableHash 'environment-unavailable' }
+  return Get-StableHash 'environment-unidentified'
+}
+
 function Get-TestDetector {
   param($Snapshot, $Previous, [DateTimeOffset]$Now)
   $result = New-DetectorResult
@@ -1441,12 +1482,17 @@ function Get-TestDetector {
     $name = [string]$test.name
     $idHash = Get-StableHash $name
     $prior = Get-Value $Previous $idHash
-    $environmentValues = @(Get-EnvironmentStatusValues (Get-Value $test 'environmentStatuses'))
-    $environmentHash = Get-StableHash (@($environmentValues | Sort-Object))
+    $environmentStatuses = Get-Value $test 'environmentStatuses'
+    $environmentValues = @(Get-EnvironmentStatusValues $environmentStatuses)
+    $environmentHash = Get-TestEnvironmentIdentityHash $environmentStatuses
     $commitHash = if (Has-Value $test 'commit') { Get-StableHash ([string]$test.commit) } else { Get-StableHash 'unknown' }
+    $suiteHash = if (Has-Value $test 'buildId') { Get-StableHash ([string]$test.buildId) } else { Get-StableHash ('test-suite:' + $name) }
+    $generationHash = Get-StableHash ([string](Get-Value $test 'generation' 'generation-unavailable'))
     $current = [ordered]@{
       status = [string]$test.status
       commitHash = $commitHash
+      suiteHash = $suiteHash
+      generationHash = $generationHash
       repairAttempts = [int](Get-Value $test 'repairAttempts' 0)
       failureCount = [int](Get-Value $test 'failureCount' 0)
       environmentHash = $environmentHash
@@ -1455,22 +1501,24 @@ function Get-TestDetector {
       regressionActive = $false
     }
     foreach ($reason in @('regression', 'environment-drift', 'validation-missing')) {
-      $identity = Get-ConditionIdentity 'tests' $name $reason
+      $identityReason = if ($reason -eq 'regression') { '{0}:{1}:{2}:{3}' -f $reason, $environmentHash, $suiteHash, $generationHash } else { '{0}:{1}' -f $reason, $generationHash }
+      $identity = Get-ConditionIdentity 'tests' $name $identityReason
       Add-RouteHint $result $identity $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread')
     }
-    $regressed = $prior -and [string]$prior.status -eq 'passed' -and $current.status -eq 'failed'
-    $repairWorsened = $prior -and $current.status -eq 'failed' -and $current.repairAttempts -gt [int]$prior.repairAttempts -and $current.repairAttempts -ge 2
-    $current.regressionActive = $current.status -eq 'failed' -and ($regressed -or $repairWorsened -or ($prior -and [bool](Get-Value $prior 'regressionActive' $false)))
+    $compatiblePrior = $prior -and [string]$prior.environmentHash -eq $environmentHash -and [string](Get-Value $prior 'suiteHash' '') -eq $suiteHash -and [string](Get-Value $prior 'generationHash' '') -eq $generationHash
+    $regressed = $compatiblePrior -and [string]$prior.status -eq 'passed' -and $current.status -eq 'failed'
+    $repairWorsened = $compatiblePrior -and $current.status -eq 'failed' -and $current.repairAttempts -gt [int]$prior.repairAttempts -and $current.repairAttempts -ge 2
+    $current.regressionActive = $current.status -eq 'failed' -and ($regressed -or $repairWorsened -or ($compatiblePrior -and [bool](Get-Value $prior 'regressionActive' $false)))
     $result.Snapshot[$idHash] = $current
     if ($current.regressionActive) {
       $severity = if ($current.repairAttempts -ge 4 -or $current.failureCount -ge 5) { 'CRITICAL' } else { 'HIGH' }
-      Add-Candidate $result (New-Candidate 'tests' 'TEST_REGRESSION' $severity $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') 'regression' @('status=' + $(if ($regressed) { 'passed->failed' } else { 'failed->failed' })) @('repairAttempts=' + $current.repairAttempts, 'failureCount=' + $current.failureCount, 'commitHash=' + $commitHash.Substring(0, 16)) 'A known-good test regressed or remained broken after additional repair work.' 'Investigate the introducing change and preserve the failing evidence.' $Now)
+      Add-Candidate $result (New-Candidate 'tests' 'TEST_REGRESSION' $severity $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') ('regression:{0}:{1}:{2}' -f $environmentHash, $suiteHash, $generationHash) @('status=' + $(if ($regressed) { 'passed->failed' } else { 'failed->failed' })) @('repairAttempts=' + $current.repairAttempts, 'failureCount=' + $current.failureCount, 'commitHash=' + $commitHash.Substring(0, 16), 'environmentHash=' + $environmentHash.Substring(0, 16), 'suiteHash=' + $suiteHash.Substring(0, 16), 'generationHash=' + $generationHash.Substring(0, 16)) 'A known-good test regressed or remained broken after additional repair work.' 'Investigate the introducing change and preserve the failing evidence.' $Now)
     }
     if (($environmentValues | Select-Object -Unique).Count -gt 1) {
-      Add-Candidate $result (New-Candidate 'tests' 'TEST_ENVIRONMENT_DRIFT' 'WARNING' $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') 'environment-drift' @('environmentResults=disagree') @('resultVariants=' + (($environmentValues | Select-Object -Unique).Count)) 'The same validation differs across supplied environments.' 'Compare installed version, configuration, and artifact identity.' $Now)
+      Add-Candidate $result (New-Candidate 'tests' 'TEST_ENVIRONMENT_DRIFT' 'WARNING' $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') ('environment-drift:' + $generationHash) @('environmentResults=disagree') @('resultVariants=' + (($environmentValues | Select-Object -Unique).Count), 'generationHash=' + $generationHash.Substring(0, 16)) 'The same validation differs across supplied environments.' 'Compare installed version, configuration, and artifact identity.' $Now)
     }
     if ($current.required -and -not $current.ran) {
-      Add-Candidate $result (New-Candidate 'tests' 'TEST_VALIDATION_MISSING' 'WARNING' $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') 'validation-missing' @('requiredValidation=not_run') @('status=' + $current.status) 'Required validation was not run.' 'Run the required validation before release or handoff.' $Now)
+      Add-Candidate $result (New-Candidate 'tests' 'TEST_VALIDATION_MISSING' 'WARNING' $name (Get-Value $test 'owner') (Get-Value $test 'owningSolThread') ('validation-missing:' + $generationHash) @('requiredValidation=not_run') @('status=' + $current.status, 'generationHash=' + $generationHash.Substring(0, 16)) 'Required validation was not run.' 'Run the required validation before release or handoff.' $Now)
     }
   }
   return $result
@@ -1527,8 +1575,10 @@ function Get-TaskDetector {
   foreach ($task in (As-Array (Get-Value $Snapshot 'tasks'))) {
     $id = [string]$task.id
     $idHash = Get-StableHash $id
+    $generationHash = Get-StableHash ([string](Get-Value $task 'generation' 'generation-unavailable'))
     $prior = Get-Value $Previous $idHash
     $current = [ordered]@{
+      generationHash = $generationHash
       dependencyStatus = [string](Get-Value $task 'dependencyStatus' 'unknown')
       taskStatus = [string]$task.status
       ageHours = [double](Get-Value $task 'ageHours' 0)
@@ -1541,22 +1591,23 @@ function Get-TaskDetector {
       actionableActive = $false
     }
     foreach ($reason in @('actionable', 'zombie', 'unfinished-handoff')) {
-      $identity = Get-ConditionIdentity 'tasks' $id $reason
+      $identity = Get-ConditionIdentity 'tasks' $id ($reason + ':' + $generationHash)
       Add-RouteHint $result $identity $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread')
     }
-    $dependencyTransition = $prior -and [string]$prior.dependencyStatus -ne 'completed' -and $current.dependencyStatus -eq 'completed'
-    $current.actionableActive = $current.taskStatus -eq 'waiting' -and ($dependencyTransition -or ($prior -and [bool](Get-Value $prior 'actionableActive' $false)))
+    $compatiblePrior = $prior -and [string](Get-Value $prior 'generationHash' '') -eq $generationHash
+    $dependencyTransition = $compatiblePrior -and [string]$prior.dependencyStatus -ne 'completed' -and $current.dependencyStatus -eq 'completed'
+    $current.actionableActive = $current.taskStatus -eq 'waiting' -and ($dependencyTransition -or ($compatiblePrior -and [bool](Get-Value $prior 'actionableActive' $false)))
     $result.Snapshot[$idHash] = $current
     if ($current.actionableActive) {
-      Add-Candidate $result (New-Candidate 'tasks' 'TASK_ACTIONABLE' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') 'actionable' @('dependencyStatus=incomplete->completed') @('dependencyHash=' + (Get-StableHash (Get-Value $task 'dependsOn' 'unknown')).Substring(0, 16)) 'A dependency completed while this task remained waiting.' 'Resume the owning task or explicitly reclassify it.' $Now)
+      Add-Candidate $result (New-Candidate 'tasks' 'TASK_ACTIONABLE' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') ('actionable:' + $generationHash) @('dependencyStatus=incomplete->completed') @('dependencyHash=' + (Get-StableHash (Get-Value $task 'dependsOn' 'unknown')).Substring(0, 16), 'generationHash=' + $generationHash.Substring(0, 16)) 'A dependency completed while this task remained waiting.' 'Resume the owning task or explicitly reclassify it.' $Now)
     }
     $zombie = (($current.taskStatus -eq 'todo' -or $current.acknowledgedBug) -and -not $current.assigned -and $current.ageHours -ge 24)
     if ($zombie) {
-      Add-Candidate $result (New-Candidate 'tasks' 'ZOMBIE_TASK' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') 'zombie' @('ownership=unassigned') @('ageHours=' + (Format-Number $current.ageHours), 'acknowledgedBug=' + $current.acknowledgedBug) 'Recorded work has no active owner.' 'Assign the work or close it explicitly.' $Now)
+      Add-Candidate $result (New-Candidate 'tasks' 'ZOMBIE_TASK' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') ('zombie:' + $generationHash) @('ownership=unassigned') @('ageHours=' + (Format-Number $current.ageHours), 'acknowledgedBug=' + $current.acknowledgedBug, 'generationHash=' + $generationHash.Substring(0, 16)) 'Recorded work has no active owner.' 'Assign the work or close it explicitly.' $Now)
     }
     $unfinished = $current.taskStatus -eq 'completed' -and (($current.requiredValidation -and $current.validationStatus -ne 'passed') -or $current.requiredCommit -or $current.requiredPush)
     if ($unfinished) {
-      Add-Candidate $result (New-Candidate 'tasks' 'TASK_HANDOFF_INCOMPLETE' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') 'unfinished-handoff' @('task=completed', 'handoff=incomplete') @('validation=' + $current.validationStatus, 'commitRequired=' + $current.requiredCommit, 'pushRequired=' + $current.requiredPush) 'Completed work still has a required handoff action.' 'Complete or explicitly waive the remaining commit, push, or validation step.' $Now)
+      Add-Candidate $result (New-Candidate 'tasks' 'TASK_HANDOFF_INCOMPLETE' 'WARNING' $id (Get-Value $task 'owner') (Get-Value $task 'owningSolThread') ('unfinished-handoff:' + $generationHash) @('task=completed', 'handoff=incomplete') @('validation=' + $current.validationStatus, 'commitRequired=' + $current.requiredCommit, 'pushRequired=' + $current.requiredPush, 'generationHash=' + $generationHash.Substring(0, 16)) 'Completed work still has a required handoff action.' 'Complete or explicitly waive the remaining commit, push, or validation step.' $Now)
     }
   }
   return $result
@@ -2022,7 +2073,7 @@ function Remove-PendingEvent {
 }
 
 function New-InterventionRecord {
-  param($EventRecord, [string]$TargetHash, [string]$GenerationHash, [int]$Version, [string]$StateName, [string]$Reason, [DateTimeOffset]$Now, [bool]$EscalationSent)
+  param($EventRecord, [string]$TargetHash, [string]$GenerationHash, [string]$GovernorHash, [int]$Version, [string]$StateName, [string]$Reason, [DateTimeOffset]$Now, [bool]$EscalationSent)
   $contract = Get-InterventionContract ([string]$EventRecord.type)
   $id = Get-StableHash ('chronos-intervention-v1|{0}|{1}|{2}|{3}' -f [string]$EventRecord.eventId, $Version, $TargetHash, $GenerationHash)
   return [ordered]@{
@@ -2034,9 +2085,11 @@ function New-InterventionRecord {
     version = $Version
     targetHash = $TargetHash
     targetGenerationHash = $GenerationHash
+    governorHash = $GovernorHash
     state = $StateName
     attempts = 0
     claimHash = $null
+    claimExpiresAt = $null
     createdAt = $Now.ToString('o')
     updatedAt = $Now.ToString('o')
     template = $contract.Template
@@ -2062,7 +2115,11 @@ function Get-InterventionPayload {
     'transport_unavailable' { 'retain_condition_without_user_handoff' }
     'governor_usage_uncorroborated' { 'apply_governor_local_throttle_only' }
     'user_authority_required' { 'surface_once_for_user_authority' }
-    default { if ($Decision -eq 'send') { 'send_once_to_verified_target' } else { 'none' } }
+    default {
+      if ($Decision -eq 'send') { 'send_once_to_verified_target' }
+      elseif ($Decision -eq 'deferred_incompatible') { 'complete_active_intervention_then_plan_pending_event' }
+      else { 'none' }
+    }
   }
   $payload = [ordered]@{
     ok = $true
@@ -2154,7 +2211,7 @@ function Invoke-InterventionPlan {
   elseif (-not (Test-InterventionTargetPolicy $eventRecord $targetHash ([string]$contract.TargetPolicy))) { $failure = 'target_policy_mismatch' }
   if ($failure) {
     $reason = $failure
-    $record = New-InterventionRecord $eventRecord $targetHash $generationHash 1 'failed_closed' $reason $Now $false
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash $governorHash 1 'failed_closed' $reason $Now $false
     Add-BoundedIntervention $State $record
     Remove-PendingEvent $State $RequestedEventId
     Trim-State $State
@@ -2163,8 +2220,23 @@ function Invoke-InterventionPlan {
     return Get-InterventionPayload $record 'plan' 'failed_closed'
   }
 
-  $active = @($State.interventions | Where-Object { [string]$_.targetHash -eq $targetHash -and -not (Test-InterventionTerminal ([string]$_.state)) } | Sort-Object updatedAt -Descending | Select-Object -First 1)[0]
+  foreach ($staleGeneration in @($State.interventions | Where-Object {
+        [string]$_.targetHash -eq $targetHash -and
+        [string]$_.targetGenerationHash -ne $generationHash -and
+        -not (Test-InterventionTerminal ([string]$_.state))
+      })) {
+    $staleGeneration.state = 'superseded'
+    $staleGeneration.updatedAt = $Now.ToString('o')
+  }
+  $active = @($State.interventions | Where-Object {
+      [string]$_.targetHash -eq $targetHash -and
+      [string]$_.targetGenerationHash -eq $generationHash -and
+      -not (Test-InterventionTerminal ([string]$_.state))
+    } | Sort-Object updatedAt -Descending | Select-Object -First 1)[0]
   if ($active) {
+    if ([string]$active.template -ne [string]$contract.Template -or [string]$active.postcondition -ne [string]$contract.Postcondition) {
+      return Get-InterventionPayload $active 'plan' 'deferred_incompatible'
+    }
     $newRank = [int]$script:SeverityRank[[string]$eventRecord.severity]
     $activeRank = [int]$script:SeverityRank[[string]$active.severity]
     if ([string]$active.eventId -eq $RequestedEventId -or $newRank -le $activeRank -or ([bool]$active.escalationSent -and [int]$active.attempts -gt 0)) {
@@ -2180,9 +2252,9 @@ function Invoke-InterventionPlan {
     $active.state = 'superseded'
     $active.escalationSent = $alreadySent
     $active.updatedAt = $Now.ToString('o')
-    $record = New-InterventionRecord $eventRecord $targetHash $generationHash $nextVersion 'queued' 'none' $Now $alreadySent
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash $governorHash $nextVersion 'queued' 'none' $Now $alreadySent
   } else {
-    $record = New-InterventionRecord $eventRecord $targetHash $generationHash 1 'queued' 'none' $Now $false
+    $record = New-InterventionRecord $eventRecord $targetHash $generationHash $governorHash 1 'queued' 'none' $Now $false
   }
   Add-BoundedIntervention $State $record
   Remove-PendingEvent $State $RequestedEventId
@@ -2197,7 +2269,7 @@ function Invoke-InterventionFailClosed {
   if ($Reason -notin @('ambiguous_target', 'target_not_live', 'transport_unavailable', 'user_authority_required', 'unsupported_action')) { throw 'heartbeat_intervention_input_invalid' }
   $eventRecord = Get-PendingEventRecord $State $RequestedEventId
   if ($null -eq $eventRecord) { throw 'heartbeat_intervention_event_unavailable' }
-  $record = New-InterventionRecord $eventRecord (Get-StableHash 'unresolved-target') (Get-StableHash 'unresolved-generation') 1 'failed_closed' $Reason $Now $false
+  $record = New-InterventionRecord $eventRecord (Get-StableHash 'unresolved-target') (Get-StableHash 'unresolved-generation') (Get-StableHash 'unresolved-governor') 1 'failed_closed' $Reason $Now $false
   Add-BoundedIntervention $State $record
   Remove-PendingEvent $State $RequestedEventId
   Trim-State $State
@@ -2212,8 +2284,10 @@ function Assert-CurrentTarget {
   Assert-InterventionRuntimeId $RequestedGeneration
   Assert-InterventionRuntimeId $CurrentGovernorId
   $targetHash = Get-StableHash $RequestedTargetId
-  if ($targetHash -eq (Get-StableHash $CurrentGovernorId)) { throw 'heartbeat_intervention_self_target' }
+  $governorHash = Get-StableHash $CurrentGovernorId
+  if ($targetHash -eq $governorHash) { throw 'heartbeat_intervention_self_target' }
   if ($targetHash -ne [string]$Record.targetHash -or (Get-StableHash $RequestedGeneration) -ne [string]$Record.targetGenerationHash) { throw 'heartbeat_intervention_target_changed' }
+  if ($governorHash -ne [string]$Record.governorHash) { throw 'heartbeat_intervention_governor_changed' }
 }
 
 function Invoke-InterventionClaim {
@@ -2234,6 +2308,7 @@ function Invoke-InterventionClaim {
   $record.claimHash = Get-StableHash $token
   $record.attempts = [int]$record.attempts + 1
   $record.state = 'send_claimed'
+  $record.claimExpiresAt = $Now.AddSeconds($script:InterventionClaimSeconds).ToString('o')
   $record.updatedAt = $Now.ToString('o')
   $State.revision = [int64]$State.revision + 1
   Write-State $State $ResolvedStatePath
@@ -2254,10 +2329,12 @@ function Invoke-InterventionTransport {
   if ([string]$record.state -eq 'delivery_unknown' -and $Result -ne 'accepted') { throw 'heartbeat_intervention_transition_invalid' }
   $record.transportResult = $Result
   switch ($Result) {
-    'accepted' { $record.state = 'awaiting_task_ack' }
+    'accepted' { $record.state = 'awaiting_task_ack'; $record.claimExpiresAt = $null }
     'definite_failure' {
       if ([int]$record.attempts -lt 2) { $record.state = 'retry_queued' }
       else { $record.state = 'undelivered'; $record.failureReason = 'retry_budget_exhausted' }
+      $record.claimHash = $null
+      $record.claimExpiresAt = $null
     }
     'unknown' { $record.state = 'delivery_unknown' }
     default { throw 'heartbeat_intervention_input_invalid' }
@@ -2293,7 +2370,6 @@ function Invoke-InterventionResponse {
 
 function Test-VerificationSourceAllowed {
   param([string]$Type, [string]$Source)
-  if ($Source -eq 'heartbeat_engine') { return $true }
   switch ($Type) {
     { $_ -in @('AGENT_STALL', 'TASK_ACTIONABLE', 'ZOMBIE_TASK', 'TASK_HANDOFF_INCOMPLETE') } { return $Source -eq 'host_inventory' }
     { $_ -in @('TEST_REGRESSION', 'TEST_VALIDATION_MISSING') } { return $Source -eq 'host_test' }
@@ -2303,10 +2379,13 @@ function Test-VerificationSourceAllowed {
 }
 
 function Invoke-InterventionVerify {
-  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$Source, [string]$Result, [DateTimeOffset]$Now)
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$RequestedTargetId, [string]$RequestedGeneration, [string]$Source, [string]$Result, [DateTimeOffset]$Now)
   $record = Get-InterventionRecord $State $RequestedInterventionId
   if ($null -eq $record -or [int]$record.version -ne $RequestedVersion) { throw 'heartbeat_intervention_not_found' }
-  if (Test-InterventionTerminal ([string]$record.state)) { throw 'heartbeat_intervention_transition_invalid' }
+  Assert-InterventionRuntimeId $RequestedTargetId
+  Assert-InterventionRuntimeId $RequestedGeneration
+  if ((Get-StableHash $RequestedTargetId) -ne [string]$record.targetHash -or (Get-StableHash $RequestedGeneration) -ne [string]$record.targetGenerationHash) { throw 'heartbeat_intervention_target_changed' }
+  if ([string]$record.state -notin @('verification_pending', 'active_violation')) { throw 'heartbeat_intervention_transition_invalid' }
   if (-not (Test-VerificationSourceAllowed ([string]$record.type) $Source)) { throw 'heartbeat_intervention_verification_invalid' }
   $record.verificationSource = $Source
   $record.verificationResult = $Result
@@ -2320,6 +2399,67 @@ function Invoke-InterventionVerify {
   $State.revision = [int64]$State.revision + 1
   Write-State $State $ResolvedStatePath
   return Get-InterventionPayload $record 'verify' ([string]$record.state)
+}
+
+function Get-InterventionNextAction {
+  param($Record, [DateTimeOffset]$Now)
+  switch ([string]$Record.state) {
+    'queued' { return 'claim' }
+    'retry_queued' { return 'claim' }
+    'send_claimed' {
+      if ($Record.claimExpiresAt -and (ConvertTo-UtcTimestamp $Record.claimExpiresAt 'heartbeat_state_invalid') -le $Now) { return 'reclaim' }
+      return 'wait_for_claim_expiry'
+    }
+    'delivery_unknown' { return 'reconcile_delivery_without_retry' }
+    'awaiting_task_ack' { return 'wait_for_task_response' }
+    'remediating' { return 'wait_for_task_outcome' }
+    'verification_pending' { return 'verify_host_postcondition' }
+    'active_violation' { return 'verify_host_postcondition' }
+    default { return 'none' }
+  }
+}
+
+function Invoke-InterventionList {
+  param($State, [string]$CurrentGovernorId, [DateTimeOffset]$Now)
+  Assert-InterventionRuntimeId $CurrentGovernorId
+  $governorHash = Get-StableHash $CurrentGovernorId
+  $records = [Collections.Generic.List[object]]::new()
+  foreach ($record in @($State.interventions | Where-Object {
+        [string]$_.governorHash -eq $governorHash -and -not (Test-InterventionTerminal ([string]$_.state))
+      } | Sort-Object updatedAt | Select-Object -First 16)) {
+    $records.Add([ordered]@{
+        interventionId = [string]$record.interventionId
+        version = [int]$record.version
+        state = [string]$record.state
+        type = [string]$record.type
+        severity = [string]$record.severity
+        targetHash = ([string]$record.targetHash).Substring(0, 16)
+        generationHash = ([string]$record.targetGenerationHash).Substring(0, 16)
+        template = [string]$record.template
+        postcondition = [string]$record.postcondition
+        attempts = [int]$record.attempts
+        updatedAt = [string]$record.updatedAt
+        permittedNextAction = Get-InterventionNextAction $record $Now
+      }) | Out-Null
+  }
+  return [ordered]@{ ok = $true; action = 'list'; count = $records.Count; interventions = @($records) }
+}
+
+function Invoke-InterventionReclaim {
+  param($State, [string]$ResolvedStatePath, [string]$RequestedInterventionId, [int]$RequestedVersion, [string]$CurrentGovernorId, [DateTimeOffset]$Now)
+  Assert-InterventionRuntimeId $CurrentGovernorId
+  $record = Get-InterventionRecord $State $RequestedInterventionId
+  if ($null -eq $record -or [int]$record.version -ne $RequestedVersion) { throw 'heartbeat_intervention_not_found' }
+  if ((Get-StableHash $CurrentGovernorId) -ne [string]$record.governorHash) { throw 'heartbeat_intervention_governor_changed' }
+  if ([string]$record.state -ne 'send_claimed' -or -not $record.claimExpiresAt -or (ConvertTo-UtcTimestamp $record.claimExpiresAt 'heartbeat_state_invalid') -gt $Now) { throw 'heartbeat_intervention_transition_invalid' }
+  $record.claimHash = $null
+  $record.claimExpiresAt = $null
+  if ([int]$record.attempts -lt 2) { $record.state = 'retry_queued' }
+  else { $record.state = 'undelivered'; $record.failureReason = 'retry_budget_exhausted' }
+  $record.updatedAt = $Now.ToString('o')
+  $State.revision = [int64]$State.revision + 1
+  Write-State $State $ResolvedStatePath
+  return Get-InterventionPayload $record 'reclaim' ([string]$record.state)
 }
 
 function Resolve-ConditionInterventions {
@@ -2459,6 +2599,7 @@ function Invoke-Cycle {
       $oldRank = if ($old -and $script:SeverityRank.ContainsKey([string]$old.severity)) { [int]$script:SeverityRank[[string]$old.severity] } else { 0 }
       $newRank = [int]$script:SeverityRank[[string]$candidate.Severity]
       $notify = $null -eq $old -or -not [bool]$old.open -or $newRank -gt $oldRank
+      $episodeSeverity = if ($old -and [bool]$old.open -and $oldRank -gt $newRank) { [string]$old.severity } else { [string]$candidate.Severity }
       $episode = if ($old) { if ([bool]$old.open) { [int64](Get-Value $old 'episode' 1) } else { [int64](Get-Value $old 'episode' 1) + 1 } } else { 1 }
       if ($notify) {
         $eventId = Get-StableHash ('heartbeat-event-v1|{0}|{1}|{2}|open' -f $conditionHash, $episode, $candidate.Severity)
@@ -2474,7 +2615,7 @@ function Invoke-Cycle {
       $State.conditions[$conditionHash] = [ordered]@{
         family = $family
         type = [string]$candidate.Type
-        severity = [string]$candidate.Severity
+        severity = $episodeSeverity
         open = $true
         firstObserved = if ($old) { [string]$old.firstObserved } else { [string]$candidate.Detected }
         lastObserved = [string]$candidate.Detected
@@ -2482,7 +2623,7 @@ function Invoke-Cycle {
         occurrences = if ($old) { [int64]$old.occurrences + 1 } else { 1 }
         episode = $episode
         sourceEpochHash = if ($old -and [bool]$old.open) { $old.sourceEpochHash } else { $epochHash }
-        signatureHash = Get-StableHash @{ type = $candidate.Type; severity = $candidate.Severity }
+        signatureHash = Get-StableHash @{ type = $candidate.Type; severity = $episodeSeverity }
         subjectHash = [string]$candidate.SubjectHash
         ownerHash = Get-StableHash (Get-Value $candidate 'Owner' 'unknown')
         routeClass = Get-RouteClass $route
@@ -2598,7 +2739,7 @@ $acquired = $false
 $state = $null
 $resolved = $null
 try {
-  if ($Action -notin @('cycle', 'status', 'acknowledge', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
+  if ($Action -notin @('cycle', 'status', 'acknowledge', 'intervention-list', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-reclaim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
   $resolved = Resolve-StatePath $StatePath $Scope
   Initialize-StateStore $resolved.Path
   $input = $null
@@ -2614,10 +2755,13 @@ try {
   }
   $mutex = New-HeartbeatMutex $resolved.Path
   $abandoned = $false
-  $mutexWaitMilliseconds = if ($Action -eq 'cycle') { 0 } else { 1000 }
+  $mutexWaitMilliseconds = if ($Action -eq 'cycle') { 5000 } else { 1000 }
   try { $acquired = $mutex.WaitOne($mutexWaitMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true; $abandoned = $true }
   if (-not $acquired) {
-    if ($Action -eq 'cycle') { exit 0 }
+    if ($Action -eq 'cycle') {
+      Write-Output 'CHRONOS HEARTBEATS {"ok":false,"error":"heartbeat_mutex_busy","cycleDropped":false,"retryRequired":true}'
+      exit 1
+    }
     throw 'heartbeat_mutex_busy'
   }
   # Always reopen and validate authoritative state after acquisition. This is
@@ -2634,6 +2778,10 @@ try {
     Write-Output ('CHRONOS HEARTBEATS ' + ($payload | ConvertTo-Json -Compress))
     exit 0
   }
+  if ($Action -eq 'intervention-list') {
+    Write-Output ('CHRONOS INTERVENTIONS ' + ((Invoke-InterventionList $state $GovernorId $deliveryNow) | ConvertTo-Json -Compress -Depth 6))
+    exit 0
+  }
   if ($Action -eq 'intervention-plan') {
     Write-InterventionPayload (Invoke-InterventionPlan $state $resolved.Path $EventId $CorroboratingEventId $TargetId $TargetGeneration $GovernorId $deliveryNow)
     exit 0
@@ -2646,6 +2794,10 @@ try {
     Write-InterventionPayload (Invoke-InterventionClaim $state $resolved.Path $InterventionId $InterventionVersion $TargetId $TargetGeneration $GovernorId $deliveryNow)
     exit 0
   }
+  if ($Action -eq 'intervention-reclaim') {
+    Write-InterventionPayload (Invoke-InterventionReclaim $state $resolved.Path $InterventionId $InterventionVersion $GovernorId $deliveryNow)
+    exit 0
+  }
   if ($Action -eq 'intervention-transport') {
     Write-InterventionPayload (Invoke-InterventionTransport $state $resolved.Path $InterventionId $InterventionVersion $ClaimToken $TransportResult $deliveryNow)
     exit 0
@@ -2655,7 +2807,7 @@ try {
     exit 0
   }
   if ($Action -eq 'intervention-verify') {
-    Write-InterventionPayload (Invoke-InterventionVerify $state $resolved.Path $InterventionId $InterventionVersion $VerificationSource $VerificationResult $deliveryNow)
+    Write-InterventionPayload (Invoke-InterventionVerify $state $resolved.Path $InterventionId $InterventionVersion $TargetId $TargetGeneration $VerificationSource $VerificationResult $deliveryNow)
     exit 0
   }
   $events = @(Invoke-Cycle $input $state $resolved.Path $evidenceNow $deliveryNow)

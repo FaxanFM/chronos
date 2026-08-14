@@ -182,7 +182,7 @@ try {
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
-  Assert-Equal $versionStatus.plugin_version '0.8.6' 'Governor must report the active packaged plugin version.'
+  Assert-Equal $versionStatus.plugin_version '0.8.7' 'Governor must report the active packaged plugin version.'
   $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
   if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Governor runtime state must not be stored beneath Git metadata.'
@@ -614,6 +614,22 @@ $input | ForEach-Object { $_ }
   Assert-Equal (Get-Content -Raw -LiteralPath $statePath) "{not-json`r`n" 'Malformed state must not be overwritten.'
   Register-SafetyControl 'malformed-state'
 
+  foreach ($ambiguousState in @(
+    '{"version":4,"version":4,"state_revision":0,"workers":{},"tasks":{},"leases":{},"plans":{}}',
+    '{"version":4,"Version":4,"state_revision":0,"workers":{},"tasks":{},"leases":{},"plans":{}}'
+  )) {
+    [IO.File]::WriteAllText($statePath, $ambiguousState, [Text.UTF8Encoding]::new($false))
+    Assert-Failure (Invoke-Governor @('-Action', 'status')) 'state_invalid_json' 'Duplicate or case-colliding Governor state keys must fail closed.'
+    Assert-Equal (Get-Content -Raw -LiteralPath $statePath) $ambiguousState 'Ambiguous Governor state was overwritten.'
+  }
+  Register-SafetyControl 'ambiguous-state-keys'
+
+  $oversizedState = '{"version":4,"state_revision":0,"workers":{},"tasks":{},"leases":{},"plans":{},"padding":"' + ('x' * 270000) + '"}'
+  [IO.File]::WriteAllText($statePath, $oversizedState, [Text.UTF8Encoding]::new($false))
+  Assert-Failure (Invoke-Governor @('-Action', 'status')) 'state_invalid_json' 'Oversized Governor state must fail closed.'
+  Assert-Equal (Get-Item -LiteralPath $statePath).Length ([Text.Encoding]::UTF8.GetByteCount($oversizedState)) 'Oversized Governor state was overwritten.'
+  Register-SafetyControl 'state-size-boundary'
+
   @{
     version = 4
     state_revision = 1
@@ -638,6 +654,35 @@ $input | ForEach-Object { $_ }
   Assert-Failure $revisionOverflow 'state_schema_invalid' 'Out-of-range state revision must not become an opaque integer overflow.'
   Register-SafetyControl 'state-revision-boundary'
 
+  Copy-Item -LiteralPath $stateBackup -Destination $statePath -Force
+  $hardLinkPath = $statePath + '.hardlink'
+  try {
+    New-Item -ItemType HardLink -Path $hardLinkPath -Target $statePath -ErrorAction Stop | Out-Null
+    Assert-Failure (Invoke-Governor @('-Action', 'status')) 'state_path_invalid' 'Hard-linked Governor state must fail closed.'
+    Register-SafetyControl 'state-hardlink-containment'
+  } finally {
+    Remove-Item -LiteralPath $hardLinkPath -Force -ErrorAction SilentlyContinue
+  }
+
+  $junctionRepo = Join-Path $testRoot 'state-junction-repo'
+  New-FixtureRepository $junctionRepo
+  $junctionStatePath = Get-StatePath $junctionRepo
+  $junctionDirectory = Split-Path -Parent $junctionStatePath
+  $junctionTarget = Join-Path $testRoot 'state-junction-target'
+  New-Item -ItemType Directory -Path $junctionTarget -Force | Out-Null
+  $resolvedGovernorRoot = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Governor'))
+  $resolvedJunctionDirectory = [IO.Path]::GetFullPath($junctionDirectory)
+  if (-not $resolvedJunctionDirectory.StartsWith($resolvedGovernorRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Junction fixture escaped the Governor test root.' }
+  Remove-Item -LiteralPath $junctionDirectory -Recurse -Force
+  New-Item -ItemType Junction -Path $junctionDirectory -Target $junctionTarget | Out-Null
+  try {
+    Assert-Failure (Invoke-Governor @('-Action', 'status') $junctionRepo) 'state_path_invalid' 'A reparse parent beneath the Governor state root must fail closed.'
+    if (Test-Path -LiteralPath (Join-Path $junctionTarget 'governor-state.json')) { throw 'Rejected reparse state path created an external state file.' }
+    Register-SafetyControl 'state-reparse-containment'
+  } finally {
+    Remove-Item -LiteralPath $junctionDirectory -Force -ErrorAction SilentlyContinue
+  }
+
   $scriptText = Get-Content -Raw -LiteralPath $governorScript
   foreach ($diagnosticField in @('failure_stage', 'exception_type', 'continue_as_coordinator_and_report')) {
     if (-not $scriptText.Contains($diagnosticField)) {
@@ -657,6 +702,10 @@ $input | ForEach-Object { $_ }
   $unwritableStatePath = Get-StatePath $unwritableRepo
   $unwritableDirectory = Split-Path -Parent $unwritableStatePath
   New-Item -ItemType Directory -Path (Split-Path -Parent $unwritableDirectory) -Force | Out-Null
+  $unwritableFull = [IO.Path]::GetFullPath($unwritableDirectory)
+  $governorRootFull = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Governor')).TrimEnd('\')
+  if (-not $unwritableFull.StartsWith($governorRootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unwritable-store fixture escaped the Governor TEMP root.' }
+  Remove-Item -LiteralPath $unwritableDirectory -Recurse -Force
   Set-Content -LiteralPath $unwritableDirectory -Value 'A file deliberately blocks Governor state-directory creation.'
   $unwritablePlan = Invoke-Governor @(
     '-Action', 'plan', '-TaskId', 'unwritable-store', '-TaskClass', 'explore',
@@ -732,6 +781,9 @@ $input | ForEach-Object { $_ }
   $quarantinedStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status') $version3Repo)
   Assert-Equal $quarantinedStatus.state_version 4 'Version-3 state must migrate to version 4.'
   Assert-Equal $quarantinedStatus.blocked_legacy_write_leases 1 'Active version-3 writes must be quarantined.'
+  $persistedQuarantine = Get-Content -Raw -LiteralPath $version3StatePath | ConvertFrom-Json
+  Assert-Equal $persistedQuarantine.version 4 'Status did not persist the Governor state migration.'
+  Assert-Equal $persistedQuarantine.leases.$legacyTask.status 'blocked_legacy_write' 'Status did not persist the quarantined lease state.'
   foreach ($blockedAction in @('renew', 'result', 'verify', 'correct', 'accept')) {
     $blockedResult = Invoke-Governor @(
       '-Action', $blockedAction, '-TaskId', $legacyTask, '-WorkerId', $legacyWorker,

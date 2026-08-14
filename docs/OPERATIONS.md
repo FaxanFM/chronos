@@ -38,11 +38,11 @@ The authoritative immutable v0.8.5 ZIP SHA-256 is
 It matches the independently audited and externally exercised release
 candidate.
 
-The v0.8.6 release-candidate ZIP SHA-256 is
+The authoritative immutable v0.8.6 ZIP SHA-256 is
 `948fcc4bab8775791f7ec303dd8830aa08e2db2cf2ba9c0a41038351de4ae37e`.
 It changes only Plugin Platform manifest compatibility and its release
-regression coverage. Treat this value as provisional until the signed release
-workflow publishes and verifies the immutable asset.
+regression coverage. The signed release and public Plugin Directory package
+were published before the v0.8.7 audit-remediation work began.
 
 ## Published Release
 
@@ -61,7 +61,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.7.7
+git verify-tag v0.8.6
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -115,7 +115,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.6 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.7 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the

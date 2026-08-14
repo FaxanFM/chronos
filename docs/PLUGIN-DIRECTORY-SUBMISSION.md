@@ -1,23 +1,19 @@
 # OpenAI Plugin Directory Published Listing Record
 
-Status: v0.7.7 is published in the OpenAI Plugins Directory. The focused
-[v0.7.7 maintenance package](https://github.com/FaxanFM/chronos/releases/tag/v0.7.7)
-is an immutable GitHub release and was submitted under the verified Dravara,
-LLC business identity. Both OpenAI skill scans passed, OpenAI approved the
-submission, and the public listing was verified at version 0.7.7. The
-authoritative reproducible ZIP SHA-256 is
-`b74e3a595f218eedf70658edd63364827f861e75d377d9a286cbdc91f88076ee`.
-
-GitHub release candidate: v0.8.6 keeps single-Governor supervision autonomous,
-recovers from prior Heartbeat state owned by an inaccessible sandbox identity,
-and reports that condition without claiming access to unreadable contents. It
-has not been submitted, approved, or published in the OpenAI Plugin Directory.
-The release artifact is `chronos-v0.8.6.zip` with SHA-256
+Status: v0.8.6 is published in the OpenAI Plugins Directory under the verified
+Dravara, LLC business identity. Both OpenAI skill scans passed and the package
+was published from the existing Chronos listing. The GitHub release artifact is
+`chronos-v0.8.6.zip` with SHA-256
 `948fcc4bab8775791f7ec303dd8830aa08e2db2cf2ba9c0a41038351de4ae37e`.
-No tag or GitHub release is created until local, CI, audit, and external canary
-gates pass.
-Release record after gated publication:
+Release record:
 https://github.com/FaxanFM/chronos/releases/tag/v0.8.6.
+
+v0.8.7 is an audit-remediation candidate with artifact
+`chronos-v0.8.7.zip` and SHA-256
+`8d423929e11af6f10411c1da70c0db88bc1d77b1caf7ba4e40872071f9ec72c6`.
+It is not submitted or published until local suites, CI, independent review,
+and an external Windows canary pass. Candidate release URL:
+https://github.com/FaxanFM/chronos/releases/tag/v0.8.7.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -38,7 +34,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.6.zip` release asset.
+   `chronos-v0.8.7.zip` release asset after every gate passes.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -54,7 +50,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.6`
+- Version: `0.8.7`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -240,7 +236,7 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.6 keeps one Terra Medium Governor per machine and
+> Chronos for Codex v0.8.7 keeps one Terra Medium Governor per machine and
 > leaves monitored tasks passive on their existing models. Each Governor cycle
 > reconciles one bounded host task inventory, so missing or disabled lifecycle
 > hooks do not require manual registration. Default Heartbeat and supervision
@@ -289,9 +285,9 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.7.7 published; v0.8.6 not submitted**. Retained evidence
-confirms that v0.7.7 is visible in the directory. It does not establish exact
-submission, approval, publication, or region values.
+Review status: **v0.8.6 published; v0.8.7 not submitted**. Retained evidence
+confirms the v0.8.6 publication. Exact regional availability remains outside
+this repository's evidence boundary.
 
 OpenAI reviewer notes: none
 

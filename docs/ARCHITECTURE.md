@@ -101,7 +101,8 @@ Intervention state is separate from event delivery. One record is keyed by the
 event occurrence, intervention version, target hash, and target-generation hash.
 It moves through target resolution, queued send, claimed send, transport result,
 task response, and independent postcondition verification. One active record is
-allowed per target. Equal or lower severity events coalesce. Unknown transport
+allowed per target generation. Compatible equal or lower severity events
+coalesce; incompatible contracts remain pending. Unknown transport
 does not retry. A definite failure can retry once. A task report cannot resolve
 the detector condition. Native planning compares the requested target hash with
 the event class's persisted subject or owner hash and fails closed on a policy
@@ -223,7 +224,7 @@ started when fingerprinting exceeds its time or byte limit.
 ## Calibration Boundary
 
 Health thresholds and quota scoring are heuristic observations, not predictions
-of failure. v0.8.6 does not change the existing inspector warning thresholds,
+of failure. v0.8.7 does not change the existing inspector warning thresholds,
 critical thresholds, scoring weights, or predictive claims. Heartbeat transition
 rules are a separate engineering subsystem and must retain explicit coverage and
 evidence. See [Calibration Methodology](CALIBRATION-METHODOLOGY.md).

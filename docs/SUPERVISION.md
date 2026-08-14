@@ -152,7 +152,8 @@ supervision, reconcile one host Heartbeat automation attached to the dedicated
 task. Use 60 minutes while monitored work is active and 360 minutes while idle.
 A normal cycle ends silently. A new, materially worse, or eligible resolution
 transition can open one bounded intervention for one exact affected task. The
-Governor plans all events before it sends, coalesces by target, and never
+Governor plans all events before it sends, coalesces compatible work by target
+generation, and never
 broadcasts. This bounds scheduled Governor turns to 24 per
 active day or four per idle day; provider billing and caching remain host
 concerns and Chronos makes no cost claim.

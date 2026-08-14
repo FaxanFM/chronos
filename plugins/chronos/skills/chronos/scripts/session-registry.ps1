@@ -21,7 +21,7 @@ $script:ResultLimit = 64
 $script:CheckBatchLimit = 8
 $script:EndedRetentionHours = 24
 $script:ActiveRetentionDays = 30
-$script:JsonNodeLimit = 4096
+$script:JsonNodeLimit = 8192
 $script:PendingEventLimit = 256
 $script:PendingEventByteLimit = 4096
 $script:SynchronousHookMutexWaitMilliseconds = 250
@@ -313,7 +313,9 @@ function Write-InstallationScopeId {
   $json = ([ordered]@{ schema = 1; id = $Id } | ConvertTo-Json -Compress)
   $temporary = Join-Path $directory ('.supervision-scope-' + [guid]::NewGuid().ToString('N') + '.tmp')
   try {
-    [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
+    $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     try {
       [IO.File]::Move($temporary, $Path)
     } catch [IO.IOException] {
@@ -332,6 +334,7 @@ function Get-OrCreateInstallationScopeId {
   if ($script:StateStoreMode -eq 'temp_private' -and
       -not [string]::IsNullOrWhiteSpace($script:LegacyInstallationScopePath) -and
       (Test-Path -LiteralPath $script:LegacyInstallationScopePath -PathType Leaf)) {
+    if (-not (Test-NoReparseAncestors $script:LegacyInstallationScopePath)) { throw 'supervision_install_scope_path_invalid' }
     $legacyId = Read-InstallationScopeId $script:LegacyInstallationScopePath
     $script:StateStoreMigration = 'legacy_scope_imported'
     return Write-InstallationScopeId $path $legacyId
@@ -431,7 +434,7 @@ function ConvertTo-UtcTimestamp {
 
 function New-State {
   return [ordered]@{
-    schema = 2
+    schema = 3
     revision = 0L
     governor = $null
     sessions = @{}
@@ -445,6 +448,18 @@ function New-State {
   }
 }
 
+function Upgrade-State {
+  param($State)
+  $schema = Get-Value $State 'schema' $null
+  if ((Test-IsInteger $schema) -and [int]$schema -eq 2) {
+    foreach ($record in @($State.sessions.Values)) {
+      if (-not $record.Contains('generationHash')) { $record['generationHash'] = $null }
+    }
+    $State.schema = 3
+  }
+  return $State
+}
+
 function Assert-ExactKeys {
   param($Record, [string[]]$Allowed)
   if (-not ($Record -is [Collections.IDictionary])) { throw 'supervision_state_invalid' }
@@ -456,7 +471,7 @@ function Assert-ExactKeys {
 function Assert-State {
   param($State, [switch]$ValidateProtectedIds)
   Assert-ExactKeys $State @('schema', 'revision', 'governor', 'sessions', 'health')
-  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 2 -or
+  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 3 -or
       -not (Test-IsInteger $State.revision) -or [long]$State.revision -lt 0 -or
       -not ($State.sessions -is [Collections.IDictionary]) -or
       -not ($State.health -is [Collections.IDictionary]) -or
@@ -485,11 +500,12 @@ function Assert-State {
   foreach ($key in $State.sessions.Keys) {
     if ([string]$key -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     $record = $State.sessions[$key]
-    Assert-ExactKeys $record @('idHash', 'protectedId', 'kind', 'parentHash', 'workspaceHash', 'model', 'state', 'source', 'firstSeenUtc', 'lastSeenUtc', 'endedAtUtc', 'lastEventUtc', 'lastEventRank', 'recordRevision')
+    Assert-ExactKeys $record @('idHash', 'protectedId', 'kind', 'parentHash', 'workspaceHash', 'model', 'state', 'source', 'generationHash', 'firstSeenUtc', 'lastSeenUtc', 'endedAtUtc', 'lastEventUtc', 'lastEventRank', 'recordRevision')
     if ([string]$record.idHash -ne [string]$key -or -not (Test-ProtectedIdShape $record.protectedId)) { throw 'supervision_state_invalid' }
     if ($ValidateProtectedIds -and (Get-TextHash (Unprotect-OpaqueId $record.protectedId)) -ne [string]$key) { throw 'supervision_state_invalid' }
     if ([string]$record.kind -notin @('task', 'agent') -or [string]$record.state -notin @('active', 'ended')) { throw 'supervision_state_invalid' }
     if ($null -ne $record.parentHash -and [string]$record.parentHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
+    if ($null -ne $record.generationHash -and [string]$record.generationHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     if ([string]$record.workspaceHash -notmatch '^[a-f0-9]{64}$' -or [string]$record.model -notmatch '^[A-Za-z0-9._:/-]{1,128}$') { throw 'supervision_state_invalid' }
     if ([string]$record.source -notin @('startup', 'resume', 'clear', 'compact', 'subagent', 'fallback')) { throw 'supervision_state_invalid' }
     [void](ConvertTo-UtcTimestamp $record.firstSeenUtc)
@@ -512,7 +528,7 @@ function Read-State {
     $utf8 = New-Object Text.UTF8Encoding($false, $true)
     $text = $utf8.GetString($bytes)
     Assert-StrictJson $text 'supervision_state_invalid'
-    $state = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+    $state = Upgrade-State (ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop))
     Assert-State $state -ValidateProtectedIds:$ValidateProtectedIds
     return $state
   } catch { throw 'supervision_state_invalid' }
@@ -560,6 +576,10 @@ function Import-LegacyStateIfPresent {
       (Test-Path -LiteralPath $ResolvedStatePath) -or
       [string]::IsNullOrWhiteSpace($script:LegacyDefaultStatePath) -or
       -not (Test-Path -LiteralPath $script:LegacyDefaultStatePath -PathType Leaf)) { return }
+  if (-not (Test-NoReparseAncestors $script:LegacyDefaultStatePath)) {
+    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
+    return
+  }
   try {
     $legacy = Read-State $script:LegacyDefaultStatePath -ValidateProtectedIds
     Write-State $legacy $ResolvedStatePath
@@ -623,18 +643,42 @@ function Write-PendingHookEvent {
   if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
   $directoryItem = Get-Item -LiteralPath $directory -Force
   if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
-  if (@(Get-ChildItem -LiteralPath $directory -File -Force -ErrorAction Stop).Count -ge $script:PendingEventLimit) { throw 'supervision_pending_event_capacity' }
-  $token = [guid]::NewGuid().ToString('N')
-  $temporary = Join-Path $directory ('.pending-' + $token + '.tmp')
-  $final = Join-Path $directory ('pending-' + $token + '.json')
+  $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($PreparedEvent | ConvertTo-Json -Compress -Depth 4))
+  if ($bytes.Length -gt $script:PendingEventByteLimit) { throw 'supervision_pending_event_capacity' }
+  foreach ($staleReservation in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-slot-*.lock' | Select-Object -First $script:PendingEventLimit)) {
+    if ($staleReservation.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddMinutes(-5)) {
+      Remove-Item -LiteralPath $staleReservation.FullName -Force -ErrorAction SilentlyContinue
+    }
+  }
+  $start = [int]([BitConverter]::ToUInt32(([guid]::NewGuid()).ToByteArray(), 0) % [uint32]$script:PendingEventLimit)
+  $reservation = $null
+  $final = $null
+  for ($offset = 0; $offset -lt $script:PendingEventLimit; $offset++) {
+    $slot = ($start + $offset) % $script:PendingEventLimit
+    $candidateFinal = Join-Path $directory ('pending-slot-{0:d3}.json' -f $slot)
+    $candidateReservation = Join-Path $directory ('pending-slot-{0:d3}.lock' -f $slot)
+    if (Test-Path -LiteralPath $candidateFinal -PathType Leaf) { continue }
+    try {
+      $reserveStream = New-Object IO.FileStream($candidateReservation, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      $reserveStream.Dispose()
+      if (Test-Path -LiteralPath $candidateFinal -PathType Leaf) {
+        Remove-Item -LiteralPath $candidateReservation -Force -ErrorAction SilentlyContinue
+        continue
+      }
+      $reservation = $candidateReservation
+      $final = $candidateFinal
+      break
+    } catch [IO.IOException] { continue }
+  }
+  if ([string]::IsNullOrWhiteSpace($final)) { throw 'supervision_pending_event_capacity' }
+  $temporary = Join-Path $directory ('.pending-' + [guid]::NewGuid().ToString('N') + '.tmp')
   try {
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($PreparedEvent | ConvertTo-Json -Compress -Depth 4))
-    if ($bytes.Length -gt $script:PendingEventByteLimit) { throw 'supervision_pending_event_capacity' }
     $stream = New-Object IO.FileStream($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush() } finally { $stream.Dispose() }
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     [IO.File]::Move($temporary, $final)
   } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    if ($reservation) { Remove-Item -LiteralPath $reservation -Force -ErrorAction SilentlyContinue }
   }
 }
 
@@ -749,23 +793,26 @@ function Invoke-HostInventoryReconciliation {
   $present = @{}
   $added = 0
   $reactivated = 0
+  $generationChanged = 0
   $ended = 0
   foreach ($task in @($Inventory.Tasks)) {
     $hash = Get-TextHash ([string]$task.Id)
+    $generationHash = if ([string]::IsNullOrWhiteSpace([string]$task.Generation)) { $null } else { Get-TextHash ([string]$task.Generation) }
     $present[$hash] = $true
     $existing = if ($State.sessions.Contains($hash)) { $State.sessions[$hash] } else { $null }
     if ([bool]$task.Active) {
       if ($null -eq $existing) {
-        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null (Get-TextHash 'workspace-unavailable') 'unavailable' 'active' 'fallback' $Now $Inventory.CapturedAt 3 -AllowReactivation) { $added++ }
+        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null (Get-TextHash 'workspace-unavailable') 'unavailable' 'active' 'fallback' $Now $Inventory.CapturedAt 3 -GenerationHash $generationHash -AllowReactivation) { $added++ }
       } elseif ([string]$existing.state -eq 'ended') {
-        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null ([string]$existing.workspaceHash) ([string]$existing.model) 'active' ([string]$existing.source) $Now $Inventory.CapturedAt 3 -AllowReactivation) { $reactivated++ }
+        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null ([string]$existing.workspaceHash) ([string]$existing.model) 'active' ([string]$existing.source) $Now $Inventory.CapturedAt 3 -GenerationHash $generationHash -AllowReactivation) { $reactivated++ }
       } else {
-        $existing.lastSeenUtc = $Now.ToString('o')
-        $existing.lastEventUtc = $Inventory.CapturedAt.ToString('o')
-        $existing.lastEventRank = 3
+        $priorGeneration = [string](Get-Value $existing 'generationHash' '')
+        if (Set-SessionRecord $State ([string]$task.Id) 'task' $null ([string]$existing.workspaceHash) ([string]$existing.model) 'active' ([string]$existing.source) $Now $Inventory.CapturedAt 3 -GenerationHash $generationHash -AllowReactivation) {
+          if ($generationHash -and $priorGeneration -and $generationHash -ne $priorGeneration) { $generationChanged++ }
+        }
       }
     } elseif ($null -ne $existing -and [string]$existing.state -eq 'active' -and $hash -ne $currentHash) {
-      Set-RecordEndedByHash $State $hash $Now $Inventory.CapturedAt
+      [void](Set-RecordEndedByHash $State $hash $Now $Inventory.CapturedAt $generationHash)
       if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
     }
   }
@@ -773,11 +820,11 @@ function Invoke-HostInventoryReconciliation {
     foreach ($hash in @($State.sessions.Keys)) {
       $record = $State.sessions[$hash]
       if ([string]$record.kind -ne 'task' -or [string]$record.state -ne 'active' -or $hash -eq $currentHash -or $present.ContainsKey($hash)) { continue }
-      Set-RecordEndedByHash $State ([string]$hash) $Now $Inventory.CapturedAt
+      [void](Set-RecordEndedByHash $State ([string]$hash) $Now $Inventory.CapturedAt)
       if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
     }
   }
-  return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; Ended = $ended; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
+  return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; GenerationChanged = $generationChanged; Ended = $ended; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
 }
 
 function New-RegistryMutex {
@@ -791,15 +838,10 @@ function New-RegistryMutex {
     $rule = New-Object Security.AccessControl.MutexAccessRule($sid, [Security.AccessControl.MutexRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
     $security.AddAccessRule($rule)
   } catch { throw 'supervision_mutex_unavailable' }
-  foreach ($scope in @('Global', 'Local')) {
-    try {
-      $created = $false
-      return New-Object Threading.Mutex($false, ($scope + '\' + $suffix), [ref]$created, $security)
-    } catch {
-      if ($scope -eq 'Local') { throw 'supervision_mutex_unavailable' }
-    }
-  }
-  throw 'supervision_mutex_unavailable'
+  try {
+    $created = $false
+    return New-Object Threading.Mutex($false, ('Global\' + $suffix), [ref]$created, $security)
+  } catch { throw 'supervision_mutex_unavailable' }
 }
 
 function Remove-ExpiredRecords {
@@ -818,14 +860,18 @@ function Remove-ExpiredRecords {
 }
 
 function Set-RecordEndedByHash {
-  param($State, [string]$Hash, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt)
-  if (-not $State.sessions.Contains($Hash)) { return }
+  param($State, [string]$Hash, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$GenerationHash)
+  if (-not $State.sessions.Contains($Hash)) { return $false }
   $record = $State.sessions[$Hash]
-  if ($record.state -eq 'ended') { return }
-  $lastEvent = ConvertTo-UtcTimestamp $record.lastEventUtc
-  if ($EventObservedAt -lt $lastEvent) {
+  if ($record.state -eq 'ended') { return $true }
+  if ($GenerationHash -and $record.generationHash -and [string]$record.generationHash -ne $GenerationHash) {
     $State.health.ignoredStaleEvents = [long]$State.health.ignoredStaleEvents + 1
-    return
+    return $false
+  }
+  $lastEvent = ConvertTo-UtcTimestamp $record.lastEventUtc
+  if ($EventObservedAt -lt $lastEvent -or ($EventObservedAt -eq $lastEvent -and 2 -le [int]$record.lastEventRank)) {
+    $State.health.ignoredStaleEvents = [long]$State.health.ignoredStaleEvents + 1
+    return $false
   }
   $State.revision = [long]$State.revision + 1
   $record.state = 'ended'
@@ -834,6 +880,7 @@ function Set-RecordEndedByHash {
   $record.lastEventUtc = $EventObservedAt.ToString('o')
   $record.lastEventRank = 2
   $record.recordRevision = [long]$State.revision
+  return $true
 }
 
 function Set-SessionRecord {
@@ -850,6 +897,7 @@ function Set-SessionRecord {
     [DateTimeOffset]$EventObservedAt,
     [ValidateRange(1, 3)][int]$EventRank,
     [string]$PreparedProtectedId,
+    [string]$GenerationHash,
     [switch]$AllowReactivation
   )
   $hash = Get-TextHash $Id
@@ -887,6 +935,7 @@ function Set-SessionRecord {
     model = $Model
     state = $LifecycleState
     source = $Source
+    generationHash = if (-not [string]::IsNullOrWhiteSpace($GenerationHash)) { $GenerationHash } elseif ($existing) { $existing.generationHash } else { $null }
     firstSeenUtc = $firstSeen
     lastSeenUtc = $Now.ToString('o')
     endedAtUtc = if ($LifecycleState -eq 'ended') { $Now.ToString('o') } else { $null }
@@ -1186,7 +1235,11 @@ try {
     $sameGovernor = $null -ne $state.governor -and [string]$state.governor.idHash -eq $currentHash
     if ($null -ne $state.governor -and [string]$state.governor.idHash -ne $currentHash) {
       if (-not $Force) { throw 'supervision_governor_conflict' }
-      Set-RecordEndedByHash $state ([string]$state.governor.idHash) $now $now
+      $priorGovernorHash = [string]$state.governor.idHash
+      $endedPriorGovernor = Set-RecordEndedByHash $state $priorGovernorHash $now $now
+      if (-not $endedPriorGovernor -or [string]$state.sessions[$priorGovernorHash].state -ne 'ended') {
+        throw 'supervision_event_order_conflict'
+      }
     }
     $existing = if ($state.sessions.Contains($currentHash)) { $state.sessions[$currentHash] } else { $null }
     $workspaceHash = if ($null -ne $existing) { [string]$existing.workspaceHash } else { Get-WorkspaceHash (Get-Location).Path }
@@ -1234,6 +1287,7 @@ try {
     $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
     $payload['hostTasksAdded'] = [int]$reconciled.Added
     $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated
+    $payload['hostTaskGenerationsChanged'] = [int]$reconciled.GenerationChanged
     $payload['hostTasksEnded'] = [int]$reconciled.Ended
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     Write-State $state $resolved

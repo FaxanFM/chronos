@@ -85,7 +85,7 @@ Use `-HeartbeatInspectorOutputPath` only with captured compact `CHRONOS` and
 for the strict normalized input contract and coverage limits.
 
 Only the dedicated Governor uses `-HeartbeatInterventionAction`. It must plan
-all events before sending, keep one active intervention per target, recheck the
+all events before sending, keep one active intervention per target generation, recheck the
 target generation before claiming a send, and use fixed returned instructions.
 Transport acceptance is not task acknowledgement. A task response is not proof
 of recovery; a later observed Heartbeat cycle or allowed independent host check

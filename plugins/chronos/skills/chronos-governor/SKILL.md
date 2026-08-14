@@ -146,39 +146,43 @@ script sends a message itself.
 
 For one Governor cycle:
 
-1. Collect all due Heartbeat events before sending any task message. Process a
+1. Resume persisted work first. Call `-HeartbeatInterventionAction list` with
+   this Governor ID. Follow only each returned `permittedNextAction`. Reclaim a
+   `send_claimed` record only after Chronos reports its claim expired. The list
+   returns opaque IDs and hash prefixes, never raw task IDs.
+2. Collect all due Heartbeat events before sending any task message. Process a
    returned `GovernorLocalAction` first. Update only this Governor's recurrence,
    re-list it, and acknowledge the event only after exactly one active matching
    recurrence has the returned cadence. If the update cannot be verified, leave
    the event pending for its bounded retry and do not ask the user to relay it.
-2. Resolve each event against current host task inventory. Follow the event's
+3. Resolve each event against current host task inventory. Follow the event's
    `TargetPolicy`. Require exactly one live, authorized target and its current
    host generation. Never target the Governor, a self-origin run, an unrelated
    owner fallback, or a task whose generation changed.
-3. Call `-HeartbeatInterventionAction plan` for every event. Plan all events
+4. Call `-HeartbeatInterventionAction plan` for every event. Plan all events
    before claiming one. Chronos retains at most one active intervention per
    target, coalesces equal or lower severity events, and replaces an unsent
    record when a higher severity event arrives. Native planning also binds the
    requested target hash to the fixed subject or owner policy and returns
    `target_policy_mismatch` on redirection.
-4. Immediately recheck the target and generation. Call
+5. Immediately recheck the target and generation. Call
    `-HeartbeatInterventionAction claim` only for the final queued record. The
    returned claim token authorizes one bounded host send attempt.
-5. Send one fixed-template message to the exact target with
+6. Send one fixed-template message to the exact target with
    `send_message_to_thread`. Include only the opaque intervention ID, version,
    categorical instruction, fixed safety limits, postcondition name, and fixed
    reply format returned by Chronos. Do not interpolate detector prose, task
    titles, paths, test names, tool output, or other untrusted content.
-6. Record `accepted` only when the host tool definitely accepts the send.
+7. Record `accepted` only when the host tool definitely accepts the send.
    Record `definite_failure` only when it definitely rejects or never attempts
    the send. Record `unknown` after a timeout or indeterminate result. Never
    retry `unknown` unless host evidence confirms that the first send did not
    occur. A definite failure permits one retry; the total is two attempts.
-7. A reply advances state only when the exact target and generation return the
+8. A reply advances state only when the exact target and generation return the
    matching intervention ID and version. Reduce the reply to one allowed
    category before calling `-HeartbeatInterventionAction response`. A task
    report is not proof that recovery occurred.
-8. Resolve only after a later observed Heartbeat cycle or an allowed independent
+9. Resolve only after a later observed Heartbeat cycle or an allowed independent
    host check confirms the named postcondition. Use
    `-HeartbeatInterventionAction verify` for host inventory, narrow test, or Git
    evidence. A stale reply cannot resolve a newer version.

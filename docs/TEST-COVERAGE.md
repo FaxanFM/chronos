@@ -66,16 +66,19 @@ counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
-adaptation, persisted-state privacy, schema 4 and 5 to 6 migration, denied
+adaptation, persisted-state privacy, legacy-to-schema-7 migration, denied
 prior-state recovery when the Windows host enforces the simulated ACL even when
 an older LocalAppData fallback is readable, prior-scope junction rejection,
 read-only import when the ACL denial is not enforced, explicit no-prior-write
-status, accessible empty-scope negative control, one-active-record
-per target, eight-event coalescing, higher-severity replacement, fixed action
+status, accessible empty-scope negative control, explicit busy-cycle retry, one
+active record per target generation, compatible eight-event coalescing,
+incompatible-contract deferral, higher-severity replacement, fixed action
 contracts, self-target rejection, same-subject and same-window Governor-usage
 corroboration, transport acceptance versus task acknowledgement, ambiguous-send
 non-retry, two-attempt definite-failure retry, exact reporter and generation
-binding, task-report non-resolution, independent postcondition verification,
+binding, task-report non-resolution, wrong-state and public-engine verification
+rejection, independent postcondition verification, bounded restart listing,
+expired-claim reclaim, incompatible-environment non-resolution,
 Governor status-counter exposure, success, duplicate, and failed-cycle
 accounting, Governor supervision-counter progress, missing-counter containment,
 Governor-local throttle and restore actions, isolated 6.3 percent runtime
@@ -107,9 +110,11 @@ reconciliation, missed-hook task recovery, absent-task closure, stale inventory
 rejection, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
-containment, concurrent cross-process writes, delayed starts after terminal
-events, host-confirmed reactivation, two-phase release, live mutex contention,
-bounded fallback creation, protected fallback contents, reconciliation and
+containment, concurrent cross-process writes, monotonic host timestamp/rank
+ordering, task generation changes, delayed starts after terminal events,
+host-confirmed reactivation, forced-takeover postconditions, two-phase release,
+live mutex contention, atomic bounded fallback slots, stale reservation
+recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 full 256-record capacity behavior, silent hook output,
 headless Windows commands, lifecycle-only event coverage, and absence of

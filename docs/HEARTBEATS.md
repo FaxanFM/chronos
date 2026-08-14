@@ -160,7 +160,7 @@ secret-shaped values, and absolute paths are not accepted collector fields.
 
 Required per record: `id`, `active`.
 
-Supported fields: `owner`, `owningSolThread`, `progressHash`, `lastToolHash`,
+Supported fields: `generation`, `owner`, `owningSolThread`, `progressHash`, `lastToolHash`,
 `lastCommandHash`, `lastFileChangeUtc`, `lastGitHash`, `lastTestHash`,
 `repeatedEquivalentActions`, `minutesSinceMeaningfulChange`,
 `tokensSinceMeaningfulChange`, `totalTokens`, `longRunningOperation`,
@@ -225,14 +225,15 @@ evidence. A child count by itself is not a session-explosion diagnosis.
 
 Required per record: `name`, `status`.
 
-Supported fields: `owner`, `owningSolThread`, `commit`, `repairAttempts`,
+Supported fields: `generation`, `owner`, `owningSolThread`, `commit`, `repairAttempts`,
 `failureCount`, `required`, `ran`, `environmentStatuses`, and `buildId`.
 
 Chronos persists whether a regression became active. A known failing baseline
 does not become a new regression. A persisted pass-to-fail transition does.
 Unchanged failures are deduplicated. Additional failed repair attempts can
 increase severity. Environment disagreement and missing required validation
-use separate condition keys.
+use separate condition keys. Regression and recovery require the same task
+generation, environment identity, and suite identity.
 
 ### Machine and installation drift
 
@@ -251,7 +252,7 @@ disabled when version differences are intentional.
 
 Required per record: `id`, `status`.
 
-Supported fields: `owner`, `owningSolThread`, `dependsOn`,
+Supported fields: `generation`, `owner`, `owningSolThread`, `dependsOn`,
 `dependencyStatus`, `ageHours`, `requiredCommit`, `requiredPush`,
 `requiredValidation`, `validationStatus`, `acknowledgedBug`, `assigned`, and
 `updatedAt`.
@@ -259,7 +260,8 @@ Supported fields: `owner`, `owningSolThread`, `dependsOn`,
 The actionable-task detector requires a persisted dependency transition from
 incomplete to complete. A first snapshot that already says complete does not
 wake an owner. Unassigned old work and incomplete release handoffs use separate
-conditions.
+conditions. When the host provides `generation`, a reused task ID starts a new
+condition identity and cannot resolve or coalesce the prior generation.
 
 ### Git and build state
 
@@ -375,20 +377,24 @@ Governor-local for the bounded retry and never becomes a routine user relay.
 
 For task-directed events, the Governor must plan all events in a cycle before
 it sends a task message.
-Chronos permits one active intervention per target. Equal or lower severity
-events coalesce. A higher severity event replaces an unsent version. If an
+Chronos permits one active intervention per target generation. Compatible equal
+or lower severity events coalesce. An incompatible remediation contract remains
+pending until the active contract is terminal. A higher severity event replaces
+an unsent compatible version. If an
 earlier version was already sent, only one escalation version is allowed.
 
 The minimum flow is:
 
-1. `plan` or `fail-closed`.
-2. Recheck the exact live target and host generation.
-3. `claim` one send attempt.
-4. Call `send_message_to_thread` with the fixed returned instruction.
-5. Record `accepted`, `definite_failure`, or `unknown`.
-6. Accept a bounded categorical reply only from the exact target and version.
-7. Wait for an observed Heartbeat result or an allowed independent host check.
-8. Mark `verified_resolved`, `active_violation`, or `remediation_failed`.
+1. `list` persisted interventions for this Governor and follow only the returned
+   bounded next action. Use `reclaim` only for an expired claimed send.
+2. `plan` or `fail-closed` all new events.
+3. Recheck the exact live target and host generation.
+4. `claim` one send attempt.
+5. Call `send_message_to_thread` with the fixed returned instruction.
+6. Record `accepted`, `definite_failure`, or `unknown`.
+7. Accept a bounded categorical reply only from the exact target and version.
+8. Wait for an observed Heartbeat result or an allowed independent host check.
+9. Mark `verified_resolved`, `active_violation`, or `remediation_failed`.
 
 `plan` hashes the requested target and enforces the fixed event-class policy
 against the persisted subject and owner hashes. A subject-only event cannot be
@@ -400,6 +406,19 @@ Transport acceptance is not task acknowledgement. A task report is not proof
 of recovery. A send with an unknown outcome does not retry. Only a definite
 failure permits one retry. State keys combine the event occurrence,
 intervention version, target hash, and target-generation hash.
+
+List recoverable work after a Governor restart:
+
+```powershell
+chronos.cmd -Action heartbeat -HeartbeatInterventionAction list `
+  -HeartbeatGovernorId <governor-task-id>
+```
+
+The list is bounded to 16 active records and returns opaque intervention IDs,
+versions, states, target and generation hash prefixes, fixed templates,
+postconditions, attempt counts, timestamps, and `permittedNextAction`. For an
+expired `send_claimed` record, call `reclaim` with its opaque ID, version, and
+the same Governor ID. Reclaim never retries an ambiguous `delivery_unknown`.
 
 Plan an event:
 

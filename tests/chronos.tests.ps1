@@ -741,7 +741,7 @@ try {
     "Current function-call escalation requests must expose bounded resolution and latency aggregates."
   Assert-Match $machine2Output " reviewerToolCalls=3 reviewerEscalationsObserved=2 reviewerEscalationUniquePrefixes=1 reviewerEscalationRepeatedPrefixes=1 reviewerEscalationLargestPrefix=2 " `
     "Reviewer-originated escalation traffic was not classified independently."
-  Assert-Match $machine2Output " ruleCount=12 ruleMonolithic=2 ruleReusableNarrow=6 ruleBroadInterpreter=4 ruleCredentialShaped=1 " `
+  Assert-Match $machine2Output " ruleCount=12 ruleMonolithic=2 ruleReusableNarrow=4 ruleBroadInterpreter=8 ruleCredentialShaped=1 " `
     "Structured rule parsing did not classify single, raw, triple, reordered, nested, escaped, and comment forms correctly."
   Assert-Match $machine2Output " ruleStatus=CRITICAL ruleValuesReturned=false " `
     "Credential-shaped rule output must be critical and must never return values."
@@ -778,6 +778,11 @@ try {
       "prefix_rule(pattern=['bash','--noprofile','-c'], decision='allow')",
       "prefix_rule(pattern=['python','-I','-c'], decision='allow')",
       "prefix_rule(pattern=['node','--no-warnings','-e'], decision='allow')",
+      "prefix_rule(pattern=['powershell','-ExecutionPolicy','Bypass'], decision='allow')",
+      "prefix_rule(pattern=['powershell','-WorkingDirectory',r'C:\safe'], decision='allow')",
+      "prefix_rule(pattern=['python','-X','utf8'], decision='allow')",
+      "prefix_rule(pattern=['node','--require','module'], decision='allow')",
+      "prefix_rule(pattern=['bash','--rcfile','file'], decision='allow')",
       "prefix_rule(pattern=['powershell','-File'], decision='allow')",
       "prefix_rule(pattern=['powershell',['-NoProfile','safe.ps1']], decision='allow')",
       "prefix_rule(pattern=['powershell',['-File','safe.ps1']], decision='allow')",
@@ -791,7 +796,7 @@ try {
   $ruleStructureOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action inspect -CodexHome $ruleStructureHome -SampleSeconds 1
   if ($LASTEXITCODE -ne 0) { throw "Chronos structured rule regression failed." }
-  Assert-Match $ruleStructureOutput " ruleCount=17 ruleMonolithic=0 ruleReusableNarrow=4 ruleBroadInterpreter=13 ruleCredentialShaped=0 " `
+  Assert-Match $ruleStructureOutput " ruleCount=22 ruleMonolithic=0 ruleReusableNarrow=4 ruleBroadInterpreter=18 ruleCredentialShaped=0 " `
     "Nested alternatives, raw Windows paths, displaced arbitrary-code flags, branch-specific missing operands, constrained files, and non-allow decisions were not classified safely."
   Assert-Match $ruleStructureOutput " ruleFilesEligible=1 ruleFilesSelected=1 ruleCoverageCapped=false ruleParseFailures=0 " `
     "Valid structured rule alternatives must parse without degraded coverage."

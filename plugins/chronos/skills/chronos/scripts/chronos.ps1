@@ -13,7 +13,7 @@ param(
   [string]$HeartbeatAcknowledgeEventId,
   [string]$HeartbeatEventId,
   [string]$HeartbeatCorroboratingEventId,
-  [ValidateSet("", "plan", "fail-closed", "claim", "transport", "response", "verify")]
+  [ValidateSet("", "list", "plan", "fail-closed", "claim", "reclaim", "transport", "response", "verify")]
   [string]$HeartbeatInterventionAction = "",
   [string]$HeartbeatInterventionId,
   [ValidateRange(0, 2147483647)]
@@ -26,7 +26,7 @@ param(
   [string]$HeartbeatTransportResult = "",
   [ValidateSet("", "acknowledged", "outcome_reported", "declined", "user_authority_required", "remediation_failed")]
   [string]$HeartbeatTaskResponse = "",
-  [ValidateSet("", "heartbeat_engine", "host_inventory", "host_test", "host_git")]
+  [ValidateSet("", "host_inventory", "host_test", "host_git")]
   [string]$HeartbeatVerificationSource = "",
   [ValidateSet("", "resolved", "active", "failed")]
   [string]$HeartbeatVerificationResult = "",
@@ -650,6 +650,97 @@ function Get-RecordHash {
   }
 }
 
+function Move-RolloutJsonWhitespace {
+  param([string]$Text, [ref]$Index)
+  while ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -in @(' ', "`t", "`r", "`n")) { $Index.Value++ }
+}
+
+function Read-RolloutJsonString {
+  param([string]$Text, [ref]$Index)
+  if ($Index.Value -ge $Text.Length -or $Text[$Index.Value] -ne '"') { throw 'invalid' }
+  $start = $Index.Value
+  $Index.Value++
+  while ($Index.Value -lt $Text.Length) {
+    $character = $Text[$Index.Value]
+    if ([int][char]$character -lt 0x20) { throw 'invalid' }
+    if ($character -eq '"') {
+      $Index.Value++
+      $decoded = $Text.Substring($start, $Index.Value - $start) | ConvertFrom-Json -ErrorAction Stop
+      if (-not ($decoded -is [string])) { throw 'invalid' }
+      return $decoded.Normalize([Text.NormalizationForm]::FormC)
+    }
+    if ($character -eq '\') {
+      $Index.Value++
+      if ($Index.Value -ge $Text.Length) { throw 'invalid' }
+      if ($Text[$Index.Value] -eq 'u') {
+        if ($Index.Value + 4 -ge $Text.Length -or $Text.Substring($Index.Value + 1, 4) -notmatch '^[0-9A-Fa-f]{4}$') { throw 'invalid' }
+        $Index.Value += 5
+        continue
+      }
+      if ($Text[$Index.Value] -notin @('"', '\', '/', 'b', 'f', 'n', 'r', 't')) { throw 'invalid' }
+    }
+    $Index.Value++
+  }
+  throw 'invalid'
+}
+
+function Assert-RolloutJsonValue {
+  param([string]$Text, [ref]$Index, [ref]$Nodes, [int]$Depth)
+  if ($Depth -gt 16) { throw 'invalid' }
+  Move-RolloutJsonWhitespace $Text $Index
+  if ($Index.Value -ge $Text.Length) { throw 'invalid' }
+  $Nodes.Value++
+  if ($Nodes.Value -gt 4096) { throw 'invalid' }
+  $character = $Text[$Index.Value]
+  if ($character -eq '"') { [void](Read-RolloutJsonString $Text $Index); return }
+  if ($character -eq '{') {
+    $Index.Value++
+    Move-RolloutJsonWhitespace $Text $Index
+    $keys = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    if ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -eq '}') { $Index.Value++; return }
+    while ($true) {
+      Move-RolloutJsonWhitespace $Text $Index
+      if (-not $keys.Add((Read-RolloutJsonString $Text $Index))) { throw 'invalid' }
+      Move-RolloutJsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length -or $Text[$Index.Value] -ne ':') { throw 'invalid' }
+      $Index.Value++
+      Assert-RolloutJsonValue $Text $Index $Nodes ($Depth + 1)
+      Move-RolloutJsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length) { throw 'invalid' }
+      if ($Text[$Index.Value] -eq '}') { $Index.Value++; return }
+      if ($Text[$Index.Value] -ne ',') { throw 'invalid' }
+      $Index.Value++
+    }
+  }
+  if ($character -eq '[') {
+    $Index.Value++
+    Move-RolloutJsonWhitespace $Text $Index
+    if ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -eq ']') { $Index.Value++; return }
+    while ($true) {
+      Assert-RolloutJsonValue $Text $Index $Nodes ($Depth + 1)
+      Move-RolloutJsonWhitespace $Text $Index
+      if ($Index.Value -ge $Text.Length) { throw 'invalid' }
+      if ($Text[$Index.Value] -eq ']') { $Index.Value++; return }
+      if ($Text[$Index.Value] -ne ',') { throw 'invalid' }
+      $Index.Value++
+    }
+  }
+  $start = $Index.Value
+  while ($Index.Value -lt $Text.Length -and $Text[$Index.Value] -notin @(',', ']', '}', ' ', "`t", "`r", "`n")) { $Index.Value++ }
+  if ($Text.Substring($start, $Index.Value - $start) -notmatch '^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$') { throw 'invalid' }
+}
+
+function Test-RolloutJsonUnambiguous {
+  param([string]$Text)
+  try {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    $index = 0; $nodes = 0
+    Assert-RolloutJsonValue $Text ([ref]$index) ([ref]$nodes) 0
+    Move-RolloutJsonWhitespace $Text ([ref]$index)
+    return $index -eq $Text.Length
+  } catch { return $false }
+}
+
 function Get-TextFingerprint {
   param([string]$Text)
   if ([string]::IsNullOrEmpty($Text)) { return $null }
@@ -1031,6 +1122,45 @@ function Get-RuleExecutableName {
   ([System.IO.Path]::GetFileNameWithoutExtension($normalized)).ToLowerInvariant()
 }
 
+function Test-RuleElementIsFixedOperand {
+  param($Element)
+  $values = @($Element.Alternatives | ForEach-Object { ([string]$_).Trim() })
+  return $values.Count -gt 0 -and
+    @($values | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -match '^[-/]' }).Count -eq 0
+}
+
+function Test-InterpreterRuleHasFixedOperand {
+  param([string]$Executable, [object[]]$PatternElements)
+  if ($PatternElements.Count -lt 2) { return $false }
+  $name = $Executable.ToLowerInvariant()
+  if ($name -in @('powershell', 'pwsh')) {
+    $switches = @('-nologo', '-noprofile', '-noninteractive', '-noexit', '-sta', '-mta')
+    $valueOptions = @('-executionpolicy', '-inputformat', '-outputformat', '-windowstyle', '-workingdirectory', '-version', '-configurationname', '-custompipename', '-settingsfile')
+    for ($position = 1; $position -lt $PatternElements.Count; $position++) {
+      $values = @($PatternElements[$position].Alternatives | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
+      if ($values.Count -eq 0) { return $false }
+      if (@($values | Where-Object { $_ -notin $switches }).Count -eq 0) { continue }
+      if (@($values | Where-Object { $_ -notin $valueOptions }).Count -eq 0) {
+        $position++
+        if ($position -ge $PatternElements.Count) { return $false }
+        continue
+      }
+      if (@($values | Where-Object { $_ -ne '-file' }).Count -eq 0) {
+        return $position + 1 -lt $PatternElements.Count -and
+          (Test-RuleElementIsFixedOperand $PatternElements[$position + 1])
+      }
+      return $false
+    }
+    return $false
+  }
+  if ($name -in @('python', 'python3', 'node', 'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'cscript', 'wscript', 'curl')) {
+    # Only a direct fixed operand is considered constrained. Interpreter
+    # options may consume following values, so unknown option layouts fail closed.
+    return Test-RuleElementIsFixedOperand $PatternElements[1]
+  }
+  return $false
+}
+
 function ConvertFrom-PrefixRuleBlock {
   param([string]$Block)
   $open = $Block.IndexOf('(')
@@ -1200,17 +1330,10 @@ function Get-RuleHealth {
           break
         }
       }
-      $fixedOperandGuaranteed = $false
-      foreach ($subsequentElement in $subsequentElements) {
-        $elementValues = @($subsequentElement.Alternatives | ForEach-Object {
-            ([string]$_).Trim().ToLowerInvariant()
-          })
-        if ($elementValues.Count -gt 0 -and
-            @($elementValues | Where-Object { -not $_ -or $_ -match '^[-/]' }).Count -eq 0) {
-          $fixedOperandGuaranteed = $true
-          break
-        }
-      }
+      $unsafeInterpreterBranch = @($firstExecutables | Where-Object {
+          $_ -in $interpreterNames -and -not (Test-InterpreterRuleHasFixedOperand $_ $patternElements)
+        }).Count -gt 0
+      $fixedOperandGuaranteed = $hasInterpreter -and -not $unsafeInterpreterBranch
       $optionOnlyPrefix = $patternElements.Count -gt 1 -and -not $fixedOperandGuaranteed
       $missingFileOperand = $false
       if (@($firstExecutables | Where-Object { $_ -in @('powershell', 'pwsh') }).Count -gt 0) {
@@ -1910,7 +2033,7 @@ function Get-QuotaHealth {
       $headText = Get-BoundedFileHead -Path $file.FullName
       foreach ($headLine in @($headText -split "`r?`n" | Select-Object -First 256)) {
         if ([string]::IsNullOrWhiteSpace($headLine)) { continue }
-        try { $headRecord = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        try { if (-not (Test-RolloutJsonUnambiguous $headLine)) { throw 'ambiguous' }; $headRecord = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if ($headRecord.type -ne "session_meta") { continue }
         $headMetadataFound = $true
         $headTimestamp = Get-RecordTimestamp $headRecord
@@ -1952,7 +2075,7 @@ function Get-QuotaHealth {
     if (-not $tail.EndsWith("`n", [System.StringComparison]::Ordinal)) {
       $lastLineComplete = $false
       if ($lines.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($lines[-1])) {
-        try { $null = $lines[-1] | ConvertFrom-Json -ErrorAction Stop; $lastLineComplete = $true } catch { $lastLineComplete = $false }
+        try { if (-not (Test-RolloutJsonUnambiguous $lines[-1])) { throw 'ambiguous' }; $null = $lines[-1] | ConvertFrom-Json -ErrorAction Stop; $lastLineComplete = $true } catch { $lastLineComplete = $false }
       }
       if (-not $lastLineComplete) {
         $health.TailIncompleteFiles++
@@ -1966,6 +2089,7 @@ function Get-QuotaHealth {
       if ([string]::IsNullOrWhiteSpace($line)) { continue }
 
       try {
+        if (-not (Test-RolloutJsonUnambiguous $line)) { throw 'ambiguous' }
         $record = $line | ConvertFrom-Json -ErrorAction Stop
       } catch {
         $health.MalformedRecords++

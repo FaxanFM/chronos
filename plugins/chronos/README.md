@@ -38,7 +38,7 @@ commands below only as a fallback.
 - Evaluates eight opt-in Heartbeat families and emits an event only for an
   actionable transition or material worsening. Stable event IDs and a bounded
   outbox protect host delivery across restarts. One active intervention per
-  target, event coalescing, and a two-attempt limit prevent wake storms.
+  target generation, compatible event coalescing, and a two-attempt limit prevent wake storms.
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
@@ -158,8 +158,9 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
 - Inspector, Heartbeat, and Governor commands run when requested. After the
   user trusts the packaged hooks, four silent lifecycle hooks also run only at
   task or subagent start and end.
-- Does not collect, transmit, or retain prompts, responses, source, diffs,
-  commands, tool output, credentials, usernames, absolute paths, or personal data.
+- Does not transmit telemetry or retain raw prompts, responses, source, diffs,
+  commands, tool output, credentials, usernames, or absolute paths. It retains
+  only the bounded local pseudonymous coordination metadata described below.
 - Never blocks, pauses, or ends a Codex task.
 - Never terminates Codex or unrelated user processes and never deletes user
   files. Governor can stop only its own bounded Git fingerprint subprocess.
