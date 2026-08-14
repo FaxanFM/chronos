@@ -1059,7 +1059,7 @@ function Assert-State {
   }
   foreach ($conditionKey in $State.conditions.Keys) {
     if ([string]$conditionKey -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' }
-    Assert-StateRecord $State.conditions[$conditionKey] @('family', 'type', 'severity', 'open', 'firstObserved', 'lastObserved', 'lastNotified', 'occurrences', 'episode', 'sourceEpochHash', 'signatureHash', 'subjectHash', 'ownerHash', 'routeClass', 'resolutionNotified', 'resolvedAt')
+    Assert-StateRecord $State.conditions[$conditionKey] @('family', 'type', 'severity', 'open', 'firstObserved', 'lastObserved', 'lastNotified', 'occurrences', 'episode', 'sourceEpochHash', 'signatureHash', 'generationBindingHash', 'subjectHash', 'ownerHash', 'routeClass', 'resolutionNotified', 'resolvedAt')
     if ([string]$State.conditions[$conditionKey].family -notin $script:Families -or [string]$State.conditions[$conditionKey].severity -notin $script:SeverityRank.Keys) { throw 'heartbeat_state_invalid' }
   }
   foreach ($event in @($State.events)) {
@@ -2670,11 +2670,24 @@ function Invoke-Cycle {
       $old = Get-Value $State.conditions $conditionHash
       $oldRank = if ($old -and $script:SeverityRank.ContainsKey([string]$old.severity)) { [int]$script:SeverityRank[[string]$old.severity] } else { 0 }
       $newRank = [int]$script:SeverityRank[[string]$candidate.Severity]
-      $notify = $null -eq $old -or -not [bool]$old.open -or $newRank -gt $oldRank
+      $subjectGenerationHash = [string](Get-Value $candidate 'SubjectGenerationHash' '')
+      $ownerGenerationHash = [string](Get-Value $candidate 'OwnerGenerationHash' '')
+      $generationBindingHash = if ($subjectGenerationHash -or $ownerGenerationHash) {
+        Get-StableHash @{ subject = $subjectGenerationHash; owner = $ownerGenerationHash }
+      } else { $null }
+      $oldGenerationBindingHash = if ($old) { [string](Get-Value $old 'generationBindingHash' '') } else { $null }
+      $generationChanged = $old -and [bool]$old.open -and $oldGenerationBindingHash -ne [string]$generationBindingHash
+      $notify = $null -eq $old -or -not [bool]$old.open -or $newRank -gt $oldRank -or $generationChanged
       $episodeSeverity = if ($old -and [bool]$old.open -and $oldRank -gt $newRank) { [string]$old.severity } else { [string]$candidate.Severity }
       $episode = if ($old) { if ([bool]$old.open) { [int64](Get-Value $old 'episode' 1) } else { [int64](Get-Value $old 'episode' 1) + 1 } } else { 1 }
       if ($notify) {
-        $eventId = Get-StableHash ('heartbeat-event-v1|{0}|{1}|{2}|open' -f $conditionHash, $episode, $candidate.Severity)
+        if ($generationChanged) {
+          # Corrected host identity replaces the stale pending envelope. Only
+          # the Governor sees the new plan candidate; no monitored task is sent
+          # anything until planning validates the new target generation.
+          $State.outbox = @($State.outbox | Where-Object { [string]$_.conditionHash -ne $conditionHash })
+        }
+        $eventId = Get-StableHash ('heartbeat-event-v1|{0}|{1}|{2}|{3}|open' -f $conditionHash, $episode, $candidate.Severity, $generationBindingHash)
         $event = Convert-CandidateToEvent $candidate $eventId
         $routed.Add($event) | Out-Null
         $newEvents.Add($event) | Out-Null
@@ -2684,7 +2697,7 @@ function Invoke-Cycle {
         $State.health.suppressedDuplicates = [int64]$State.health.suppressedDuplicates + 1
       }
       $route = Get-RouteTarget $candidate
-      $State.conditions[$conditionHash] = [ordered]@{
+      $conditionRecord = [ordered]@{
         family = $family
         type = [string]$candidate.Type
         severity = $episodeSeverity
@@ -2695,13 +2708,15 @@ function Invoke-Cycle {
         occurrences = if ($old) { [int64]$old.occurrences + 1 } else { 1 }
         episode = $episode
         sourceEpochHash = if ($old -and [bool]$old.open) { $old.sourceEpochHash } else { $epochHash }
-        signatureHash = Get-StableHash @{ type = $candidate.Type; severity = $episodeSeverity }
+        signatureHash = Get-StableHash @{ type = $candidate.Type; severity = $episodeSeverity; generationBindingHash = $generationBindingHash }
         subjectHash = [string]$candidate.SubjectHash
         ownerHash = Get-StableHash (Get-Value $candidate 'Owner' 'unknown')
         routeClass = Get-RouteClass $route
         resolutionNotified = $false
         resolvedAt = $null
       }
+      if ($generationBindingHash) { $conditionRecord.generationBindingHash = $generationBindingHash }
+      $State.conditions[$conditionHash] = $conditionRecord
       if ($family -eq 'heartbeat') {
         $backoff = $EvidenceNow.AddMinutes(15).ToString('o')
         $collector.backoffUntilUtc = $backoff

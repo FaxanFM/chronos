@@ -17,7 +17,9 @@
   become `delivery_unknown` and never retry without proof of a definite failure.
 - Bind subject and owner generations separately so owner-targeted remediation
   cannot compare a parent task with its child's generation. Missing owner
-  generation fails closed when subject generation is already known.
+  generation fails closed when subject generation is already known. Corrected
+  or rotated owner evidence replaces the stale pending Governor envelope and
+  re-arms the open condition without messaging the monitored task.
 - Restrict public intervention verification to the correct lifecycle states
   and allowlisted host evidence. Internal detector recovery remains a native
   cycle-only transition.

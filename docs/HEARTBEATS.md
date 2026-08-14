@@ -265,7 +265,10 @@ condition identity and cannot resolve or coalesce the prior generation. For an
 owner-targeted intervention, `ownerGeneration` identifies the owner's live host
 generation separately from the child or test record's `generation`. If subject
 generation is known but the distinct owner's generation is not, planning fails
-closed until host discovery supplies it.
+closed until host discovery supplies it. A newly supplied or rotated owner
+generation re-arms the open condition, replaces its stale pending Governor
+envelope, and receives a new event identity. It does not send to the monitored
+task until the replacement plan validates the target and generation.
 
 ### Git and build state
 

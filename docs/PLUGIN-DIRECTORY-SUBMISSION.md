@@ -10,7 +10,7 @@ https://github.com/FaxanFM/chronos/releases/tag/v0.8.6.
 
 v0.8.7 is an audit-remediation candidate with artifact
 `chronos-v0.8.7.zip` and SHA-256
-`0cee6dcd2c164f8d496d8c864ef7a8327a07d598411c6df31d77c4384e4791f6`.
+`ea9503a0b30f398ea784d680b30bc94b4833bc5b8665a32ae7b79cc491034196`.
 It is not submitted or published until local suites, CI, independent review,
 and an external Windows canary pass. Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.8.7.

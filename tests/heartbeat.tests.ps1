@@ -687,11 +687,25 @@ try {
   $ownerGenerationPlan = Get-InterventionPayload (Invoke-Intervention $ownerGeneration 'plan' -EventId $ownerGenerationEvent.EventId -Target 'parent-task' -Generation 'parent-g9' -Governor 'governor-task')
   Assert-Equal $ownerGenerationPlan.decision 'send' 'A truthful owner generation was compared with the child generation.'
 
+  $correctedOwnerGeneration = New-Case 'intervention-corrected-owner-generation'
+  $missingOwnerCycle = Invoke-Heartbeat $correctedOwnerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
+  $missingOwnerEvent = Assert-Event $missingOwnerCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
+  $correctedOwnerCycle = Invoke-Heartbeat $correctedOwnerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; ownerGeneration = 'parent-g9'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
+  $correctedOwnerEvent = Assert-Event $correctedOwnerCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
+  Assert-True ($correctedOwnerEvent.EventId -ne $missingOwnerEvent.EventId) 'Corrected owner generation reused the stale event identity.'
+  Assert-FailedSafely (Invoke-Intervention $correctedOwnerGeneration 'plan' -EventId $missingOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g9' -Governor 'governor-task') 'heartbeat_intervention_event_unavailable' 'Corrected owner evidence left the stale event planable.'
+  $correctedOwnerPlan = Get-InterventionPayload (Invoke-Intervention $correctedOwnerGeneration 'plan' -EventId $correctedOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g9' -Governor 'governor-task')
+  Assert-Equal $correctedOwnerPlan.decision 'send' 'Corrected owner generation did not re-arm the open condition.'
+
   $staleOwnerGeneration = New-Case 'intervention-stale-owner-generation'
   $staleOwnerCycle = Invoke-Heartbeat $staleOwnerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; ownerGeneration = 'parent-g9'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
   $staleOwnerEvent = Assert-Event $staleOwnerCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
-  $staleOwnerPlan = Get-InterventionPayload (Invoke-Intervention $staleOwnerGeneration 'plan' -EventId $staleOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g10' -Governor 'governor-task')
-  Assert-Equal $staleOwnerPlan.reason 'target_generation_mismatch' 'A replacement owner generation accepted stale child evidence.'
+  $rotatedOwnerCycle = Invoke-Heartbeat $staleOwnerGeneration @{ tasks = @(@{ id = 'child-task'; generation = 'child-g1'; owner = 'parent-task'; ownerGeneration = 'parent-g10'; status = 'completed'; requiredValidation = $true; validationStatus = 'failed' }) } -NoAcknowledge
+  $rotatedOwnerEvent = Assert-Event $rotatedOwnerCycle 'TASK_HANDOFF_INCOMPLETE' 'governor'
+  Assert-True ($rotatedOwnerEvent.EventId -ne $staleOwnerEvent.EventId) 'Owner rotation did not replace the stale event identity.'
+  Assert-FailedSafely (Invoke-Intervention $staleOwnerGeneration 'plan' -EventId $staleOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g10' -Governor 'governor-task') 'heartbeat_intervention_event_unavailable' 'Owner rotation left the stale event planable.'
+  $rotatedOwnerPlan = Get-InterventionPayload (Invoke-Intervention $staleOwnerGeneration 'plan' -EventId $rotatedOwnerEvent.EventId -Target 'parent-task' -Generation 'parent-g10' -Governor 'governor-task')
+  Assert-Equal $rotatedOwnerPlan.decision 'send' 'Owner rotation did not re-arm the open condition.'
 
   # Eight events for one task are coalesced before any host wake is claimed.
   $coalesce = New-Case 'intervention-coalesce'
