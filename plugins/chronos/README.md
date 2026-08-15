@@ -12,8 +12,10 @@ and coordinates bounded read tasks without creating an autonomous agent loop.
 
 Published by Dravara, LLC. The currently approved directory package is live for eligible
 users, subject to region, supported surface, workspace controls, and role.
-Directory publication is not an OpenAI endorsement. Use the public marketplace
-commands below only as a fallback.
+Directory publication is not an OpenAI endorsement. Use the Git marketplace
+commands below only when the Directory is unavailable. Do not install both
+sources: Codex treats `chronos@chronos` and
+`chronos@openai-curated-remote` as separate source identities.
 
 ## What it does
 
@@ -62,7 +64,7 @@ the result reports whether that activity was observed.
 
 ## Install in Codex
 
-Install it from its public marketplace:
+Install from the Directory link above. As a fallback, install from Git:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
@@ -70,6 +72,19 @@ codex.cmd plugin add chronos@chronos
 ```
 
 Open a new Codex task after installation.
+
+Chronos v0.8.8 checks valid cached source manifests on first use and separates
+cached duplication from a confirmed enabled-source conflict. If it confirms
+the running Directory package and enabled legacy Git source, remove the legacy
+source through the Codex plugin manager, then start a fresh task:
+
+```powershell
+codex.cmd plugin remove chronos@chronos
+codex.cmd plugin marketplace remove chronos
+```
+
+Chronos does not edit plugin configuration or cache files itself. A loaded task
+catalog cannot be hot-swapped.
 
 ## Use
 

@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("inspect", "plan", "cleanup", "heartbeat", "supervise")]
+  [ValidateSet("inspect", "plan", "cleanup", "heartbeat", "supervise", "install-status")]
   [string]$Action = "inspect",
   [int]$MinAgeMinutes = 60,
   [int]$ProcessId = 0,
@@ -143,6 +143,141 @@ function Test-ChronosReadPath {
     $cursor = if ($cursor -is [System.IO.DirectoryInfo]) { $cursor.Parent } else { $cursor.Directory }
   }
   $null -ne $cursor
+}
+
+function Get-ChronosInstallStatus {
+  $currentSource = 'standalone'
+  try {
+    $pluginRoot = Get-Item -LiteralPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))) -Force -ErrorAction Stop
+    if ($pluginRoot.Parent -and $pluginRoot.Parent.Parent -and
+        $pluginRoot.Parent.Name -eq 'chronos') {
+      $currentSource = $pluginRoot.Parent.Parent.Name
+    }
+  } catch {}
+
+  $sources = New-Object System.Collections.Generic.List[string]
+  $cacheRoot = Join-Path $CodexHome 'plugins\cache'
+  if (Test-ChronosReadPath $cacheRoot) {
+    $marketplaces = @([System.IO.Directory]::EnumerateDirectories($cacheRoot) | Select-Object -First 32)
+    foreach ($marketplacePath in $marketplaces) {
+      $marketplace = Get-Item -LiteralPath $marketplacePath -Force -ErrorAction SilentlyContinue
+      if (-not $marketplace -or
+          ($marketplace.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+          -not (Test-ChronosReadPath $marketplace.FullName)) { continue }
+      $pluginPath = Join-Path $marketplace.FullName 'chronos'
+      if (-not (Test-ChronosReadPath $pluginPath)) { continue }
+      $plugin = Get-Item -LiteralPath $pluginPath -Force -ErrorAction SilentlyContinue
+      if (-not $plugin -or -not $plugin.PSIsContainer -or
+          ($plugin.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { continue }
+
+      $validPackage = $false
+      foreach ($versionPath in @([System.IO.Directory]::EnumerateDirectories($plugin.FullName) | Select-Object -First 16)) {
+        $version = Get-Item -LiteralPath $versionPath -Force -ErrorAction SilentlyContinue
+        if (-not $version -or
+            ($version.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            -not (Test-ChronosReadPath $version.FullName)) { continue }
+        $manifestPath = Join-Path $version.FullName '.codex-plugin\plugin.json'
+        if (-not (Test-ChronosReadPath $manifestPath)) { continue }
+        try {
+          $manifestFile = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+          if ($manifestFile.Length -gt 65536) { continue }
+          $manifest = Get-Content -Raw -LiteralPath $manifestFile.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$manifest.name -eq 'chronos' -and
+              ([string]$manifest.version).Trim() -match '^\d+\.\d+\.\d+$') {
+            $validPackage = $true
+            break
+          }
+        } catch {}
+      }
+      if ($validPackage) { $sources.Add($marketplace.Name) }
+    }
+  }
+
+  $sourceNames = @($sources | Sort-Object -Unique)
+  $hasDirectorySource = $sourceNames -contains 'openai-curated-remote'
+  $hasLegacyGitSource = $sourceNames -contains 'chronos'
+  $cachedDuplicateSources = $sourceNames.Count -gt 1
+  $legacyGitConfig = 'unavailable'
+  $configPath = Join-Path $CodexHome 'config.toml'
+  if (Test-ChronosReadPath $configPath) {
+    try {
+      $configFile = Get-Item -LiteralPath $configPath -Force -ErrorAction Stop
+      if ($configFile.Length -le 1048576) {
+        $legacyGitConfig = 'not_configured'
+        $inLegacySection = $false
+        foreach ($line in [System.IO.File]::ReadLines($configFile.FullName)) {
+          $trimmed = $line.Trim()
+          if ($trimmed -match '^\[(.+)\]$') {
+            $section = $matches[1].Trim()
+            $inLegacySection = $section -eq 'plugins."chronos@chronos"' -or
+              $section -eq "plugins.'chronos@chronos'"
+            continue
+          }
+          if ($inLegacySection -and $trimmed -match '^enabled\s*=\s*(true|false)\s*(?:#.*)?$') {
+            $legacyGitConfig = if ($matches[1] -eq 'true') { 'enabled' } else { 'disabled' }
+            break
+          }
+        }
+      }
+    } catch { $legacyGitConfig = 'unavailable' }
+  }
+  $canonicalSource = if ($hasDirectorySource) { 'openai-curated-remote' } elseif ($currentSource -ne 'standalone') { $currentSource } else { 'unavailable' }
+  $sourceConflict = if ($currentSource -eq 'openai-curated-remote' -and $legacyGitConfig -eq 'enabled') {
+    'CONFIRMED'
+  } elseif ($hasDirectorySource -and $hasLegacyGitSource) {
+    'POSSIBLE'
+  } elseif ($sourceNames.Count -gt 0) { 'NONE' } else { 'UNAVAILABLE' }
+  $recommendation = if ($sourceConflict -eq 'CONFIRMED') {
+    'remove_legacy_git_install_then_start_new_task'
+  } elseif ($sourceConflict -eq 'POSSIBLE') {
+    'review_plugin_manager_sources'
+  } else { 'none' }
+
+  [pscustomobject][ordered]@{
+    PluginVersion = $script:ChronosPluginVersion
+    CurrentSource = $currentSource
+    SourceObservation = if ($sourceNames.Count -gt 0) { 'cache_inventory_not_enabled_state' } else { 'unavailable' }
+    CachedSourceCount = $sourceNames.Count
+    CachedSources = if ($sourceNames.Count -gt 0) { $sourceNames -join ',' } else { 'none' }
+    CachedDuplicateSources = $cachedDuplicateSources
+    LegacyGitSourcePresent = $hasLegacyGitSource
+    DirectorySourcePresent = $hasDirectorySource
+    LegacyGitConfig = $legacyGitConfig
+    SourceConflict = $sourceConflict
+    CanonicalSource = $canonicalSource
+    SessionReloadRequired = $sourceConflict -eq 'CONFIRMED'
+    RecommendedAction = $recommendation
+  }
+}
+
+function Format-ChronosInstallValue($Value) {
+  if ($Value -is [bool]) { return $Value.ToString().ToLowerInvariant() }
+  ([string]$Value).Replace(' ', '-')
+}
+
+$script:ChronosInstallStatus = Get-ChronosInstallStatus
+
+if ($Action -eq 'install-status') {
+  $installFields = [ordered]@{
+    pluginVersion = $script:ChronosInstallStatus.PluginVersion
+    currentSource = $script:ChronosInstallStatus.CurrentSource
+    sourceObservation = $script:ChronosInstallStatus.SourceObservation
+    cachedSourceCount = $script:ChronosInstallStatus.CachedSourceCount
+    cachedSources = $script:ChronosInstallStatus.CachedSources
+    cachedDuplicateSources = $script:ChronosInstallStatus.CachedDuplicateSources
+    legacyGitSourcePresent = $script:ChronosInstallStatus.LegacyGitSourcePresent
+    directorySourcePresent = $script:ChronosInstallStatus.DirectorySourcePresent
+    legacyGitConfig = $script:ChronosInstallStatus.LegacyGitConfig
+    sourceConflict = $script:ChronosInstallStatus.SourceConflict
+    canonicalSource = $script:ChronosInstallStatus.CanonicalSource
+    sessionReloadRequired = $script:ChronosInstallStatus.SessionReloadRequired
+    recommendedAction = $script:ChronosInstallStatus.RecommendedAction
+  }
+  $installText = @($installFields.GetEnumerator() | ForEach-Object {
+      $_.Key + '=' + (Format-ChronosInstallValue $_.Value)
+    }) -join ' '
+  Write-Output ('CHRONOS INSTALL ' + $installText)
+  exit 0
 }
 
 function Initialize-ChronosSqlite {
@@ -3199,6 +3334,15 @@ if ($Action -eq "inspect") {
   Write-Output $headline
   $efficiencyFields = [ordered]@{
     pluginVersion = $script:ChronosPluginVersion
+    installCurrentSource = $script:ChronosInstallStatus.CurrentSource
+    installSourceObservation = $script:ChronosInstallStatus.SourceObservation
+    installCachedSources = $script:ChronosInstallStatus.CachedSources
+    installCachedDuplicateSources = $script:ChronosInstallStatus.CachedDuplicateSources
+    installLegacyGitConfig = $script:ChronosInstallStatus.LegacyGitConfig
+    installSourceConflict = $script:ChronosInstallStatus.SourceConflict
+    installCanonicalSource = $script:ChronosInstallStatus.CanonicalSource
+    installSessionReloadRequired = $script:ChronosInstallStatus.SessionReloadRequired
+    installRecommendedAction = $script:ChronosInstallStatus.RecommendedAction
     headlineScope = 'machine_health'
     processDiagnosticLevel = $processLevel
     machineHealthContributors = $machineContributorText

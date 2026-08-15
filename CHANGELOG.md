@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.8.8
+
+- Add a bounded `install-status` preflight that identifies valid cached Chronos
+  sources without treating cache presence as proof that a source is enabled.
+- Detect the common legacy Git marketplace plus OpenAI Plugins Directory
+  duplicate, name `openai-curated-remote` as canonical, and require a fresh
+  task after plugin-manager cleanup because loaded task catalogs cannot be
+  changed by a skill.
+- Surface install-source status in normal inspection output and update the
+  first Directory prompt to check installation sources with resource health.
+- Document the Directory-first install path and the narrow, user-approved
+  migration from `chronos@chronos`. Chronos never edits plugin configuration or
+  cache files directly.
+
 ## v0.8.7
 
 - Remove background execution flags from packaged lifecycle hooks because

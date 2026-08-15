@@ -21,7 +21,7 @@ across plans, including Free, subject to region, supported surface, workspace
 controls, and role. Directory publication permits distribution; it is not an
 OpenAI endorsement or support commitment.
 
-Manual marketplace fallback:
+Manual Git marketplace fallback for environments where the Directory is not available:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
@@ -29,6 +29,20 @@ codex.cmd plugin add chronos@chronos
 ```
 
 Open a new Codex task, then ask: `Use Chronos to inspect current Codex health.`
+
+Do not install both sources. Codex identifies the same package as
+`chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
+the OpenAI Plugins Directory. They are separate source identities and the
+Directory install does not replace the Git install in an already loaded task.
+Chronos v0.8.8 distinguishes a confirmed enabled-source conflict from cached
+packages that may be stale. After it confirms the running Directory package
+and enabled legacy Git source, remove the legacy source through the plugin
+manager and start a fresh task:
+
+```powershell
+codex.cmd plugin remove chronos@chronos
+codex.cmd plugin marketplace remove chronos
+```
 
 <p align="center"><img src="assets/chronos-proof-card.png" width="500" alt="Sanitized example Chronos output separating healthy machine resources from runaway automatic review and approval persistence"></p>
 
@@ -105,11 +119,12 @@ the result reports whether that activity was observed.
 
 ## Install in Codex
 
-Ask Codex to:
+For the normal Directory installation, use the link above. If the Directory is
+not available in the current Codex surface, ask Codex to:
 
 > **Analyze and install [FaxanFM/chronos](https://github.com/FaxanFM/chronos), then use Chronos Governor for appropriate low-complexity repository tasks.**
 
-Or install it manually from its public marketplace:
+Or install the Git fallback manually:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos
@@ -121,6 +136,9 @@ versioned plugin skill locator captured when they started. An older open task
 may therefore advertise a cache path removed by the upgrade even though the new
 version is installed correctly. Do not copy or link new plugin files into an
 old version directory; use a fresh task and verify the installed version.
+Run `chronos.cmd -Action install-status` to check for duplicate valid cached
+sources. The result deliberately labels this as cache inventory, not proof of
+enabled state.
 
 Chronos is published in the shared OpenAI Plugins Directory for ChatGPT and
 Codex. The marketplace commands are a fallback for environments where the

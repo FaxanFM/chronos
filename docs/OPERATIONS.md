@@ -115,7 +115,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.7 retains disabled shared-folder write delegation. Inactive Governor
+v0.8.8 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the
@@ -127,6 +127,25 @@ the task as coordinator. Do not delete or edit state to force recovery. Report
 the compact result only. An `internal_error` now includes a privacy-safe
 `failure_stage` and exception class, but never the exception message, local
 path, or state content.
+
+### Directory migration
+
+The Git marketplace identity `chronos@chronos` and Plugins Directory identity
+`chronos@openai-curated-remote` are separate Codex sources. Installing the
+Directory package does not remove the Git source or rewrite an already loaded
+task catalog. Check the bounded cache inventory with:
+
+```powershell
+chronos.cmd -Action install-status
+```
+
+When Chronos confirms that the Directory package is running and the legacy Git
+source remains enabled, remove
+the legacy source through `codex.cmd plugin remove chronos@chronos` followed by
+`codex.cmd plugin marketplace remove chronos`, then start a fresh task. Obtain
+user approval before changing plugin-manager state. Never delete cache folders
+or edit `config.toml` directly. Cache presence is not proof that a source is
+enabled; the status output states this limitation.
 
 ## Supervision Recovery
 

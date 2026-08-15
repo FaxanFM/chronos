@@ -5,6 +5,34 @@ description: Detect and mitigate Codex process, CPU, memory, handle, disk, diagn
 
 # Chronos
 
+## Installation preflight
+
+Run this lightweight check once when Chronos is first used in a task:
+
+```powershell
+"<skill-root>\scripts\chronos.cmd" -Action install-status
+```
+
+`sourceObservation=cache_inventory_not_enabled_state` means the result shows
+valid cached package sources; cache presence alone does not prove that a source
+is enabled. `sourceConflict=CONFIRMED` requires the running Directory package
+and an enabled legacy Git configuration. If both cached sources exist but that
+proof is absent, report `POSSIBLE` and inspect the plugin manager before making
+changes. Explain that Codex treats the Git marketplace and Plugins Directory as
+separate sources. Prefer `openai-curated-remote`. For a confirmed conflict,
+with narrow user approval,
+remove the legacy source through the Codex plugin manager, never by editing
+configuration or cache files directly:
+
+```powershell
+codex.cmd plugin remove chronos@chronos
+codex.cmd plugin marketplace remove chronos
+```
+
+Then start a fresh Codex task. An existing task's loaded skill catalog cannot
+be hot-swapped. Do not remove the legacy source when the Directory source is
+absent, and do not imply that Chronos changed the active task catalog.
+
 Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
 operating-system scheduler, daemon, service, telemetry file, or persistent log.
 After normal Codex hook trust review, the plugin's four lifecycle hooks update a
