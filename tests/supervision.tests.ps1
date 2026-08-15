@@ -626,7 +626,8 @@ try {
   Assert-True (@(Get-ChildItem -LiteralPath $pendingDirectory -File -Force).Count -eq 0) 'Merged fallback queue entries were not removed.'
 
   $sourceText = Get-Content -Raw -LiteralPath $module
-  Assert-True ($sourceText.Contains('SpecialFolder]::LocalApplicationData')) 'Default supervision state must use LocalAppData, not volatile temp storage.'
+  Assert-True ($sourceText.Contains("Join-Path `$tempRoot 'Chronos\Supervision'")) 'Default supervision state must use the private TEMP Chronos namespace.'
+  Assert-True ($sourceText.Contains("Join-Path `$localRoot 'session-registry.json'")) 'LocalAppData must remain available only as the legacy supervision migration source.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
   Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'
   Assert-True (-not $sourceText.Contains("@('Global', 'Local')")) 'A shared registry must not silently fall back from the Global mutex namespace.'
