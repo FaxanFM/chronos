@@ -69,7 +69,7 @@ try {
     '336 cycles or 14 days',
     '-SupervisionConfirmRecurrenceStopped',
     '%TEMP%\Chronos\Supervision\session-registry.json',
-    'one compact host task-list call',
+    'one compact complete host task-list call',
     'gpt-5.6-terra',
     'routine user action',
     'DPAPI does not protect against another process already running as that'
@@ -151,6 +151,7 @@ try {
     '-PluginRoot $package',
     'Test Chronos Supervision',
     'timeout-minutes:',
+    'subject-path: dist/*',
     'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
     '--draft',
     'gh release edit $env:GITHUB_REF_NAME --draft=false',
@@ -158,7 +159,10 @@ try {
     'for ($attempt = 1; $attempt -le 12; $attempt++)',
     'Start-Sleep -Seconds 5',
     'gh release verify $env:GITHUB_REF_NAME',
-    'gh release verify-asset $env:GITHUB_REF_NAME'
+    'gh release verify-asset $env:GITHUB_REF_NAME',
+    'gh release download $env:GITHUB_REF_NAME',
+    'Published asset bytes differ from the verified build',
+    "'chronos@openai-curated-remote'"
   )) {
     if (-not $releaseWorkflow.Contains($required)) {
       throw "Release workflow is missing supply-chain control: $required"
@@ -230,6 +234,22 @@ try {
   )
   if (($installedSkills -join "`n") -ne "chronos`nchronos-governor") {
     throw "Extracted package must contain exactly the chronos and chronos-governor skills."
+  }
+
+  $directoryCodexHome = Join-Path $testRoot 'directory-clean-home'
+  $directoryInstallRoot = Join-Path $directoryCodexHome "plugins\cache\openai-curated-remote\chronos\$version"
+  New-Item -ItemType Directory -Path $directoryInstallRoot -Force | Out-Null
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($firstArtifact, $directoryInstallRoot)
+  $directoryLauncher = Join-Path $directoryInstallRoot 'skills\chronos\scripts\chronos.cmd'
+  $directoryOutput = @(& $directoryLauncher -Action install-status -CodexHome $directoryCodexHome 2>&1)
+  $directoryText = $directoryOutput -join "`n"
+  if ($LASTEXITCODE -ne 0 -or
+      $directoryText -notmatch ('pluginVersion=' + [regex]::Escape($version) + '\b') -or
+      $directoryText -notmatch 'currentPluginIdentity=chronos@openai-curated-remote\b' -or
+      $directoryText -notmatch 'canonicalPluginIdentity=chronos@openai-curated-remote\b' -or
+      $directoryText -notmatch 'cachedSourceCount=1\b' -or
+      $directoryText -notmatch 'sourceConflict=NONE\b') {
+    throw "Canonical Directory clean-install discovery failed.`n$directoryText"
   }
   $installedHookText = Get-Content -Raw -LiteralPath (Join-Path $installRoot 'hooks\hooks.json')
   if ($installedHookText.Contains('"async"')) {
@@ -311,8 +331,15 @@ try {
     }
   }
   $releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.release.json") | ConvertFrom-Json
-  if ($releaseManifest.schema_version -ne 2 -or @($releaseManifest.files).Count -ne $releaseManifest.packaged_files) {
+  if ($releaseManifest.schema_version -ne 3 -or @($releaseManifest.files).Count -ne $releaseManifest.packaged_files) {
     throw "Release manifest must contain a versioned per-file inventory."
+  }
+  if ([string]$releaseManifest.distribution.repository -ne 'FaxanFM/chronos' -or
+      [string]$releaseManifest.distribution.canonical_identity -ne 'chronos@openai-curated-remote' -or
+      [string]$releaseManifest.distribution.canonical_source -ne 'openai-curated-remote' -or
+      [string]$releaseManifest.distribution.legacy_git_identity -ne 'chronos@chronos' -or
+      [string]$releaseManifest.distribution.plugin_directory_listing -ne 'plugins_6a79c882cf488191b8f62ee20e0e2571') {
+    throw 'Release manifest does not bind the public Directory and legacy Git identities.'
   }
   if (
     [long]$releaseManifest.packaged_bytes -gt [long]$releaseManifest.package_limits.package_bytes -or

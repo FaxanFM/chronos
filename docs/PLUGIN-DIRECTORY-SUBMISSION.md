@@ -1,19 +1,19 @@
 # OpenAI Plugin Directory Published Listing Record
 
-Status: v0.8.7 is published in the OpenAI Plugins Directory under the verified
+Status: v0.8.8 is published in the OpenAI Plugins Directory under the verified
 Dravara, LLC business identity. Both OpenAI skill scans passed and the package
 was published from the existing Chronos listing. The GitHub release artifact is
-`chronos-v0.8.7.zip` with SHA-256
-`580a64fb5f1393005c7fc314979a025f3d64137515a9bb70f41e1824ac60d640`.
-Release record:
-https://github.com/FaxanFM/chronos/releases/tag/v0.8.7.
-
-v0.8.8 is an install-source hotfix candidate with artifact
-`chronos-v0.8.8.zip` and SHA-256
+`chronos-v0.8.8.zip` with SHA-256
 `686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
+Release record:
+https://github.com/FaxanFM/chronos/releases/tag/v0.8.8.
+
+v0.8.9 is a supervision and publication-verification candidate with artifact
+`chronos-v0.8.9.zip` and SHA-256
+`a59eb938d9332db3d18fde13dad0805d9f477db5ef26c445b7d9cbabe6d8829f`.
 It is not submitted or published until local suites, CI, independent review,
 and an external Windows canary pass. Candidate release URL:
-https://github.com/FaxanFM/chronos/releases/tag/v0.8.8.
+https://github.com/FaxanFM/chronos/releases/tag/v0.8.9.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -34,7 +34,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.8.8.zip` release asset after every gate passes.
+   `chronos-v0.8.9.zip` release asset after every gate passes.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -50,7 +50,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.8.8`
+- Version: `0.8.9`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -236,10 +236,11 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.8.8 detects duplicate Git and Directory installations,
+> Chronos for Codex v0.8.9 detects duplicate Git and Directory installations,
 > keeps one Terra Medium Governor per machine, and
 > leaves monitored tasks passive on their existing models. Each Governor cycle
-> reconciles one bounded host task inventory, so missing or disabled lifecycle
+> requires and reconciles one complete bounded host task inventory, then returns
+> one compact normalized status per listed task. Missing or disabled lifecycle
 > hooks do not require manual registration. Default Heartbeat and supervision
 > state now uses the sandbox-writable Windows temporary directory, with safe
 > legacy-state import. Comparable supervision counters prevent repository-idle
@@ -249,7 +250,9 @@ Do not infer worldwide availability from publication.
 > the required Windows PowerShell invocation flags. Chronos installs no service,
 > makes no network request, and sends no publisher telemetry. Existing Inspector
 > thresholds, Heartbeat detector thresholds, and read-only Governor policy are
-> unchanged.
+> unchanged. Release records bind the canonical
+> `chronos@openai-curated-remote` identity to the exact ZIP, and publication
+> downloads are compared byte-for-byte with the verified build.
 
 ## Assets and Evidence
 
@@ -286,8 +289,8 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.8.7 published; v0.8.8 not submitted**. Retained evidence
-confirms the v0.8.7 publication. Exact regional availability remains outside
+Review status: **v0.8.8 published; v0.8.9 not submitted**. Retained evidence
+confirms the v0.8.8 publication. Exact regional availability remains outside
 this repository's evidence boundary.
 
 OpenAI reviewer notes: none

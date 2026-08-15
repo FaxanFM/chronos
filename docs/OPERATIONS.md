@@ -44,6 +44,13 @@ It changes only Plugin Platform manifest compatibility and its release
 regression coverage. The signed release and public Plugin Directory package
 were published before the v0.8.7 audit-remediation work began.
 
+The authoritative immutable v0.8.7 ZIP SHA-256 is
+`580a64fb5f1393005c7fc314979a025f3d64137515a9bb70f41e1824ac60d640`.
+The authoritative immutable v0.8.8 ZIP SHA-256 is
+`686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
+v0.8.8 is the current published Directory package while v0.8.9 completes its
+release gates.
+
 ## Published Release
 
 A `vX.Y.Z` tag must exactly match `.codex-plugin/plugin.json`. Before creating a
@@ -61,7 +68,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.8.6
+git verify-tag v0.8.8
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -71,7 +78,8 @@ The workflow runs every test on two Windows runner labels in an unprivileged
 job. A separate publication job rebuilds the package, creates an official
 GitHub artifact attestation with a commit-pinned action, and verifies that
 attestation before creating a draft release. It publishes the complete draft
-once and then verifies the immutable release and each asset. Release immutability then
+once, verifies the immutable release and each asset, downloads every published
+asset, and compares its bytes with the verified build. Release immutability then
 prevents its tag or assets from being moved, modified, or deleted while the
 release exists. A failed signature check, test, version check, reproducibility
 check, or attestation prevents publication.
@@ -82,16 +90,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.6.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.6.zip -R FaxanFM/chronos
-gh release verify v0.8.6 -R FaxanFM/chronos
-gh release verify-asset v0.8.6 .\chronos-v0.8.6.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.8.8.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.8.8.zip -R FaxanFM/chronos
+gh release verify v0.8.8 -R FaxanFM/chronos
+gh release verify-asset v0.8.8 .\chronos-v0.8.8.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.6.sha256`. These controls prove
+Compare the first command with `chronos-v0.8.8.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -99,8 +107,10 @@ tag, commit, and assets. None replaces local source review.
 
 ## Upgrade
 
-Fully close Codex before replacing an installed plugin. Then refresh the public
-marketplace and reinstall Chronos through the Codex plugin manager:
+Fully close Codex before replacing an installed plugin. The normal public source
+is the OpenAI Plugins Directory identity `chronos@openai-curated-remote`; install
+or update Chronos through the Directory listing. Use the Git marketplace only
+as a fallback when the Directory is unavailable:
 
 ```powershell
 codex.cmd plugin marketplace add FaxanFM/chronos

@@ -100,7 +100,7 @@ jobs:
       - name: Attest release artifact
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: dist/*.zip
+          subject-path: dist/*
       - name: Verify attestation before publication
         shell: powershell
         env:
@@ -115,7 +115,7 @@ jobs:
             }
             throw "Pre-publication attestation verification failed: $Path"
           }
-          foreach ($asset in @(Get-ChildItem -LiteralPath dist -Filter *.zip -File)) {
+          foreach ($asset in @(Get-ChildItem -LiteralPath dist -File)) {
             Test-Attestation $asset.FullName
           }
       - name: Publish and verify GitHub release
@@ -141,4 +141,21 @@ jobs:
           Invoke-ReleaseVerification { gh release verify $env:GITHUB_REF_NAME } "Immutable release verification failed."
           foreach ($asset in $assets) {
             Invoke-ReleaseVerification { gh release verify-asset $env:GITHUB_REF_NAME $asset } "Release asset verification failed: $asset"
+          }
+
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'chronos-published-release'
+          New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
+          foreach ($asset in $assets) {
+            $name = [IO.Path]::GetFileName($asset)
+            Invoke-ReleaseVerification { gh release download $env:GITHUB_REF_NAME --pattern $name --dir $downloadRoot --clobber } "Published asset download failed: $name"
+            $published = Join-Path $downloadRoot $name
+            if ((Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash) {
+              throw "Published asset bytes differ from the verified build: $name"
+            }
+          }
+          $releaseRecord = Get-Content -Raw -LiteralPath (Join-Path $downloadRoot "chronos-$env:GITHUB_REF_NAME.release.json") | ConvertFrom-Json
+          $publishedZip = Join-Path $downloadRoot "chronos-$env:GITHUB_REF_NAME.zip"
+          if ([string]$releaseRecord.sha256 -ne (Get-FileHash -LiteralPath $publishedZip -Algorithm SHA256).Hash.ToLowerInvariant() -or
+              [string]$releaseRecord.distribution.canonical_identity -ne 'chronos@openai-curated-remote') {
+            throw 'Published release record does not bind the canonical Directory identity to the ZIP bytes.'
           }

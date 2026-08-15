@@ -116,10 +116,12 @@ chronos.cmd -Action supervise -SupervisionAction status
 
 # Run only inside the selected Governor task
 chronos.cmd -Action supervise -SupervisionAction initialize
+
+# Passive registry read; this does not advance the Governor cycle
 chronos.cmd -Action supervise -SupervisionAction discover
 
-# After one compact host task-list call, reconcile its normalized inventory
-chronos.cmd -Action supervise -SupervisionAction reconcile-host `
+# After one compact complete host task-list call, run one Governor cycle
+chronos.cmd -Action supervise -SupervisionAction cycle `
   -SupervisionHostInventoryPath <temporary-inventory.json>
 
 # Only after host liveness verifies an ended entry is active again
@@ -136,10 +138,11 @@ chronos.cmd -Action supervise -SupervisionAction release `
 
 The Governor calls the host task list once, writes only opaque task IDs, safe
 status categories, optional opaque generations, a capture time, and a
-completeness flag to a bounded temporary JSON file, then calls
-`reconcile-host`. Host task state is the liveness authority. The native action
+`complete=true` flag to a bounded temporary JSON file, then calls `cycle`.
+Missing or incomplete inventory fails closed and does not advance the cycle.
+Host task state is the liveness authority. The native action
 adds tasks missed by hooks, reactivates verified live tasks, and closes absent
-tasks only when the inventory declares itself complete. It returns the rotating
+tasks. It returns one hash-only normalized status for every inventory task and the rotating
 `checkBatch`, which contains at most eight entries and covers larger registries
 fairly over successive cycles. Inventory or transport failure remains
 Governor-local; the routine user action is none.
@@ -148,7 +151,9 @@ an ended task or agent. Only `confirm-active`, after host verification, can do
 that. Do not poll full transcripts, repeatedly read unchanged tasks, or send
 routine messages to monitored tasks.
 
-The Governor owns the only model recurrence. When the user enables recurring
+The Governor owns the only model recurrence. A normal cycle reports
+`taskWakePolicy=intervention_claim_required`; only the bounded Heartbeat
+plan-and-claim state machine can authorize a task message. When the user enables recurring
 supervision, reconcile one host Heartbeat automation attached to the dedicated
 task. Use 60 minutes while monitored work is active and 360 minutes while idle.
 A normal cycle ends silently. A new, materially worse, or eligible resolution

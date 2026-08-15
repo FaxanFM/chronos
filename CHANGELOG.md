@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.9
+
+- Make `supervise cycle` the only action that advances a Governor cycle. It
+  requires one fresh, complete, bounded host inventory and atomically
+  reconciles every listed task before returning the rotating check batch.
+- Return one compact hash-only normalized status for every host-inventory task.
+  Passive `discover` no longer advances cycle counters, and normal cycles state
+  that a claimed Heartbeat intervention is required before any task wake.
+- Remove the timing-sensitive wall-clock assertion from supervision tests.
+  Mutex contention is validated by deterministic state, queue, silence, and
+  cleanup postconditions while production hook timeouts remain fixed.
+- Bind release records to the canonical Directory identity
+  `chronos@openai-curated-remote`, attest all release assets, download every
+  published asset for byte comparison, and verify the published record against
+  the ZIP digest.
+- Add a clean-install gate that extracts the exact ZIP beneath the canonical
+  Directory cache identity and requires successful package discovery with no
+  legacy Git conflict.
+
 ## v0.8.8
 
 - Add a bounded `install-status` preflight that identifies valid cached Chronos

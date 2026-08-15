@@ -6,7 +6,7 @@ security-coverage percentage, and the project does not describe it as one.
 
 ## Governor
 
-`tests/governor.tests.ps1` currently runs 42 deterministic validations. They
+`tests/governor.tests.ps1` currently runs 46 deterministic validations. They
 cover runtime inventory selection, model binding, canonical worker IDs,
 single-use plan tokens, V2 `fork_turns=none`, categorical write containment,
 one active lease per worker, fencing, renewal, read-mutation detection,
@@ -105,15 +105,16 @@ Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
 cadence, stable and isolated opaque installation equivalence keys, malformed
 scope rejection, reconciliation retry budget and postcondition,
-cycle and age limits, bounded complete and incomplete host inventory
-reconciliation, missed-hook task recovery, absent-task closure, stale inventory
+cycle and age limits, mandatory complete per-cycle host inventory
+reconciliation, one hash-only normalized status per inventory task, passive
+non-advancing discovery, missed-hook task recovery, absent-task closure, stale inventory
 rejection, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, monotonic host timestamp/rank
 ordering, task generation changes, delayed starts after terminal events,
 host-confirmed reactivation, forced-takeover postconditions, two-phase release,
-live mutex contention, atomic bounded fallback slots, stale reservation
+live mutex contention with deterministic state and queue postconditions, atomic bounded fallback slots, stale reservation
 recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 full 256-record capacity behavior, silent hook output,
@@ -121,7 +122,9 @@ headless Windows commands, lifecycle-only event coverage, rejection of
 unsupported background-hook flags, and absence of scheduler, process-launch,
 and network primitives.
 
-These tests validate local discovery and persistence. They do not prove that a
+The suite does not use an elapsed-time threshold as a correctness assertion;
+the production hook ceiling and fixed mutex waits are validated structurally,
+while process timeouts only stop a hung test. These tests validate local discovery and persistence. They do not prove that a
 user trusted the hook, that host task and automation tools are available, that
 a task remains live, that a host reconciled exactly one recurrence, or that the
 host selected Terra Medium. Those behaviors require an installed-package host
@@ -131,13 +134,16 @@ canary. The registry remains advisory.
 
 `tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
 tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
-per-file manifest hashes and sizes, pre-materialization package limits, required
+per-file manifest hashes and sizes, canonical Directory distribution identity, pre-materialization package limits, required
 plugin files, repository-file exclusion, and a matching artifact checksum. It
-also extracts the exact ZIP as a fresh install, verifies the two-skill inventory
-and version, and runs the packaged `.cmd` Heartbeat and supervision status
+also extracts the exact ZIP as a fresh `chronos@openai-curated-remote` cache
+install, verifies canonical registry discovery, the two-skill inventory and version, and runs the packaged `.cmd` Heartbeat and supervision status
 commands so execution-policy handling is part of the release gate.
 
 Tagged CI runs inspector, Heartbeat, supervision, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the
-artifact attestation is verified before a draft is created, and the immutable
-release and assets are verified again after publication.
+artifact attestation for every release asset is verified before a draft is
+created. After publication, the workflow verifies the immutable release and
+assets, downloads every asset, compares its bytes with the verified build, and
+checks that the published release record binds the canonical identity to the
+ZIP digest.

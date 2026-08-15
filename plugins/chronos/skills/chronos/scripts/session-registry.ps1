@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'release')]
+  [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'cycle', 'release')]
   [string]$Action = 'status',
   [string]$StatePath,
   [string]$HostInventoryPath,
@@ -776,6 +776,7 @@ function Read-HostInventory {
       $normalized.Add([pscustomobject]@{
         Id = $id
         Active = ($status -in $activeStates)
+        Status = if ($status -in $activeStates) { 'live' } else { 'ended' }
         Generation = $generation
       }) | Out-Null
     }
@@ -825,6 +826,17 @@ function Invoke-HostInventoryReconciliation {
     }
   }
   return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; GenerationChanged = $generationChanged; Ended = $ended; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
+}
+
+function Get-CompactHostTaskStatuses {
+  param($Inventory)
+  @($Inventory.Tasks | ForEach-Object {
+    [ordered]@{
+      idHash = (Get-TextHash ([string]$_.Id)).Substring(0, 16)
+      status = [string]$_.Status
+      generation = if ([string]::IsNullOrWhiteSpace([string]$_.Generation)) { 'unavailable' } else { 'observed' }
+    }
+  })
 }
 
 function New-RegistryMutex {
@@ -1289,6 +1301,8 @@ try {
     $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated
     $payload['hostTaskGenerationsChanged'] = [int]$reconciled.GenerationChanged
     $payload['hostTasksEnded'] = [int]$reconciled.Ended
+    $payload['hostTaskStatuses'] = @(Get-CompactHostTaskStatuses $inventory)
+    $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     Write-State $state $resolved
     Write-SafeOutput $payload
@@ -1312,16 +1326,38 @@ try {
     Write-SafeOutput ([ordered]@{ ok = $true; action = 'release'; revision = [long]$state.revision; governorClaimed = $false })
     exit 0
   }
-  if ($Action -eq 'discover') {
+  if ($Action -eq 'cycle') {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
+    $inventory = Read-HostInventory $HostInventoryPath $now
+    if (-not [bool]$inventory.Complete) { throw 'supervision_host_inventory_incomplete' }
+    $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
     $state.governor.cycleCount = [long]$state.governor.cycleCount + 1
     $state.governor.lastCycleUtc = $now.ToString('o')
     $state.governor.lastSeenUtc = $now.ToString('o')
     $activeCount = @($state.sessions.Values | Where-Object { $_.state -eq 'active' -and $_.idHash -ne $state.governor.idHash }).Count
     $state.governor.idleCycles = if ($activeCount -gt 0) { 0L } else { [long]$state.governor.idleCycles + 1 }
-    $payload = Get-DiscoveryPayload $state 'discover' $current $SinceRevision $now
+    $payload = Get-DiscoveryPayload $state 'cycle' $current $SinceRevision $now
+    $payload['hostInventoryObserved'] = [int]$reconciled.Observed
+    $payload['hostInventoryComplete'] = $true
+    $payload['hostInventoryCycle'] = [long]$state.governor.cycleCount
+    $payload['hostTasksAdded'] = [int]$reconciled.Added
+    $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated
+    $payload['hostTaskGenerationsChanged'] = [int]$reconciled.GenerationChanged
+    $payload['hostTasksEnded'] = [int]$reconciled.Ended
+    $payload['hostTaskStatuses'] = @(Get-CompactHostTaskStatuses $inventory)
+    $payload['taskWakePolicy'] = 'intervention_claim_required'
+    $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     $state.health.scanOffset = [long]$payload.nextBatchOffset
     Write-State $state $resolved
+    Write-SafeOutput $payload
+    exit 0
+  }
+  if ($Action -eq 'discover') {
+    if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
+    $payload = Get-DiscoveryPayload $state 'discover' $current $SinceRevision $now
+    $payload['cycleAdvanced'] = $false
+    $payload['taskWakePolicy'] = 'intervention_claim_required'
+    $payload['requiredHostAction'] = 'run_cycle_with_complete_host_inventory'
     Write-SafeOutput $payload
     exit 0
   }

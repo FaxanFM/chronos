@@ -122,7 +122,7 @@ $artifactHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash
   [System.Text.UTF8Encoding]::new($false)
 )
 $releaseManifest = [ordered]@{
-  schema_version = 2
+  schema_version = 3
   plugin = "chronos"
   version = $Version
   artifact = $artifactName
@@ -133,6 +133,13 @@ $releaseManifest = [ordered]@{
     files = $maximumFiles
     file_bytes = $maximumFileBytes
     package_bytes = $maximumPackageBytes
+  }
+  distribution = [ordered]@{
+    repository = 'FaxanFM/chronos'
+    canonical_identity = 'chronos@openai-curated-remote'
+    canonical_source = 'openai-curated-remote'
+    legacy_git_identity = 'chronos@chronos'
+    plugin_directory_listing = 'plugins_6a79c882cf488191b8f62ee20e0e2571'
   }
   files = @($packagedFileManifest)
   reproducible_timestamp = "1980-01-01T00:00:00Z"

@@ -61,11 +61,11 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
   foreach ($source in @('chronos', 'openai-curated-remote')) {
-    $manifestDirectory = Join-Path $duplicateInstallHome "plugins\cache\$source\chronos\0.8.8\.codex-plugin"
+    $manifestDirectory = Join-Path $duplicateInstallHome "plugins\cache\$source\chronos\0.8.9\.codex-plugin"
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
     [System.IO.File]::WriteAllText(
       (Join-Path $manifestDirectory 'plugin.json'),
-      '{"name":"chronos","version":"0.8.8"}',
+      '{"name":"chronos","version":"0.8.9"}',
       [System.Text.UTF8Encoding]::new($false)
     )
   }
@@ -74,30 +74,30 @@ try {
     "[plugins.`"chronos@chronos`"]`nenabled = true`n",
     [System.Text.UTF8Encoding]::new($false)
   )
-  $installedScriptDirectory = Join-Path $duplicateInstallHome 'plugins\cache\openai-curated-remote\chronos\0.8.8\skills\chronos\scripts'
+  $installedScriptDirectory = Join-Path $duplicateInstallHome 'plugins\cache\openai-curated-remote\chronos\0.8.9\skills\chronos\scripts'
   New-Item -ItemType Directory -Path $installedScriptDirectory -Force | Out-Null
   Copy-Item -LiteralPath $chronosScript -Destination (Join-Path $installedScriptDirectory 'chronos.ps1')
   $installedChronosScript = Join-Path $installedScriptDirectory 'chronos.ps1'
-  $directoryManifest = Join-Path $directoryInstallHome 'plugins\cache\openai-curated-remote\chronos\0.8.8\.codex-plugin'
+  $directoryManifest = Join-Path $directoryInstallHome 'plugins\cache\openai-curated-remote\chronos\0.8.9\.codex-plugin'
   New-Item -ItemType Directory -Path $directoryManifest -Force | Out-Null
   [System.IO.File]::WriteAllText(
     (Join-Path $directoryManifest 'plugin.json'),
-    '{"name":"chronos","version":"0.8.8"}',
+    '{"name":"chronos","version":"0.8.9"}',
     [System.Text.UTF8Encoding]::new($false)
   )
 
   $duplicateInstallOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedChronosScript -Action install-status -CodexHome $duplicateInstallHome
   if ($LASTEXITCODE -ne 0) { throw 'Chronos duplicate install-source check failed.' }
-  Assert-Match $duplicateInstallOutput '^CHRONOS INSTALL pluginVersion=0\.8\.8 ' 'Install status must report its package version.'
+  Assert-Match $duplicateInstallOutput '^CHRONOS INSTALL pluginVersion=0\.8\.9 ' 'Install status must report its package version.'
   Assert-Match $duplicateInstallOutput ' sourceObservation=cache_inventory_not_enabled_state ' 'Cache inventory must not be reported as enabled state.'
-  Assert-Match $duplicateInstallOutput ' currentSource=openai-curated-remote sourceObservation=cache_inventory_not_enabled_state cachedSourceCount=2 cachedSources=chronos,openai-curated-remote cachedDuplicateSources=true legacyGitSourcePresent=true directorySourcePresent=true legacyGitConfig=enabled sourceConflict=CONFIRMED canonicalSource=openai-curated-remote sessionReloadRequired=true recommendedAction=remove_legacy_git_install_then_start_new_task$' `
+  Assert-Match $duplicateInstallOutput ' currentSource=openai-curated-remote sourceObservation=cache_inventory_not_enabled_state cachedSourceCount=2 cachedSources=chronos,openai-curated-remote cachedDuplicateSources=true legacyGitSourcePresent=true directorySourcePresent=true legacyGitConfig=enabled sourceConflict=CONFIRMED canonicalSource=openai-curated-remote currentPluginIdentity=chronos@openai-curated-remote canonicalPluginIdentity=chronos@openai-curated-remote sessionReloadRequired=true recommendedAction=remove_legacy_git_install_then_start_new_task$' `
     'The Git and Directory duplicate must recommend the canonical migration.'
   if (($duplicateInstallOutput -join "`n").Contains($testRoot)) { throw 'Install status exposed an absolute local path.' }
 
   $directoryInstallOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $chronosScript -Action install-status -CodexHome $directoryInstallHome
-  Assert-Match $directoryInstallOutput ' cachedSourceCount=1 cachedSources=openai-curated-remote cachedDuplicateSources=false legacyGitSourcePresent=false directorySourcePresent=true legacyGitConfig=unavailable sourceConflict=NONE canonicalSource=openai-curated-remote sessionReloadRequired=false recommendedAction=none$' `
+  Assert-Match $directoryInstallOutput ' cachedSourceCount=1 cachedSources=openai-curated-remote cachedDuplicateSources=false legacyGitSourcePresent=false directorySourcePresent=true legacyGitConfig=unavailable sourceConflict=NONE canonicalSource=openai-curated-remote currentPluginIdentity=standalone canonicalPluginIdentity=chronos@openai-curated-remote sessionReloadRequired=false recommendedAction=none$' `
     'A single Directory package must not produce a duplicate warning.'
 
   $beforeHash = (Get-FileHash -LiteralPath $databasePath -Algorithm SHA256).Hash

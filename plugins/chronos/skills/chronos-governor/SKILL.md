@@ -107,24 +107,28 @@ Plugin lifecycle hooks register only `SessionStart`, `SessionEnd`,
 `SubagentStart`, and `SubagentStop`. They run headless, return no model context,
 and require the normal one-time Codex hook trust review. If hooks are disabled
 or untrusted, continue with one compact host task-list inventory and reconcile
-it through `-SupervisionAction reconcile-host`; do not ask the user to register
+it through `-SupervisionAction cycle`; do not ask the user to register
 or relay tasks. Brief registry contention uses a bounded protected fallback event;
 `status` and `discover` reconcile and remove it under the registry lock. Never
 bypass hook trust.
 
 For each Governor cycle, apply the bounded cycle-zero/one host convergence check
-when required, then call the host task list exactly once. Write only opaque task
+when required, then call the host task list exactly once. The inventory must be
+complete for the cycle to advance. Write only opaque task
 IDs, safe status categories, optional opaque generations, capture time, and a
 completeness flag to a bounded JSON file under `%TEMP%`; never write titles,
-paths, or transcript content. Run `-SupervisionAction reconcile-host` with that
-file, remove the file, and treat the returned inventory as liveness authority.
+paths, or transcript content. Run `-SupervisionAction cycle` with that file,
+remove the file, and treat the returned inventory as liveness authority. Verify
+that `hostInventoryCycle` advanced once and that `hostTaskStatuses` contains one
+hash-only normalized entry for every listed task.
 Use compact `wait_threads` snapshots from the rotating `checkBatch`, which
 contains at most eight entries. If host inventory is unavailable, fail closed
 for task-directed sends, retain pending state, and retry next cycle without a
 user handoff. If an ended registry entry is confirmed live by the host, use
 `-SupervisionAction confirm-active -SupervisionSubjectId <id>`; a delayed start
 hook cannot revive terminal state by itself. Do not repeatedly read full tasks
-or transcripts. A normal cycle must end without messaging monitored tasks. If
+or transcripts. A normal cycle must end without messaging monitored tasks;
+`taskWakePolicy=intervention_claim_required` is the native postcondition. If
 `rotationRequired=true`, reconcile a fresh Governor or pause the recurrence
 before the current cycle ends. See the public
 [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).

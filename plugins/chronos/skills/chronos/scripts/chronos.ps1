@@ -32,7 +32,7 @@ param(
   [string]$HeartbeatVerificationResult = "",
   [ValidateSet("", "ambiguous_target", "target_not_live", "transport_unavailable", "user_authority_required", "unsupported_action")]
   [string]$HeartbeatFailureReason = "",
-  [ValidateSet("status", "initialize", "confirm-active", "reconcile-host", "discover", "release")]
+  [ValidateSet("status", "initialize", "confirm-active", "reconcile-host", "discover", "cycle", "release")]
   [string]$SupervisionAction = "status",
   [string]$SupervisionStatePath,
   [string]$SupervisionHostInventoryPath,
@@ -245,6 +245,8 @@ function Get-ChronosInstallStatus {
     LegacyGitConfig = $legacyGitConfig
     SourceConflict = $sourceConflict
     CanonicalSource = $canonicalSource
+    CurrentPluginIdentity = if ($currentSource -eq 'standalone') { 'standalone' } else { 'chronos@' + $currentSource }
+    CanonicalPluginIdentity = if ($canonicalSource -eq 'unavailable') { 'unavailable' } else { 'chronos@' + $canonicalSource }
     SessionReloadRequired = $sourceConflict -eq 'CONFIRMED'
     RecommendedAction = $recommendation
   }
@@ -270,6 +272,8 @@ if ($Action -eq 'install-status') {
     legacyGitConfig = $script:ChronosInstallStatus.LegacyGitConfig
     sourceConflict = $script:ChronosInstallStatus.SourceConflict
     canonicalSource = $script:ChronosInstallStatus.CanonicalSource
+    currentPluginIdentity = $script:ChronosInstallStatus.CurrentPluginIdentity
+    canonicalPluginIdentity = $script:ChronosInstallStatus.CanonicalPluginIdentity
     sessionReloadRequired = $script:ChronosInstallStatus.SessionReloadRequired
     recommendedAction = $script:ChronosInstallStatus.RecommendedAction
   }

@@ -34,7 +34,7 @@ Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
 the OpenAI Plugins Directory. They are separate source identities and the
 Directory install does not replace the Git install in an already loaded task.
-Chronos v0.8.8 distinguishes a confirmed enabled-source conflict from cached
+Chronos v0.8.9 distinguishes a confirmed enabled-source conflict from cached
 packages that may be stale. After it confirms the running Directory package
 and enabled legacy Git source, remove the legacy source through the plugin
 manager and start a fresh task:
@@ -96,6 +96,9 @@ paths, identifiers, prompts, commands, credentials, or private source.
   monitored tasks. When action is required, the Governor sends one fixed,
   bounded instruction to the exact verified affected task. Stable event IDs,
   one active intervention per target generation, and bounded retries prevent wake storms.
+- Reconciles every task from one complete bounded host inventory inside each
+  Governor cycle. The native result returns hash-only normalized task statuses;
+  routine cycles do not wake monitored tasks.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.

@@ -60,8 +60,10 @@ automations.
 "<skill-root>\scripts\chronos.cmd" -Action supervise -SupervisionAction status
 ```
 
-Only the Governor task runs `-SupervisionAction initialize`, `reconcile-host`,
-and `discover`. The `.cmd` launcher always applies the required noninteractive
+Only the Governor task runs `-SupervisionAction initialize`, `cycle`,
+`reconcile-host`, and `discover`. Every Governor recurrence must use `cycle`
+with one fresh complete host inventory. Passive `discover` does not increment
+the Governor cycle counter. The `.cmd` launcher always applies the required noninteractive
 Windows PowerShell 5.1 execution-policy flags.
 Host task tools remain the authority for whether a task is live. The registry
 is a privacy-bounded discovery hint, not a task transport or security boundary.
