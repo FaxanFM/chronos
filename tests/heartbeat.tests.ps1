@@ -23,6 +23,23 @@ function Assert-Equal {
   if ($Actual -ne $Expected) { throw "$Message Expected '$Expected', got '$Actual'." }
 }
 
+function Start-HiddenPowerShell {
+  param([string]$EncodedCommand)
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = 'powershell.exe'
+  $info.Arguments = '-NoProfile -NonInteractive -EncodedCommand ' + $EncodedCommand
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+  $process = New-Object Diagnostics.Process
+  $process.StartInfo = $info
+  if (-not $process.Start()) {
+    $process.Dispose()
+    throw 'Could not start the bounded Heartbeat test helper.'
+  }
+  return $process
+}
+
 function Get-TestStableHash {
   param($Value)
   $json = $Value | ConvertTo-Json -Compress -Depth 16
@@ -598,7 +615,7 @@ try {
   $busyMutexName = 'Global\ChronosHeartbeat-' + (Get-TestHash (Get-TestCanonicalStateIdentity $busy.State)).Substring(0, 24)
   $busyCommand = "`$m=New-Object Threading.Mutex(`$false,'$busyMutexName');[void]`$m.WaitOne();[IO.File]::WriteAllText('$($busyReady.Replace("'", "''"))','ready');Start-Sleep -Seconds 7;`$m.ReleaseMutex();`$m.Dispose()"
   $busyEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($busyCommand))
-  $busyHolder = Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $busyEncoded -PassThru -WindowStyle Hidden
+  $busyHolder = Start-HiddenPowerShell $busyEncoded
   try {
     $busyDeadline = [DateTime]::UtcNow.AddSeconds(5)
     while (-not (Test-Path -LiteralPath $busyReady) -and [DateTime]::UtcNow -lt $busyDeadline) { Start-Sleep -Milliseconds 50 }
@@ -960,7 +977,7 @@ try {
   $holder = New-Object Threading.Mutex($false, $mutexName)
   try {
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("`$m=New-Object Threading.Mutex(`$false,'$mutexName');[void]`$m.WaitOne();[Environment]::Exit(0)"))
-    $child = Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedCommand -PassThru -WindowStyle Hidden
+    $child = Start-HiddenPowerShell $encodedCommand
     $child.WaitForExit()
     $child.Dispose()
     $abandonedResult = Invoke-RawModule @('-InputPath', $abandonedInput, '-StatePath', $abandoned.State)

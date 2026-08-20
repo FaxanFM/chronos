@@ -230,6 +230,8 @@ try {
   Assert-True ($emptyData.equivalenceScope -eq 'installation' -and $emptyData.installationScopePersistence -eq 'state_root_anchor') 'Installation equivalence scope or persistence boundary regressed.'
   Assert-True ($emptyData.stateStoreMode -eq 'explicit' -and $emptyData.stateStoreWriteReady -and $emptyData.routineUserAction -eq 'none') 'State-store preflight or autonomous routine-failure contract regressed.'
   Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
+  Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'complete_host_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
+  Assert-True ($emptyData.catalogRefreshAction -eq 'fully_restart_codex_then_start_fresh_task' -and $emptyData.loadedTaskCatalogHotSwap -eq 'unsupported_by_host') 'Install refresh guidance did not preserve the host catalog boundary.'
   Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-5.6-terra' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select Terra Medium.'
   $scopePath = Join-Path (Split-Path -Parent $state) 'installation-scope.json'
   Assert-True (Test-Path -LiteralPath $scopePath -PathType Leaf) 'Status did not create a stable installation-scope anchor.'
@@ -411,7 +413,7 @@ try {
   }
   Assert-True ($turnSignal.ExitCode -eq 0 -and -not $turnSignal.Output -and -not $turnSignal.Error) 'Stop activity hook must be silent and non-blocking.'
   $turnStatus = Get-Payload (Invoke-Supervision $state)
-  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'async_turn_signals_plus_host_inventory' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
+  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'complete_host_inventory_plus_optional_hooks' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
   $rawAfterTurn = [IO.File]::ReadAllText($state)
   foreach ($private in @('turn-private-identifier', 'private assistant response that must not persist')) {
     Assert-True (-not $rawAfterTurn.Contains($private)) "Registry persisted private Stop input: $private"

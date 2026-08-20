@@ -110,7 +110,8 @@ scope rejection, reconciliation retry budget and postcondition,
 cycle and age limits, mandatory complete per-cycle host inventory
 reconciliation, one hash-only normalized status per inventory task, passive
 non-advancing discovery, missed-hook task recovery, absent-task closure, stale inventory
-rejection, state-store preflight, current-user protected identifiers, transcript
+rejection, optional-hook and inventory-authority status fields, full-restart
+catalog guidance, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, monotonic host timestamp/rank
@@ -139,7 +140,7 @@ canary. The registry remains advisory.
 ## Release
 
 `tests/release.tests.ps1` requires exactly three unique, single-line Directory
-starter prompts under 128 characters. It enforces separate semantic coverage
+starter prompts at most 128 characters. It enforces separate semantic coverage
 for complete setup, separated full status, and bounded read-only delegation,
 plus current listing values and end-to-end public setup guidance. It then builds
 twice and requires identical ZIP hashes,

@@ -1130,7 +1130,7 @@ function Get-DiscoveryPayload {
     changes = @($changes)
     resultTruncated = ($activeCount -gt ($activeTasks.Count + $activeAgents.Count))
     registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
-    monitoringMode = 'async_turn_signals_plus_host_inventory'
+    monitoringMode = 'complete_host_inventory_plus_optional_hooks'
     monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
     turnSignals = [long]$State.health.turnSignals
     duplicateSignals = [long]$State.health.duplicateSignals
@@ -1138,8 +1138,13 @@ function Get-DiscoveryPayload {
     workerModelTurns = 0
     hookExecutionObservation = if ([long]$State.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
     hookTrustObservation = 'host_verification_required'
+    hookRole = 'optional_acceleration'
+    hookRequiredForAutonomy = $false
     lastHookUtc = $State.health.lastHookUtc
-    livenessAuthority = 'host_task_tools'
+    livenessAuthority = 'complete_host_inventory'
+    taskDiscoveryAuthority = 'complete_host_inventory_each_governor_cycle'
+    catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
+    loadedTaskCatalogHotSwap = 'unsupported_by_host'
     taskTransport = 'host_required'
     requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
     routineUserAction = 'none'
@@ -1280,7 +1285,13 @@ try {
       registryCoverage = if ([long]$state.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
       hookExecutionObservation = if ([long]$state.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
       hookTrustObservation = 'host_verification_required'
+      hookRole = 'optional_acceleration'
+      hookRequiredForAutonomy = $false
       lastHookUtc = $state.health.lastHookUtc
+      livenessAuthority = 'complete_host_inventory'
+      taskDiscoveryAuthority = 'complete_host_inventory_each_governor_cycle'
+      catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
+      loadedTaskCatalogHotSwap = 'unsupported_by_host'
       taskTransport = 'host_required'
       requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
       routineUserAction = 'none'
@@ -1297,7 +1308,7 @@ try {
       localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
-      monitoringMode = 'async_turn_signals_plus_host_inventory'
+      monitoringMode = 'complete_host_inventory_plus_optional_hooks'
       monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
       hookModelContext = 'none'
       workerModelTurns = 0

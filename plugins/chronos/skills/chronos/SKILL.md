@@ -29,16 +29,17 @@ codex.cmd plugin remove chronos@chronos
 codex.cmd plugin marketplace remove chronos
 ```
 
-Then start a fresh Codex task. An existing task's loaded skill catalog cannot
-be hot-swapped. Do not remove the legacy source when the Directory source is
+Then fully quit and reopen Codex before starting a fresh task. An existing
+process or task's loaded skill catalog cannot be hot-swapped. Do not remove the
+legacy source when the Directory source is
 absent, and do not imply that Chronos changed the active task catalog.
 
 Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
 operating-system scheduler, daemon, service, telemetry file, or persistent log.
-After normal Codex hook trust review, the plugin's five monitoring hooks update
+When trusted and dispatched by Codex, the plugin's five monitoring hooks update
 a bounded local supervision registry for task and subagent lifecycle events and
-one completed-turn signal. Four run asynchronously; `SessionEnd` remains
-synchronous. They do not run on tools, commands, approvals, or prompts and
+one completed-turn signal. Four request
+asynchronous execution where supported; `SessionEnd` remains synchronous. They do not run on tools, commands, approvals, or prompts and
 return no model context. On brief registry contention, a hook writes one
 bounded DPAPI-protected fallback event; the next hook or Governor cycle merges
 and removes it. On Windows, each definition uses a quote-free encoded launcher
@@ -54,14 +55,18 @@ request to verify the installed source, run compact native status, and apply the
 reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
 Do not stop after an inspection or return setup instructions for the user to
-relay. The only manual boundary is normal Codex hook trust review; never bypass
-it. If hooks remain untrusted, complete the safe host-inventory fallback and
-state that passive hook hints are pending trust. An installed, active, or
+relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
+complete setup through authoritative host inventory without asking the user to
+register tasks; state only that optional hook acceleration is pending trust. An installed, active, or
 trusted `/hooks` entry is configuration evidence, not proof that the command
 executed. Read `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` from
 native supervision status. Report `not_observed` until a fresh post-trust
-lifecycle or completed-turn event advances those fields. Keep host inventory as
-the automatic liveness fallback while execution is unobserved.
+lifecycle or completed-turn event advances those fields. Keep one complete host
+inventory per Governor cycle as the task-discovery and liveness authority
+whether hooks execute or not. Hooks are an optional accelerator only.
+`hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
+must not make setup fail after complete inventory and topology postconditions
+pass.
 
 ## Complete status request
 

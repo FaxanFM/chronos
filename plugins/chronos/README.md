@@ -45,11 +45,10 @@ sources: Codex treats `chronos@chronos` and
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
-- Registers task activity and subagent lifecycle changes through five reviewed,
-  headless hooks with no model-visible output or worker recurrence. Four run in
-  the background; `SessionEnd` remains synchronous. Brief registry
-  contention uses a bounded protected fallback that the next Governor status
-  removes after merging.
+- Uses one complete host inventory per Governor cycle as task-discovery
+  authority. Five reviewed headless hooks optionally accelerate task and
+  subagent lifecycle hints with no model-visible output or worker recurrence.
+  A host that does not dispatch them still needs no user task registration.
 - Reuses one host-verified Governor or creates one fresh history-free Governor
   task instead of automatically forking a working task.
 - Routes bounded exploration, review, and verification to read workers. Shared-folder write delegation is disabled.
@@ -73,12 +72,15 @@ codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
 ```
 
-Open a new Codex task after installation.
+After installation or upgrade, fully quit and reopen Codex. Then open a fresh
+task. A running Codex process can retain an old versioned skill catalog even
+after the plugin manager replaces the package.
 
 Chronos v0.9.2 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms
 the running Directory package and enabled legacy Git source, remove the legacy
-source through the Codex plugin manager, then start a fresh task:
+source through the Codex plugin manager, then fully quit and reopen Codex
+before starting a fresh task:
 
 ```powershell
 codex.cmd plugin remove chronos@chronos
@@ -102,8 +104,10 @@ do not ask me to relay routine findings.
 Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, reconciles one host recurrence, enables due Heartbeat
 evaluation there, and proves that worker tasks have no recurrence. Normal Codex
-hook trust review is the only manual boundary. If hooks are not trusted, the
-Governor still uses one complete host inventory as its safe discovery fallback.
+hook trust is optional for autonomous discovery. If Codex presents a trust
+request, only the user can approve it; Chronos proceeds through one complete
+host inventory per Governor cycle whether hooks are trusted or dispatched.
+That complete inventory is the authority. Hooks are an optional accelerator.
 
 For an on-demand diagnostic without enabling supervision, ask:
 

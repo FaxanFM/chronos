@@ -154,23 +154,28 @@ chronos.cmd -Action install-status
 When Chronos confirms that the Directory package is running and the legacy Git
 source remains enabled, remove
 the legacy source through `codex.cmd plugin remove chronos@chronos` followed by
-`codex.cmd plugin marketplace remove chronos`, then start a fresh task. Obtain
+`codex.cmd plugin marketplace remove chronos`, then fully quit and reopen Codex
+before starting a fresh task. Obtain
 user approval before changing plugin-manager state. Never delete cache folders
 or edit `config.toml` directly. Cache presence is not proof that a source is
 enabled; the status output states this limitation.
 
 ## Supervision Recovery
 
-After upgrading, open a fresh task and review the exact Chronos lifecycle hook
-through `/hooks`. Hook trust is bound to the definition hash and cannot be
+After upgrading, fully quit and reopen Codex before opening a fresh task. This
+is required because a running host can retain a removed versioned skill
+locator. Then review the exact Chronos lifecycle hook through `/hooks`. Hook
+trust is bound to the definition hash and cannot be
 bypassed by the plugin. Then ask Codex to enable Chronos supervision once.
 
 The `/hooks` installed, active, and trusted labels do not prove the command ran.
 Check `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` in supervision
-status. A release canary must capture the baseline, complete a fresh normal
-post-trust task without invoking Chronos, and prove those values advance before
-the Governor reconciles host inventory. v0.9.2 keeps the Windows launcher
-quote-free because Codex passes it through an outer `cmd.exe` command boundary.
+status. Where the host dispatches hooks, capture the baseline and prove those
+values advance. Some current Windows Codex and `codex exec` paths can omit hook
+dispatch even while `/hooks` reports active and trusted. Chronos therefore uses
+one complete host inventory per Governor cycle as its autonomous discovery
+authority. v0.9.2 keeps the Windows launcher quote-free because Codex passes it
+through an outer `cmd.exe` command boundary.
 
 First inspect all host automations named `Chronos Governor pulse` and their
 targets. Reuse a live target only after its title and assignment confirm the

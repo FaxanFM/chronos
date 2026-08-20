@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Diagnose and govern Codex",
-    "longDescription": "Run one local Governor that passively discovers active Codex tasks, evaluates actionable Heartbeats, and contacts only the exact affected task when intervention is justified. Chronos also diagnoses Windows resource degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. Silent hooks create no model turns, routine worker tasks stay passive, and bounded read-only workers remain under coordinator verification. No publisher telemetry.",
+    "longDescription": "Run one local Governor that discovers active Codex tasks from one complete host inventory per cycle, evaluates actionable Heartbeats, and contacts only the exact affected task when intervention is justified. Optional silent hooks accelerate lifecycle hints without creating model turns. Chronos also diagnoses Windows degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
     "capabilities": ["One-Governor setup", "Passive task discovery", "Actionable Heartbeats", "Verified task intervention", "Windows resource diagnostics", "Token and approval analysis", "SQLite churn detection", "Bounded read-worker coordination"],
@@ -22,7 +22,7 @@
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.",
+      "After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.",
       "Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.",
       "Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task."
     ],

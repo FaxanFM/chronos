@@ -156,9 +156,11 @@ must match the model persisted by `plan`. A difference fails with
 The installed plugin bundles five monitoring hooks: `SessionStart`,
 `SessionEnd`, `SubagentStart`, `SubagentStop`, and `Stop`. Codex applies its
 normal hash-based trust review before these non-managed hooks can run. Start,
-subagent, and completed-turn handlers use supported asynchronous execution;
-`SessionEnd` remains synchronous as required by Codex. All return exit zero
-without output, add no model context, and fail silent on a registry error.
+subagent, and completed-turn handlers request asynchronous execution where the
+host supports it; `SessionEnd` remains synchronous as required by Codex. Some
+current Windows Codex and `codex exec` paths do not dispatch trusted hooks.
+When invoked, all return exit zero without output, add no model context, and
+fail silent on a registry error.
 
 The hooks invoke the internal `session-registry.ps1` module. It maintains a
 bounded local discovery index with current-user Windows DPAPI protected task
@@ -182,7 +184,8 @@ another PC's local registry. The anchor survives session-registry recovery.
 `chronos.cmd -Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
-is advisory; host task status is authoritative. Terminal lifecycle state has
+is advisory; one complete host inventory per Governor cycle is authoritative.
+Hooks are optional acceleration and are not required for autonomy. Terminal lifecycle state has
 precedence over delayed start events. Bootstrap reconciles matching host
 automations first, reuses a role-verified Governor, otherwise creates one fresh
 task without inherited history, and uses a mutex-protected claim as the

@@ -119,10 +119,11 @@ the user infer success from `governorClaimed` or another internal state name.
 
 Plugin monitoring hooks register `SessionStart`, `SessionEnd`,
 `SubagentStart`, `SubagentStop`, and one `Stop` signal after each completed main
-turn. All non-terminal handlers run asynchronously; `SessionEnd` is
-synchronous. They run headless, return no model context, create no model turn,
-and require the normal one-time Codex hook trust review. If hooks are disabled
-or untrusted, continue with one compact host task-list inventory and reconcile
+turn. Non-terminal handlers request asynchronous execution where the host
+supports it; `SessionEnd` is synchronous. When Codex dispatches them, they run
+headless, return no model context, and create no model turn. Hook trust is
+optional acceleration and must never block setup. If hooks are disabled,
+untrusted, or not dispatched, continue with one complete compact host task-list inventory and reconcile
 it through `-SupervisionAction cycle`; do not ask the user to register
 or relay tasks. Brief registry contention uses a bounded protected fallback event;
 `status` and `discover` reconcile and remove it under the registry lock. Never

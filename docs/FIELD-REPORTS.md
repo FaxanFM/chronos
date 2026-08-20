@@ -26,6 +26,10 @@ successfully exercises the candidate release from a fresh task.
   B through the plugin manager, confirm the old task retains A's locator, then
   confirm a fresh task loads B. This upstream scenario remains reportable to
   the Codex plugin lifecycle owner.
+- Additional v0.9.2 canary evidence: a new task created in the same running app
+  process retained the removed v0.9.0 locator after v0.9.2 was installed. A
+  package cannot rewrite an already loaded host catalog. The documented upgrade
+  boundary is now a full Codex quit and reopen followed by a fresh task.
 
 ### Governor status hid an independent-machine failure
 
@@ -130,6 +134,31 @@ successfully exercises the candidate release from a fresh task.
   active.
 - Validation status: local supervision and Governor suites pass. Independent
   installed-package validation remains required before release.
+
+### Windows host trusted lifecycle hooks without dispatching them
+
+- Affected context: v0.9.0 and the first v0.9.2 canary on a current Windows
+  Codex installation.
+- Reproduction scope: reproduced on one independent installation. The exact
+  quote-free command succeeds through the Windows command boundary locally and
+  in both Windows CI jobs, so this is host-path specific.
+- Evidence: `/hooks` reported all five definitions installed, active, and
+  trusted. A fresh neutral task did not advance `hookRuns`, `turnSignals`, or
+  `lastHookUtc`, and no hook failure was exposed. Complete host-inventory cycles
+  still discovered every live task with no unrelated wake or worker model turn.
+- Root cause boundary: current upstream Codex reports include Windows Desktop
+  lifecycle hooks that are detected but never dispatched and `codex exec` paths
+  that omit hook dispatch. A plugin command cannot run when the host does not
+  invoke it. The quote-free launcher only mitigates the separate embedded-quote
+  command-runner defect; it cannot repair host dispatch.
+- v0.9.2 correction: make complete host inventory the explicit discovery and
+  liveness authority on every Governor cycle. Report hooks as optional
+  acceleration, keep `hookRequiredForAutonomy=false`, and never fail setup when
+  inventory and topology postconditions pass on a non-dispatching host.
+- Regression: native status and public contracts expose the authority, optional
+  hook role, restart action, and zero-user-registration behavior. Deterministic
+  inventory tests require all live tasks, compact statuses, zero routine wakes,
+  and zero worker model turns.
 
 ## Heuristic / Tuning Issues
 

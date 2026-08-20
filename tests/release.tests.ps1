@@ -84,7 +84,7 @@ try {
     Get-Content -Raw -LiteralPath $operationsPath
     Get-Content -Raw -LiteralPath $supportPath
   ) -join "`n"
-  foreach ($required in @('fresh task', 'versioned plugin skill locator', 'Do not copy', 'stale task catalog state')) {
+  foreach ($required in @('fresh task', 'fully quit and reopen Codex', 'versioned plugin skill locator', 'Do not copy', 'stale task catalog state')) {
     if (-not $upgradeBoundary.Contains($required)) {
       throw "Public upgrade guidance is missing the stale task-locator boundary: $required"
     }
@@ -104,7 +104,10 @@ try {
     'gpt-5.6-terra',
     'configuration',
     'hookExecutionObservation=observed',
-    'fresh normal task without invoking Chronos',
+    'optional accelerator',
+    'hookRequiredForAutonomy=false',
+    'complete host inventory',
+    'fully quit and reopen Codex',
     'quote-free',
     'cmd.exe',
     'routine user action',

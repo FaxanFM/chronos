@@ -2,8 +2,8 @@
 
 ## v0.9.2
 
-- Fix silent Windows lifecycle-hook non-execution caused by Codex wrapping
-  commands that contain embedded quotes at its `cmd.exe /C` boundary.
+- Mitigate one Windows lifecycle-hook non-execution path caused by Codex
+  wrapping commands that contain embedded quotes at its `cmd.exe /C` boundary.
 - Replace every Windows hook command with one constant quote-free
   `-EncodedCommand` launcher. The decoded PowerShell resolves `PLUGIN_ROOT`
   internally and invokes only Chronos's packaged session-registry script.
@@ -19,6 +19,13 @@
 - Distinguish host-reported hook configuration or trust from observed command
   execution. Host task inventory remains the automatic liveness fallback until
   a fresh lifecycle event proves hook execution.
+- Make one complete host inventory per Governor cycle the explicit autonomous
+  task-discovery authority. Lifecycle hooks are optional accelerators because
+  some current Windows Codex and `codex exec` paths do not dispatch them even
+  when the host reports them active and trusted.
+- Require a full Codex quit and reopen after installation or upgrade before a
+  fresh task, because a running host can retain a removed versioned skill
+  catalog.
 - Add a complete-status skill contract that runs Inspector, supervision, and
   Heartbeat status without creating a Governor, recurrence, worker, event, or
   task wake.

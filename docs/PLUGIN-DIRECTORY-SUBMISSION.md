@@ -14,12 +14,14 @@ v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
-v0.9.2 is the candidate Directory update. It fixes silent Windows lifecycle
-hook non-execution, preserves terminal state when asynchronous lifecycle events
-arrive out of order, and retains the improved first-use prompts, listing copy,
-full-setup contract, and deterministic prompt-quality gates. The candidate
+v0.9.2 is the candidate Directory update. It mitigates the embedded-quote
+Windows hook-launcher defect, makes complete host inventory authoritative when
+the host does not dispatch hooks, preserves terminal state when asynchronous
+lifecycle events arrive out of order, and requires a full host restart after
+upgrade. It retains the improved first-use prompts, listing copy, full-setup
+contract, and deterministic prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`102d2ef1014ca4f108b72df251e760e7ff106a671f5edef8b399aa71ba8eeb3a`.
+`fb92539e61d31924ef05a054f3b807d5ed955f06d5aa3147f54a0db80c075b79`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -109,20 +111,20 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.`
+1. `After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.`
 2. `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
 3. `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
 
-All three are unique, single-line, under 128 characters, and contain no app
+All three are unique, single-line, at most 128 characters, and contain no app
 mention.
 
 ## Positive Reviewer Cases
 
 ### 1. Complete first-use setup
 
-- Prompt: `Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.`
+- Prompt: `After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.`
 - Expected behavior: verify the installed source and native status, perform
-  normal hook trust review, reuse or create one history-free Governor, and
+  optional hook trust review when the host presents it, reuse or create one history-free Governor, and
   reconcile the installation-scoped recurrence without prompting worker tasks.
 - Expected result: a compact summary showing the active source, native status,
   one live Governor, one active Governor recurrence, readable Heartbeat status,
@@ -243,13 +245,15 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.9.2 fixes Windows lifecycle hooks that could appear
-> installed, active, and trusted without executing. The Windows definitions now
-> use one quote-free encoded launcher that resolves the installed plugin path
-> inside PowerShell. Exact source and extracted-package tests execute that
-> launcher through the Codex-style `cmd.exe` boundary and require fresh registry
-> evidence. Host-reported trust remains separate from observed execution, and
-> complete host inventory remains the automatic fallback. v0.9.2 also retains
+> Chronos for Codex v0.9.2 mitigates the embedded-quote Windows hook-launcher
+> defect with one quote-free encoded launcher that resolves the installed plugin
+> path inside PowerShell. Exact source and extracted-package tests execute that
+> launcher through the Codex-style `cmd.exe` boundary. Some current Windows
+> Codex and `codex exec` paths still do not dispatch trusted hooks; Chronos now
+> labels hooks as optional acceleration and makes complete host inventory the
+> autonomous task-discovery authority on every Governor cycle. Install or
+> upgrade requires a full Codex quit and reopen before a fresh task so the host
+> does not retain a removed versioned skill catalog. v0.9.2 also retains
 > v0.9.1's first starter prompt, which completes the real
 > setup: installed-source verification, native status, one dedicated Governor,
 > one supervision and Heartbeat recurrence, and zero worker recurrences. The
@@ -257,8 +261,9 @@ Do not infer worldwide availability from publication.
 > token explanation. The third prompt demonstrates bounded read-only delegation
 > and coordinator verification. Release tests now enforce three distinct,
 > single-line, action-oriented prompts and their required setup, diagnostic, and
-> delegation concepts. v0.9.2 retains v0.9.0's silent asynchronous lifecycle and completed-turn
-> hooks to discover active tasks without worker prompts or worker model turns.
+> delegation concepts. v0.9.2 retains v0.9.0's silent asynchronous lifecycle
+> and completed-turn hooks as optional hints without worker prompts or worker
+> model turns.
 > It detects duplicate Git and Directory installations,
 > keeps one Terra Medium Governor per machine, and
 > leaves monitored tasks passive on their existing models. Each Governor cycle

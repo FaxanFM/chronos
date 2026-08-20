@@ -7,7 +7,8 @@ or per-task model loop.
 
 ## Setup
 
-After installing or upgrading Chronos, open a fresh Codex task and ask:
+After installing or upgrading Chronos, fully quit and reopen Codex. Then open a
+fresh task and ask:
 
 ```text
 Set up Chronos fully on this PC. Verify the installed source, enable
@@ -31,9 +32,13 @@ The `/hooks` installed, active, and trusted labels describe host configuration.
 They do not prove that Windows launched the command. Native status reports
 `hookExecutionObservation=observed` only after `hookRuns` and `lastHookUtc`
 advance. Until then it reports `not_observed` and keeps the complete host
-inventory as the liveness authority. A release canary must trust the hooks,
-capture those counters, complete a fresh normal task without invoking Chronos,
-and prove that the counters advance before Governor reconciliation.
+inventory as the liveness authority. Hooks are an optional accelerator, not an
+autonomy dependency. Current Windows Codex surfaces can show trusted hooks
+without dispatching them, and `codex exec` can omit hook dispatch. A release
+canary must record observed execution when the host provides it. When it does
+not, the canary must identify the host limitation and prove that one complete
+host inventory still discovers every live task without user registration,
+routine wakes, or worker model turns.
 
 Setup is complete only after Codex reports the active source, native status,
 one live dedicated Governor, one active matching Governor recurrence, readable
@@ -48,8 +53,8 @@ No worker prompt or worker-side script is required. The plugin registers only:
 - `SubagentStop`
 - `Stop`
 
-Start, subagent, and completed-turn handlers use supported asynchronous command
-execution. `SessionEnd` is always synchronous in Codex. Every hook is headless,
+Start, subagent, and completed-turn handlers request asynchronous command
+execution where the host supports it. `SessionEnd` is always synchronous in Codex. Every hook is headless,
 has a three-second host timeout, exits without model-visible output, and never
 runs for prompts, approvals, or tools. The `Stop` hook records only the task,
 a hashed turn signal, safe model/workspace categories, counters, and timestamps.
@@ -286,6 +291,9 @@ prefers Terra Medium. `hookExecutionObservation`, `lastHookUtc`, and
 state. The trust field remains `host_verification_required`; Chronos does not
 infer it from local registry data. A disabled, untrusted, or non-executing hook
 produces no registry event and does not block host inventory reconciliation.
+Native status reports `hookRole=optional_acceleration`,
+`hookRequiredForAutonomy=false`, and
+`taskDiscoveryAuthority=complete_host_inventory_each_governor_cycle`.
 
 Chronos intentionally does not register `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PermissionRequest`, `PreCompact`, or `PostCompact`. This avoids

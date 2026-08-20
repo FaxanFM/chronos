@@ -12,6 +12,11 @@ loops, quota and context pressure, broken permission rules, rollout duplication,
 diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
 stay passive. Chronos sends no publisher telemetry.
 
+One complete host inventory per Governor cycle is the task-discovery authority.
+Lifecycle hooks are an optional accelerator: a Windows host may show them as
+active and trusted without dispatching them. Missing hook execution never
+disables autonomous discovery or asks the user to register tasks.
+
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
 
@@ -29,7 +34,8 @@ codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
 ```
 
-Open a new Codex task, then ask:
+After any install or upgrade, fully quit and reopen Codex. Then open a fresh
+task and ask:
 
 > **Set up Chronos fully on this PC. Verify the installed source, enable
 > supervision and Heartbeats in one dedicated Governor, and confirm one
@@ -43,7 +49,7 @@ Directory install does not replace the Git install in an already loaded task.
 Chronos v0.9.2 distinguishes a confirmed enabled-source conflict from cached
 packages that may be stale. After it confirms the running Directory package
 and enabled legacy Git source, remove the legacy source through the plugin
-manager and start a fresh task:
+manager. Then fully quit and reopen Codex before starting a fresh task:
 
 ```powershell
 codex.cmd plugin remove chronos@chronos
@@ -108,8 +114,9 @@ paths, identifiers, prompts, commands, credentials, or private source.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
-- Registers task activity and subagent lifecycle changes through five reviewed,
-  headless hooks. Four run asynchronously; `SessionEnd` remains synchronous.
+- Registers optional task activity and subagent lifecycle hints through five
+  reviewed headless hooks. Four request asynchronous execution where supported;
+  `SessionEnd` remains synchronous.
   The completed-turn signal has no worker recurrence, model call, transcript
   read, or model-visible output. Brief registry contention uses a bounded
   protected fallback that the next Governor status removes after merging.
@@ -141,11 +148,12 @@ codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
 ```
 
-Open a new Codex task after installation or upgrade. Codex tasks can retain the
-versioned plugin skill locator captured when they started. An older open task
-may therefore advertise a cache path removed by the upgrade even though the new
-version is installed correctly. Do not copy or link new plugin files into an
-old version directory; use a fresh task and verify the installed version.
+Fully quit and reopen Codex after installation or upgrade, then open a fresh
+task. A running process or task can retain the versioned plugin skill locator
+captured before the change and advertise a cache path removed by the upgrade
+even though the new version is installed correctly. Do not copy or link new
+plugin files into an old version directory; restart, use a fresh task, and
+verify the installed version.
 Run `chronos.cmd -Action install-status` to check for duplicate valid cached
 sources. The result deliberately labels this as cache inventory, not proof of
 enabled state.
@@ -170,8 +178,9 @@ do not ask me to relay routine findings.
 Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, reconciles one host recurrence, enables due Heartbeat
 evaluation there, and proves that worker tasks have no recurrence. Normal Codex
-hook trust review is the only manual boundary. If hooks are not trusted, the
-Governor still uses one complete host inventory as its safe discovery fallback.
+hook trust is optional for autonomous discovery. If Codex presents a trust
+request, only the user can approve it; Chronos proceeds through one complete
+host inventory per Governor cycle whether the hooks are trusted or dispatched.
 
 For an on-demand diagnostic without enabling supervision, ask:
 
@@ -180,7 +189,7 @@ Run a complete Chronos status. Separate machine health from workflow, quota,
 approval, rule, SQLite, and supervision issues.
 ```
 
-Review and trust the packaged lifecycle hook once through Codex `/hooks`.
+Optionally review and trust the packaged lifecycle hooks through Codex `/hooks`.
 Worker tasks need no script or prompt and can use Luna, Terra, Sol, or another
 runtime model. Setup explicitly enables at most one Governor turn per hour
 while work is active and one every six hours while idle. The Governor rotates
