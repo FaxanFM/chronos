@@ -100,6 +100,8 @@ silent normal cycles.
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native
 `chronos.cmd` and `chronos.ps1 -Action supervise` wrappers, empty status,
 lifecycle start and end,
+asynchronous completed-turn activity, duplicate turn-signal deduplication,
+mid-session self-discovery,
 strict UTF-8 and BOM-framed hook input,
 Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
@@ -118,9 +120,9 @@ live mutex contention with deterministic state and queue postconditions, atomic 
 recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 full 256-record capacity behavior, silent hook output,
-headless Windows commands, lifecycle-only event coverage, rejection of
-unsupported background-hook flags, and absence of scheduler, process-launch,
-and network primitives.
+headless Windows commands, bounded event coverage, correct asynchronous flags
+with synchronous `SessionEnd`, absence of high-frequency prompt/tool hooks, and
+absence of scheduler, process-launch, and network primitives.
 
 The suite does not use an elapsed-time threshold as a correctness assertion;
 the production hook ceiling and fixed mutex waits are validated structurally,

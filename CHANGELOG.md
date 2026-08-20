@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.0
+
+- Use supported asynchronous command hooks for `SessionStart`,
+  `SubagentStart`, `SubagentStop`, and `Stop`. Keep `SessionEnd` synchronous as
+  required by Codex.
+- Add one silent completed-turn activity signal per main task. This lets a task
+  first observed after installation register itself without a prompt, worker
+  recurrence, model call, transcript read, or model-visible hook output.
+- Deduplicate activity by a SHA-256 turn hash and persist only bounded counters,
+  protected task IDs, safe categories, and timestamps. Prompt, response,
+  transcript, tool, and raw turn data remain excluded.
+- Keep the complete host task inventory as the liveness authority on each
+  Governor cycle. Hooks reduce discovery delay; they do not wake tasks,
+  authorize interventions, replace host reconciliation, or create model turns.
+- Continue to exclude prompt and tool hooks. This avoids launching a process for
+  each tool call and keeps routine monitoring overhead bounded to task
+  lifecycle changes plus one short local process after a completed main turn.
+
 ## v0.8.9
 
 - Make `supervise cycle` the only action that advances a Governor cycle. It

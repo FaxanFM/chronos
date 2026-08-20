@@ -434,7 +434,7 @@ function ConvertTo-UtcTimestamp {
 
 function New-State {
   return [ordered]@{
-    schema = 3
+    schema = 4
     revision = 0L
     governor = $null
     sessions = @{}
@@ -444,6 +444,8 @@ function New-State {
       ignoredStaleEvents = 0L
       scanOffset = 0L
       lastHookUtc = $null
+      turnSignals = 0L
+      duplicateSignals = 0L
     }
   }
 }
@@ -456,6 +458,15 @@ function Upgrade-State {
       if (-not $record.Contains('generationHash')) { $record['generationHash'] = $null }
     }
     $State.schema = 3
+  }
+  if ((Test-IsInteger $State.schema) -and [int]$State.schema -eq 3) {
+    if (-not $State.health.Contains('turnSignals')) { $State.health['turnSignals'] = 0L }
+    if (-not $State.health.Contains('duplicateSignals')) { $State.health['duplicateSignals'] = 0L }
+    foreach ($record in @($State.sessions.Values)) {
+      if (-not $record.Contains('lastSignalHash')) { $record['lastSignalHash'] = $null }
+      if (-not $record.Contains('turnSignals')) { $record['turnSignals'] = 0L }
+    }
+    $State.schema = 4
   }
   return $State
 }
@@ -471,18 +482,20 @@ function Assert-ExactKeys {
 function Assert-State {
   param($State, [switch]$ValidateProtectedIds)
   Assert-ExactKeys $State @('schema', 'revision', 'governor', 'sessions', 'health')
-  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 3 -or
+  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 4 -or
       -not (Test-IsInteger $State.revision) -or [long]$State.revision -lt 0 -or
       -not ($State.sessions -is [Collections.IDictionary]) -or
       -not ($State.health -is [Collections.IDictionary]) -or
       $State.sessions.Count -gt $script:SessionLimit) {
     throw 'supervision_state_invalid'
   }
-  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc')
+  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc', 'turnSignals', 'duplicateSignals')
   if (-not (Test-IsInteger $State.health.hookRuns) -or [long]$State.health.hookRuns -lt 0 -or
       -not (Test-IsInteger $State.health.droppedEntries) -or [long]$State.health.droppedEntries -lt 0 -or
       -not (Test-IsInteger $State.health.ignoredStaleEvents) -or [long]$State.health.ignoredStaleEvents -lt 0 -or
-      -not (Test-IsInteger $State.health.scanOffset) -or [long]$State.health.scanOffset -lt 0) {
+      -not (Test-IsInteger $State.health.scanOffset) -or [long]$State.health.scanOffset -lt 0 -or
+      -not (Test-IsInteger $State.health.turnSignals) -or [long]$State.health.turnSignals -lt 0 -or
+      -not (Test-IsInteger $State.health.duplicateSignals) -or [long]$State.health.duplicateSignals -lt 0) {
     throw 'supervision_state_invalid'
   }
   if ($null -ne $State.health.lastHookUtc) { [void](ConvertTo-UtcTimestamp $State.health.lastHookUtc) }
@@ -500,12 +513,13 @@ function Assert-State {
   foreach ($key in $State.sessions.Keys) {
     if ([string]$key -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     $record = $State.sessions[$key]
-    Assert-ExactKeys $record @('idHash', 'protectedId', 'kind', 'parentHash', 'workspaceHash', 'model', 'state', 'source', 'generationHash', 'firstSeenUtc', 'lastSeenUtc', 'endedAtUtc', 'lastEventUtc', 'lastEventRank', 'recordRevision')
+    Assert-ExactKeys $record @('idHash', 'protectedId', 'kind', 'parentHash', 'workspaceHash', 'model', 'state', 'source', 'generationHash', 'firstSeenUtc', 'lastSeenUtc', 'endedAtUtc', 'lastEventUtc', 'lastEventRank', 'recordRevision', 'lastSignalHash', 'turnSignals')
     if ([string]$record.idHash -ne [string]$key -or -not (Test-ProtectedIdShape $record.protectedId)) { throw 'supervision_state_invalid' }
     if ($ValidateProtectedIds -and (Get-TextHash (Unprotect-OpaqueId $record.protectedId)) -ne [string]$key) { throw 'supervision_state_invalid' }
     if ([string]$record.kind -notin @('task', 'agent') -or [string]$record.state -notin @('active', 'ended')) { throw 'supervision_state_invalid' }
     if ($null -ne $record.parentHash -and [string]$record.parentHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     if ($null -ne $record.generationHash -and [string]$record.generationHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
+    if ($null -ne $record.lastSignalHash -and [string]$record.lastSignalHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     if ([string]$record.workspaceHash -notmatch '^[a-f0-9]{64}$' -or [string]$record.model -notmatch '^[A-Za-z0-9._:/-]{1,128}$') { throw 'supervision_state_invalid' }
     if ([string]$record.source -notin @('startup', 'resume', 'clear', 'compact', 'subagent', 'fallback')) { throw 'supervision_state_invalid' }
     [void](ConvertTo-UtcTimestamp $record.firstSeenUtc)
@@ -514,6 +528,7 @@ function Assert-State {
     [void](ConvertTo-UtcTimestamp $record.lastEventUtc)
     if (-not (Test-IsInteger $record.lastEventRank) -or [int]$record.lastEventRank -lt 1 -or [int]$record.lastEventRank -gt 3) { throw 'supervision_state_invalid' }
     if (-not (Test-IsInteger $record.recordRevision) -or [long]$record.recordRevision -lt 0 -or [long]$record.recordRevision -gt [long]$State.revision) { throw 'supervision_state_invalid' }
+    if (-not (Test-IsInteger $record.turnSignals) -or [long]$record.turnSignals -lt 0) { throw 'supervision_state_invalid' }
   }
   if ($null -ne $State.governor -and -not $State.sessions.Contains([string]$State.governor.idHash)) { throw 'supervision_state_invalid' }
 }
@@ -597,7 +612,7 @@ function Get-PendingEventDirectory {
 function New-PreparedHookEvent {
   param($HookData, [DateTimeOffset]$EventObservedAt)
   $event = [string](Get-Value $HookData 'hook_event_name' '')
-  if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop')) { throw 'supervision_hook_event_invalid' }
+  if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop')) { throw 'supervision_hook_event_invalid' }
   $session = Normalize-OpaqueId (Get-Value $HookData 'session_id')
   $agent = $null
   if ($event -in @('SubagentStart', 'SubagentStop')) {
@@ -606,22 +621,29 @@ function New-PreparedHookEvent {
   $source = if ($event -eq 'SessionStart') { [string](Get-Value $HookData 'source' 'startup') } elseif ($event -in @('SubagentStart', 'SubagentStop')) { 'subagent' } else { 'fallback' }
   if ($event -eq 'SessionStart' -and $source -notin @('startup', 'resume', 'clear', 'compact')) { throw 'supervision_hook_source_invalid' }
   return [ordered]@{
-    schema = 1
+    schema = 2
     event = $event
     protectedSessionId = Protect-OpaqueId $session
     protectedAgentId = if ($null -ne $agent) { Protect-OpaqueId $agent } else { $null }
     workspaceHash = Get-WorkspaceHash (Get-Value $HookData 'cwd')
     model = Normalize-Model (Get-Value $HookData 'model')
     source = $source
+    signalHash = if ($event -eq 'Stop') { Get-TextHash (Normalize-OpaqueId (Get-Value $HookData 'turn_id') 'supervision_turn_id_invalid') } else { $null }
     observedAtUtc = $EventObservedAt.ToString('o')
   }
 }
 
 function Assert-PendingHookEvent {
   param($Record)
-  Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'observedAtUtc')
-  if (-not (Test-IsInteger $Record.schema) -or [int]$Record.schema -ne 1 -or
-      [string]$Record.event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop') -or
+  $schema = Get-Value $Record 'schema' $null
+  if (-not (Test-IsInteger $schema) -or [int]$schema -notin @(1, 2)) { throw 'supervision_pending_event_invalid' }
+  if ([int]$schema -eq 1) {
+    Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'observedAtUtc')
+  } else {
+    Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'signalHash', 'observedAtUtc')
+  }
+  $allowedEvents = if ([int]$schema -eq 1) { @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop') } else { @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop') }
+  if ([string]$Record.event -notin $allowedEvents -or
       -not (Test-ProtectedIdShape $Record.protectedSessionId) -or
       [string]$Record.workspaceHash -notmatch '^[a-f0-9]{64}$' -or
       [string]$Record.model -notmatch '^[A-Za-z0-9._:/-]{1,128}$' -or
@@ -631,6 +653,11 @@ function Assert-PendingHookEvent {
   if ([string]$Record.event -in @('SubagentStart', 'SubagentStop')) {
     if (-not (Test-ProtectedIdShape $Record.protectedAgentId)) { throw 'supervision_pending_event_invalid' }
   } elseif ($null -ne $Record.protectedAgentId) {
+    throw 'supervision_pending_event_invalid'
+  }
+  if ([int]$schema -eq 2 -and [string]$Record.event -eq 'Stop') {
+    if ([string]$Record.signalHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_pending_event_invalid' }
+  } elseif ([int]$schema -eq 2 -and $null -ne $Record.signalHash) {
     throw 'supervision_pending_event_invalid'
   }
   [void](ConvertTo-UtcTimestamp $Record.observedAtUtc)
@@ -723,7 +750,7 @@ function Merge-PendingHookEvents {
       $hookData.agent_id = Unprotect-OpaqueId $record.protectedAgentId
       $preparedProtectedId = [string]$record.protectedAgentId
     }
-    Invoke-HookEvent $State $hookData $Now (ConvertTo-UtcTimestamp $record.observedAtUtc) $preparedProtectedId ([string]$record.workspaceHash)
+    Invoke-HookEvent $State $hookData $Now (ConvertTo-UtcTimestamp $record.observedAtUtc) $preparedProtectedId ([string]$record.workspaceHash) ([string](Get-Value $record 'signalHash' ''))
   }
   foreach ($item in @($items | Where-Object { -not $_.Valid })) {
     $State.health.droppedEntries = [long]$State.health.droppedEntries + 1
@@ -954,6 +981,8 @@ function Set-SessionRecord {
     lastEventUtc = $EventObservedAt.ToString('o')
     lastEventRank = $EventRank
     recordRevision = [long]$State.revision
+    lastSignalHash = if ($existing) { $existing.lastSignalHash } else { $null }
+    turnSignals = if ($existing) { [long]$existing.turnSignals } else { 0L }
   }
   if ($null -ne $State.governor -and [string]$State.governor.idHash -eq $hash) {
     $State.governor.lastSeenUtc = $Now.ToString('o')
@@ -962,9 +991,9 @@ function Set-SessionRecord {
 }
 
 function Invoke-HookEvent {
-  param($State, $HookData, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$PreparedProtectedId, [string]$PreparedWorkspaceHash)
+  param($State, $HookData, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$PreparedProtectedId, [string]$PreparedWorkspaceHash, [string]$PreparedSignalHash)
   $event = [string](Get-Value $HookData 'hook_event_name' '')
-  if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop')) { throw 'supervision_hook_event_invalid' }
+  if ($event -notin @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop')) { throw 'supervision_hook_event_invalid' }
   $session = Normalize-OpaqueId (Get-Value $HookData 'session_id')
   $workspaceHash = if ([string]$PreparedWorkspaceHash -match '^[a-f0-9]{64}$') { $PreparedWorkspaceHash } else { Get-WorkspaceHash (Get-Value $HookData 'cwd') }
   $model = Normalize-Model (Get-Value $HookData 'model')
@@ -1001,6 +1030,26 @@ function Invoke-HookEvent {
         [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $record.workspaceHash $record.model 'ended' 'subagent' $Now $EventObservedAt 2)
       }
     }
+    'Stop' {
+      $signalHash = if ($PreparedSignalHash -match '^[a-f0-9]{64}$') {
+        $PreparedSignalHash
+      } else {
+        Get-TextHash (Normalize-OpaqueId (Get-Value $HookData 'turn_id') 'supervision_turn_id_invalid')
+      }
+      $hash = Get-TextHash $session
+      if ($State.sessions.Contains($hash) -and [string]$State.sessions[$hash].lastSignalHash -eq $signalHash) {
+        $State.health.duplicateSignals = [long]$State.health.duplicateSignals + 1
+      } else {
+        $existing = if ($State.sessions.Contains($hash)) { $State.sessions[$hash] } else { $null }
+        $source = if ($existing) { [string]$existing.source } else { 'fallback' }
+        $updated = Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'active' $source $Now $EventObservedAt 3 $PreparedProtectedId
+        if ($updated) {
+          $State.sessions[$hash].lastSignalHash = $signalHash
+          $State.sessions[$hash].turnSignals = [long]$State.sessions[$hash].turnSignals + 1
+          $State.health.turnSignals = [long]$State.health.turnSignals + 1
+        }
+      }
+    }
   }
   $State.health.hookRuns = [long]$State.health.hookRuns + 1
   $State.health.lastHookUtc = $Now.ToString('o')
@@ -1028,6 +1077,7 @@ function Get-DiscoveryPayload {
       workspaceHash = ([string]$record.workspaceHash).Substring(0, 16)
       model = [string]$record.model
       lastSeenUtc = [string]$record.lastSeenUtc
+      turnSignals = [long]$record.turnSignals
       liveness = if ($record.state -eq 'ended') { 'ended' } elseif (($Now - (ConvertTo-UtcTimestamp $record.lastSeenUtc)).TotalHours -le 2) { 'recent' } else { 'host_verification_required' }
       recordRevision = [long]$record.recordRevision
     }
@@ -1071,6 +1121,12 @@ function Get-DiscoveryPayload {
     changes = @($changes)
     resultTruncated = ($activeCount -gt ($activeTasks.Count + $activeAgents.Count))
     registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
+    monitoringMode = 'async_turn_signals_plus_host_inventory'
+    monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
+    turnSignals = [long]$State.health.turnSignals
+    duplicateSignals = [long]$State.health.duplicateSignals
+    hookModelContext = 'none'
+    workerModelTurns = 0
     hookExecutionObservation = if ([long]$State.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
     hookTrustObservation = 'host_verification_required'
     lastHookUtc = $State.health.lastHookUtc
@@ -1207,6 +1263,8 @@ try {
       activeAgents = $activeAgents
       retainedRecords = $state.sessions.Count
       hookRuns = [long]$state.health.hookRuns
+      turnSignals = [long]$state.health.turnSignals
+      duplicateSignals = [long]$state.health.duplicateSignals
       droppedEntries = [long]$state.health.droppedEntries
       ignoredStaleEvents = [long]$state.health.ignoredStaleEvents
       registryCapacity = if ([long]$state.health.droppedEntries -gt 0) { 'exhausted' } else { 'available' }
@@ -1230,6 +1288,10 @@ try {
       localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
+      monitoringMode = 'async_turn_signals_plus_host_inventory'
+      monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
+      hookModelContext = 'none'
+      workerModelTurns = 0
       recommendedGovernorModel = 'gpt-5.6-terra'
       recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }

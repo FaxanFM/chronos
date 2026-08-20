@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.8.9",
+  "version": "0.9.0",
   "description": "Detect Codex degradation, approval loops, quota amplification, workflow regressions, SQLite churn, and coordinate bounded read workers on Windows.",
   "author": {
     "name": "Dravara, LLC",
@@ -14,10 +14,10 @@
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Diagnose Codex on Windows",
-    "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health; detect actionable transitions during long-running work; discover active tasks through privacy-bounded lifecycle hints; and coordinate bounded Codex read tasks using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
+    "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health; monitor active tasks through silent asynchronous turn and lifecycle signals plus complete host reconciliation; and coordinate bounded Codex read tasks using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
-    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Approval and rule diagnostics", "Heartbeat transition detection", "Passive task discovery", "Fork and lineage diagnostics", "Bounded worker coordination", "Guided recovery"],
+    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Approval and rule diagnostics", "Heartbeat transition detection", "Autonomous task monitoring", "Fork and lineage diagnostics", "Bounded worker coordination", "Guided recovery"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",

@@ -31,12 +31,15 @@ No worker prompt or worker-side script is required. The plugin registers only:
 - `SessionEnd`
 - `SubagentStart`
 - `SubagentStop`
+- `Stop`
 
-All four hooks use bounded synchronous command handlers for compatibility with
-Codex hosts that skip plugin handlers marked `async`. Every hook is headless,
+Start, subagent, and completed-turn handlers use supported asynchronous command
+execution. `SessionEnd` is always synchronous in Codex. Every hook is headless,
 has a three-second host timeout, exits without model-visible output, and never
-runs for prompts, turns, approvals, or tools. `SessionEnd` mutex acquisition is
-capped at 250 ms; start and subagent acquisition is capped at 100 ms. If the
+runs for prompts, approvals, or tools. The `Stop` hook records only the task,
+a hashed turn signal, safe model/workspace categories, counters, and timestamps.
+`SessionEnd` mutex acquisition is capped at 250 ms; asynchronous acquisition is
+capped at 100 ms. If the
 registry is busy, the hook writes one bounded protected fallback event and
 exits zero. The next hook or Governor status merges the event under the
 registry mutex.
@@ -252,13 +255,21 @@ is not a transcript, diagnostic log, or telemetry transport.
 ## Usage Boundary
 
 Supervision adds one short local PowerShell process at task or subagent start
-and end. It adds no per-turn model tokens and no worker recurrence. Only the
+and end, plus one background process after each completed main-task turn. It
+adds no hook-generated model turn, model-visible context, or worker recurrence. Only the
 dedicated Governor uses a model on the disclosed bounded host cadence. The
 deterministic supervision engine is model-agnostic; the bootstrap policy alone
 prefers Terra Medium. `hookExecutionObservation`, `lastHookUtc`, and
 `hookTrustObservation` distinguish observed execution from the host-only trust
 state. A disabled or untrusted hook produces no registry event and does not
 block host inventory reconciliation.
+
+Chronos intentionally does not register `UserPromptSubmit`, `PreToolUse`,
+`PostToolUse`, `PermissionRequest`, `PreCompact`, or `PostCompact`. This avoids
+prompt inspection, model steering, and a process launch for every tool call.
+The completed-turn signal improves discovery and recent-activity evidence; one
+complete host inventory per Governor cycle remains the task-liveness authority
+and includes both explicitly targeted and automatically discovered live tasks.
 
 Official Codex hook behavior, plugin hook discovery, trust review, asynchronous
 execution, and event fields are documented in [OpenAI Hooks](https://learn.chatgpt.com/docs/hooks).

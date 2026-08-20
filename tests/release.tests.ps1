@@ -252,11 +252,19 @@ try {
     throw "Canonical Directory clean-install discovery failed.`n$directoryText"
   }
   $installedHookText = Get-Content -Raw -LiteralPath (Join-Path $installRoot 'hooks\hooks.json')
-  if ($installedHookText.Contains('"async"')) {
-    throw 'Extracted package requests background hooks that the target Codex host skips.'
+  $installedHooks = $installedHookText | ConvertFrom-Json
+  $installedEventNames = @($installedHooks.hooks.PSObject.Properties.Name | Sort-Object)
+  if (($installedEventNames -join ',') -ne 'SessionEnd,SessionStart,Stop,SubagentStart,SubagentStop') {
+    throw 'Extracted package does not contain the expected bounded monitoring hook set.'
   }
-  if (([regex]::Matches($installedHookText, '"timeout"\s*:\s*3')).Count -ne 4) {
-    throw 'Extracted package must cap every lifecycle hook at three seconds.'
+  if (([regex]::Matches($installedHookText, '"async"\s*:\s*true')).Count -ne 4) {
+    throw 'Extracted package must run every non-terminal monitoring hook in the background.'
+  }
+  if (($installedHooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async') {
+    throw 'Extracted package must leave SessionEnd synchronous.'
+  }
+  if (([regex]::Matches($installedHookText, '"timeout"\s*:\s*3')).Count -ne 5) {
+    throw 'Extracted package must cap every monitoring hook at three seconds.'
   }
   foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
     $parseErrors = $null

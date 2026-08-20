@@ -48,7 +48,7 @@ The authoritative immutable v0.8.7 ZIP SHA-256 is
 `580a64fb5f1393005c7fc314979a025f3d64137515a9bb70f41e1824ac60d640`.
 The authoritative immutable v0.8.8 ZIP SHA-256 is
 `686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
-v0.8.8 is the current published Directory package while v0.8.9 completes its
+v0.8.8 is the current published Directory package while v0.9.0 completes its
 release gates.
 
 ## Published Release

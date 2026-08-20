@@ -34,7 +34,7 @@ Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
 the OpenAI Plugins Directory. They are separate source identities and the
 Directory install does not replace the Git install in an already loaded task.
-Chronos v0.8.9 distinguishes a confirmed enabled-source conflict from cached
+Chronos v0.9.0 distinguishes a confirmed enabled-source conflict from cached
 packages that may be stale. After it confirms the running Directory package
 and enabled legacy Git source, remove the legacy source through the plugin
 manager and start a fresh task:
@@ -102,9 +102,10 @@ paths, identifiers, prompts, commands, credentials, or private source.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
-- Passively registers task and subagent lifecycle changes through four reviewed,
-  headless hooks. No per-turn hook, worker recurrence, transcript read, or
-  model-visible hook output is used. Brief registry contention uses a bounded
+- Registers task activity and subagent lifecycle changes through five reviewed,
+  headless hooks. Four run asynchronously; `SessionEnd` remains synchronous.
+  The completed-turn signal has no worker recurrence, model call, transcript
+  read, or model-visible output. Brief registry contention uses a bounded
   protected fallback that the next Governor status removes after merging.
 - Reuses one host-verified Chronos Governor or creates a fresh history-free
   Governor task. It never automatically forks a large working task.
@@ -175,8 +176,9 @@ equivalence key, deterministic winner order, and three-attempt reconciliation
 budget keep simultaneous setup attempts on that PC converged on one task and one recurrence.
 Different PCs retain separate Governors for their separate local registries.
 Only the first two Governor pulses repeat that check; normal cycles do not.
-Only that task owns host recurrence. It discovers task and subagent starts or
-stops from a small encrypted local registry, then reconciles one compact host
+Only that task owns host recurrence. It discovers task starts, completed turns,
+ends, and subagent lifecycle changes from a small encrypted local registry,
+then reconciles one compact host
 inventory as the liveness authority. If hooks are disabled, that inventory is
 the automatic fallback; the user does not register tasks or relay routine
 findings. See
@@ -240,7 +242,8 @@ focused v0.7.7 correctness repairs and validation boundary.
 ## Safety and privacy
 
 - Inspector and Governor commands run when requested. After explicit opt-in,
-  four lifecycle hooks and one host Governor recurrence can run automatically.
+  five silent monitoring hooks and one host Governor recurrence can run
+  automatically.
 - Does not transmit telemetry or retain raw prompts, responses, source, diffs,
   commands, tool output, credentials, usernames, or absolute paths. It retains
   only the bounded local pseudonymous coordination metadata described below.
@@ -262,8 +265,8 @@ focused v0.7.7 correctness repairs and validation boundary.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
 - Creates no operating-system scheduled task, service, publisher telemetry, or
-  persistent log. Four reviewed plugin hooks store bounded task lifecycle hints
-  only at start and end. A recurring Codex automation exists only when the user
+  persistent log. Five reviewed plugin hooks store bounded task lifecycle and
+  completed-turn hints. A recurring Codex automation exists only when the user
   explicitly enables supervision or Heartbeats through the host. Setup
   reconciles duplicates, and release stops the recurrence before clearing local
   ownership.

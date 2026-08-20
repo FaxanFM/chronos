@@ -103,8 +103,10 @@ tasks, create another Governor, broadcast routine status, or assign remediation
 to the user. Keep worker recurrence disabled.
 ```
 
-Plugin lifecycle hooks register only `SessionStart`, `SessionEnd`,
-`SubagentStart`, and `SubagentStop`. They run headless, return no model context,
+Plugin monitoring hooks register `SessionStart`, `SessionEnd`,
+`SubagentStart`, `SubagentStop`, and one `Stop` signal after each completed main
+turn. All non-terminal handlers run asynchronously; `SessionEnd` is
+synchronous. They run headless, return no model context, create no model turn,
 and require the normal one-time Codex hook trust review. If hooks are disabled
 or untrusted, continue with one compact host task-list inventory and reconcile
 it through `-SupervisionAction cycle`; do not ask the user to register

@@ -127,15 +127,16 @@ try {
 
   $hooks = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json
   $eventNames = @($hooks.hooks.PSObject.Properties.Name | Sort-Object)
-  Assert-True (($eventNames -join ',') -eq 'SessionEnd,SessionStart,SubagentStart,SubagentStop') 'Hooks must contain lifecycle events only.'
+  Assert-True (($eventNames -join ',') -eq 'SessionEnd,SessionStart,Stop,SubagentStart,SubagentStop') 'Hooks must contain the bounded lifecycle and completed-turn events only.'
   $hookText = Get-Content -Raw -LiteralPath $hooksPath
-  foreach ($forbidden in @('PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'PermissionRequest')) {
-    Assert-True (-not $hookText.Contains($forbidden)) "Per-turn or turn-ending hook was present: $forbidden"
+  foreach ($forbidden in @('PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'PermissionRequest', 'PreCompact', 'PostCompact')) {
+    Assert-True (-not $hookText.Contains($forbidden)) "High-frequency or model-steering hook was present: $forbidden"
   }
   Assert-True ($hookText.Contains('-WindowStyle Hidden')) 'Windows hook commands must be headless.'
   Assert-True ($hookText.Contains('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')) 'Windows hooks must use the system PowerShell path.'
-  Assert-True (-not $hookText.Contains('"async"')) 'Packaged hooks must not request background execution that the target Codex host skips.'
-  Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 4) 'Every lifecycle hook must retain the three-second host ceiling.'
+  Assert-True (([regex]::Matches($hookText, '"async"\s*:\s*true')).Count -eq 4) 'Every non-terminal hook must use supported background execution.'
+  Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 5) 'Every packaged hook must retain the three-second host ceiling.'
+  Assert-True (-not (($hooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async')) 'SessionEnd must remain explicitly synchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
   Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
   $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath
@@ -343,6 +344,36 @@ try {
   foreach ($private in @($task, $cwd, 'private-rollout.jsonl')) {
     Assert-True (-not $raw.Contains($private)) "Registry persisted private input: $private"
   }
+
+  $turnSignal = Invoke-Hook $state @{
+    session_id = $task
+    turn_id = 'turn-private-identifier'
+    cwd = $cwd
+    hook_event_name = 'Stop'
+    model = 'gpt-5.6-sol'
+    last_assistant_message = 'private assistant response that must not persist'
+  }
+  Assert-True ($turnSignal.ExitCode -eq 0 -and -not $turnSignal.Output -and -not $turnSignal.Error) 'Stop activity hook must be silent and non-blocking.'
+  $turnStatus = Get-Payload (Invoke-Supervision $state)
+  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'async_turn_signals_plus_host_inventory' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
+  $rawAfterTurn = [IO.File]::ReadAllText($state)
+  foreach ($private in @('turn-private-identifier', 'private assistant response that must not persist')) {
+    Assert-True (-not $rawAfterTurn.Contains($private)) "Registry persisted private Stop input: $private"
+  }
+  [void](Invoke-Hook $state @{
+    session_id = $task; turn_id = 'turn-private-identifier'; cwd = $cwd;
+    hook_event_name = 'Stop'; model = 'gpt-5.6-sol'
+  })
+  $duplicateTurnStatus = Get-Payload (Invoke-Supervision $state)
+  Assert-True ($duplicateTurnStatus.turnSignals -eq 1 -and $duplicateTurnStatus.duplicateSignals -eq 1) 'Duplicate completed-turn signal was not deduplicated.'
+
+  $lateInstallState = Join-Path $root 'late-install-stop.json'
+  [void](Invoke-Hook $lateInstallState @{
+    session_id = 'thread-discovered-mid-session'; turn_id = 'turn-first-observed';
+    cwd = $cwd; hook_event_name = 'Stop'; model = 'gpt-5.6-terra'
+  })
+  $lateInstallStatus = Get-Payload (Invoke-Supervision $lateInstallState)
+  Assert-True ($lateInstallStatus.activeTasks -eq 1 -and $lateInstallStatus.turnSignals -eq 1) 'A task first observed after installation was not self-discovered.'
 
   $initialize = Invoke-Supervision $state 'initialize' $task
   Assert-True ($initialize.ExitCode -eq 0) "Governor initialization failed: $($initialize.Text)"
@@ -621,8 +652,12 @@ try {
   Assert-True ($pendingJson.Count -eq 1 -and $pendingLocks.Count -eq 0) 'Contended SessionEnd was not preserved by one atomic slot or stale reservations were retained.'
   $pendingText = Get-Content -Raw -LiteralPath $pendingJson[0].FullName
   Assert-True ($pendingText -notmatch 'thread-mutex|[A-Za-z]:\\') 'Fallback queue persisted a raw task ID or workspace path.'
+  $legacyPending = $pendingText | ConvertFrom-Json
+  $legacyPending.schema = 1
+  $legacyPending.PSObject.Properties.Remove('signalHash')
+  [IO.File]::WriteAllText($pendingJson[0].FullName, ($legacyPending | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
   $reconciledMutexStatus = Get-Payload (Invoke-Supervision $mutexState)
-  Assert-True ($reconciledMutexStatus.activeTasks -eq 0 -and $reconciledMutexStatus.hookRuns -eq 2) 'Governor status did not merge the contended SessionEnd.'
+  Assert-True ($reconciledMutexStatus.activeTasks -eq 0 -and $reconciledMutexStatus.hookRuns -eq 2) 'Governor status did not merge the legacy contended SessionEnd.'
   Assert-True (@(Get-ChildItem -LiteralPath $pendingDirectory -File -Force).Count -eq 0) 'Merged fallback queue entries were not removed.'
 
   $sourceText = Get-Content -Raw -LiteralPath $module

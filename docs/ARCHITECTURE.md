@@ -153,17 +153,18 @@ must match the model persisted by `plan`. A difference fails with
 
 ## Passive Supervision
 
-The installed plugin bundles four lifecycle hooks: `SessionStart`,
-`SessionEnd`, `SubagentStart`, and `SubagentStop`. Codex applies its normal
-hash-based trust review before these non-managed hooks can run. All four use
-bounded synchronous command handlers because some supported Codex hosts skip
-plugin handlers marked `async`. All return exit zero without output so they add
-no model context and fail silent on a registry error.
+The installed plugin bundles five monitoring hooks: `SessionStart`,
+`SessionEnd`, `SubagentStart`, `SubagentStop`, and `Stop`. Codex applies its
+normal hash-based trust review before these non-managed hooks can run. Start,
+subagent, and completed-turn handlers use supported asynchronous execution;
+`SessionEnd` remains synchronous as required by Codex. All return exit zero
+without output, add no model context, and fail silent on a registry error.
 
 The hooks invoke the internal `session-registry.ps1` module. It maintains a
 bounded local discovery index with current-user Windows DPAPI protected task
-and agent IDs, workspace hashes, safe model slugs, lifecycle state, counters,
-and timestamps. It does not read the transcript path supplied by the host and
+and agent IDs, workspace hashes, safe model slugs, lifecycle state, hashed
+completed-turn signals, counters, and timestamps. It does not read the
+transcript path or assistant message supplied by the host and
 does not persist raw workspace paths. Atomic replacement, a named mutex,
 reparse containment, size limits, and retention limits protect the write path.
 If the mutex is briefly busy, the hook writes one bounded fallback event beside

@@ -3,8 +3,9 @@
 Effective August 11, 2026
 
 Chronos is a local Windows plugin. Health inspection and Heartbeat evaluation
-run on demand. Four reviewed lifecycle hooks can record bounded task and
-subagent start or end hints after the user trusts their exact definition.
+run on demand. Five reviewed monitoring hooks can record bounded task
+lifecycle, completed-turn activity, and subagent lifecycle hints after the user
+trusts their exact definition.
 Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
 
 ## Data handling
@@ -62,9 +63,10 @@ usernames, or absolute paths. It is not transmitted by Chronos.
 Governor verification may return repository-relative changed paths when its
 advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
-When the user trusts the packaged Chronos lifecycle hooks, they run only when a
-Codex task or subagent starts or ends. The hook receives the host event object
-but does not read or retain its transcript path. It stores task and agent
+When the user trusts the packaged Chronos hooks, they run when a Codex task or
+subagent starts or ends and once after a main-task turn completes. The hook
+receives the host event object but does not read or retain its transcript path,
+assistant message, prompt, or tool data. It stores task and agent
 identifiers protected with Windows DPAPI for the current user, SHA-256 indexes,
 workspace hashes, safe model slugs, lifecycle state, counters, and timestamps
 in a bounded file beneath the user's Windows temporary Chronos directory. A
@@ -86,8 +88,10 @@ data. The complete scoped key can enter the Governor assignment and host
 automation metadata so simultaneous setup attempts on that installation agree.
 Different installations generate different IDs.
 
-Lifecycle hooks do not run for every turn, prompt, tool call, or approval. They
-return no model-visible output and make no network request. If a hook is
+Chronos does not install prompt, permission, or tool hooks. One asynchronous
+`Stop` handler records only a SHA-256 turn hash and bounded activity counters
+after each completed main-task turn. The hooks return no model-visible output,
+make no network request, and do not start a model turn. If a hook is
 disabled, untrusted, malformed, or unable to write, it exits without blocking
 the Codex task. Brief registry contention can create one temporary fallback
 entry with the same DPAPI-protected identifiers, hashed workspace, safe labels,

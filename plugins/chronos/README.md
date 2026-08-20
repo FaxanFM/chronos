@@ -44,8 +44,9 @@ sources: Codex treats `chronos@chronos` and
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
-- Passively registers task and subagent lifecycle changes through four reviewed,
-  headless hooks with no per-turn output or worker recurrence. Brief registry
+- Registers task activity and subagent lifecycle changes through five reviewed,
+  headless hooks with no model-visible output or worker recurrence. Four run in
+  the background; `SessionEnd` remains synchronous. Brief registry
   contention uses a bounded protected fallback that the next Governor status
   removes after merging.
 - Reuses one host-verified Governor or creates one fresh history-free Governor
@@ -73,7 +74,7 @@ codex.cmd plugin add chronos@chronos
 
 Open a new Codex task after installation.
 
-Chronos v0.8.9 checks valid cached source manifests on first use and separates
+Chronos v0.9.0 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms
 the running Directory package and enabled legacy Git source, remove the legacy
 source through the Codex plugin manager, then start a fresh task:
@@ -171,8 +172,8 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
 ## Safety and privacy
 
 - Inspector, Heartbeat, and Governor commands run when requested. After the
-  user trusts the packaged hooks, four silent lifecycle hooks also run only at
-  task or subagent start and end.
+  user trusts the package, five silent hooks register task lifecycle,
+  completed-turn activity, and subagent lifecycle.
 - Does not transmit telemetry or retain raw prompts, responses, source, diffs,
   commands, tool output, credentials, usernames, or absolute paths. It retains
   only the bounded local pseudonymous coordination metadata described below.
@@ -192,8 +193,8 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
 - Never returns prompts, responses, tool arguments, tool output, usernames, or
   absolute local paths. Governor verification may return repository-relative changed paths.
 - Creates no operating-system scheduled task, service, publisher telemetry, or
-  persistent log. Four reviewed hooks write bounded lifecycle hints only when a
-  task or subagent starts or ends. The host creates one recurring Governor
+  persistent log. Five reviewed hooks write bounded lifecycle and
+  completed-turn hints. The host creates one recurring Governor
   automation only after the user asks to enable supervision or Heartbeats.
   Setup reconciles duplicates, and release stops the recurrence before clearing
   local ownership.
