@@ -555,6 +555,29 @@ try {
   $staleCascade = Get-Payload (Invoke-Supervision $orderingState 'discover' $orderingGovernor)
   Assert-True ($staleCascade.activeTasks -eq 1 -and $staleCascade.activeAgents -eq 1) 'Rejected stale SessionEnd cascaded into newer child state.'
 
+  $terminalFirstState = Join-Path $root 'terminal-first.json'
+  $terminalFirstGovernor = 'thread-terminal-first-governor'
+  $terminalFirstTask = 'thread-terminal-first-task'
+  $terminalFirstAgent = '/root/terminal_first_agent'
+  $parentEndedAgent = '/root/parent_ended_agent'
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' } $t0)
+  [void](Invoke-Supervision $terminalFirstState 'initialize' $terminalFirstGovernor)
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstTask; cwd = $cwd; hook_event_name = 'SessionEnd'; reason = 'other'; model = 'gpt-5.6-sol' } $t1)
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstTask; cwd = $cwd; hook_event_name = 'SubagentStop'; agent_id = $terminalFirstAgent; model = 'gpt-5.6-luna' } $t1)
+  $terminalFirstRevision = [long](Get-Content -Raw -LiteralPath $terminalFirstState | ConvertFrom-Json).revision
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstTask; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-sol' } $t2)
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstTask; cwd = $cwd; hook_event_name = 'SubagentStart'; agent_id = $terminalFirstAgent; model = 'gpt-5.6-luna' } $t2)
+  $afterDelayedStarts = Get-Payload (Invoke-Supervision $terminalFirstState 'discover' $terminalFirstGovernor)
+  Assert-True ($afterDelayedStarts.activeTasks -eq 0 -and $afterDelayedStarts.activeAgents -eq 0) 'Terminal-first tombstones allowed delayed start handlers to revive finished work.'
+  Assert-True ([long](Get-Content -Raw -LiteralPath $terminalFirstState | ConvertFrom-Json).revision -eq $terminalFirstRevision) 'Delayed starts changed terminal-first tombstones.'
+  [void](Invoke-Hook $terminalFirstState @{ session_id = $terminalFirstTask; cwd = $cwd; hook_event_name = 'SubagentStart'; agent_id = $parentEndedAgent; model = 'gpt-5.6-luna' } $t2)
+  $parentEndedState = Get-Content -Raw -LiteralPath $terminalFirstState | ConvertFrom-Json
+  $terminalFirstTaskHash = Get-TestHash $terminalFirstTask
+  $terminalFirstAgentHash = Get-TestHash $terminalFirstAgent
+  $parentEndedAgentHash = Get-TestHash $parentEndedAgent
+  Assert-True ($parentEndedState.sessions.$terminalFirstTaskHash.state -eq 'ended' -and $parentEndedState.sessions.$terminalFirstAgentHash.state -eq 'ended' -and $parentEndedState.sessions.$parentEndedAgentHash.state -eq 'ended') 'Terminal-first or parent-ended lifecycle records were not retained as ended tombstones.'
+  Assert-True ((Get-Payload (Invoke-Supervision $terminalFirstState 'discover' $terminalFirstGovernor)).activeAgents -eq 0) 'A subagent start after its parent ended became active.'
+
   $fairState = Join-Path $root 'fairness.json'
   $fairGovernor = 'thread-fair-governor'
   [void](Invoke-Hook $fairState @{ session_id = $fairGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-luna' })

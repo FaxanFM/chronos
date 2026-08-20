@@ -15,10 +15,11 @@ It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
 v0.9.2 is the candidate Directory update. It fixes silent Windows lifecycle
-hook non-execution and retains the improved first-use prompts, listing copy,
+hook non-execution, preserves terminal state when asynchronous lifecycle events
+arrive out of order, and retains the improved first-use prompts, listing copy,
 full-setup contract, and deterministic prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`3a17b4b8b54466e21437d0d00c1e7d0af1f03cee0c876d2bf4b19fa9ee5c71c4`.
+`102d2ef1014ca4f108b72df251e760e7ff106a671f5edef8b399aa71ba8eeb3a`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

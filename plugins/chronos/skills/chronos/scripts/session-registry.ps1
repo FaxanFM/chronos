@@ -1005,10 +1005,8 @@ function Invoke-HookEvent {
     }
     'SessionEnd' {
       $hash = Get-TextHash $session
-      $sessionEnded = $false
-      if ($State.sessions.Contains($hash)) {
-        $sessionEnded = Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'ended' ([string]$State.sessions[$hash].source) $Now $EventObservedAt 2
-      }
+      $source = if ($State.sessions.Contains($hash)) { [string]$State.sessions[$hash].source } else { 'fallback' }
+      $sessionEnded = Set-SessionRecord $State $session 'task' $null $workspaceHash $model 'ended' $source $Now $EventObservedAt 2 $PreparedProtectedId
       if ($sessionEnded) {
         foreach ($key in @($State.sessions.Keys)) {
           $record = $State.sessions[$key]
@@ -1020,15 +1018,26 @@ function Invoke-HookEvent {
     }
     'SubagentStart' {
       $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
-      [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1 $PreparedProtectedId)
+      $parentHash = Get-TextHash $session
+      $parentEnded = $State.sessions.Contains($parentHash) -and [string]$State.sessions[$parentHash].state -eq 'ended'
+      $agentHash = Get-TextHash $agent
+      if (-not $parentEnded) {
+        [void](Set-SessionRecord $State $agent 'agent' $parentHash $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1 $PreparedProtectedId)
+      } elseif ($State.sessions.Contains($agentHash) -and [string]$State.sessions[$agentHash].state -eq 'ended') {
+        # Reapply the delayed start as active so the terminal-state guard records
+        # it as stale without rewriting the existing tombstone.
+        [void](Set-SessionRecord $State $agent 'agent' $parentHash $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1 $PreparedProtectedId)
+      } else {
+        [void](Set-SessionRecord $State $agent 'agent' $parentHash $workspaceHash $model 'ended' 'subagent' $Now $EventObservedAt 2 $PreparedProtectedId)
+      }
     }
     'SubagentStop' {
       $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
       $hash = Get-TextHash $agent
-      if ($State.sessions.Contains($hash)) {
-        $record = $State.sessions[$hash]
-        [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $record.workspaceHash $record.model 'ended' 'subagent' $Now $EventObservedAt 2)
-      }
+      $record = if ($State.sessions.Contains($hash)) { $State.sessions[$hash] } else { $null }
+      $recordWorkspaceHash = if ($record) { [string]$record.workspaceHash } else { $workspaceHash }
+      $recordModel = if ($record) { [string]$record.model } else { $model }
+      [void](Set-SessionRecord $State $agent 'agent' (Get-TextHash $session) $recordWorkspaceHash $recordModel 'ended' 'subagent' $Now $EventObservedAt 2 $PreparedProtectedId)
     }
     'Stop' {
       $signalHash = if ($PreparedSignalHash -match '^[a-f0-9]{64}$') {

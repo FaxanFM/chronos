@@ -170,8 +170,10 @@ tasks. It returns one hash-only normalized status for every inventory task and t
 fairly over successive cycles. Inventory or transport failure remains
 Governor-local; the routine user action is none.
 Terminal hook state has precedence: a delayed start event cannot revive
-an ended task or agent. Only `confirm-active`, after host verification, can do
-that. Do not poll full transcripts, repeatedly read unchanged tasks, or send
+an ended task or agent. A terminal event received before its asynchronous start
+creates a bounded ended tombstone, and a subagent start received after its
+parent ended remains ended. Only `confirm-active`, after host verification, can
+reactivate a task. Do not poll full transcripts, repeatedly read unchanged tasks, or send
 routine messages to monitored tasks.
 
 The Governor owns the only model recurrence. A normal cycle reports

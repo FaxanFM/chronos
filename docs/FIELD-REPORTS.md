@@ -107,6 +107,28 @@ successfully exercises the candidate release from a fresh task.
 - Validation status: local deterministic reproduction passes. Independent
   installed-package validation remains required before release.
 
+### Terminal lifecycle hooks could arrive before asynchronous starts
+
+- Affected versions: v0.9.0, the unreleased v0.9.1 candidate, and the first
+  v0.9.2 remediation candidate.
+- Reproduction scope: identified by an independent source audit and reproduced
+  with deterministic out-of-order lifecycle fixtures in development.
+- Evidence: `SessionEnd` and `SubagentStop` wrote terminal state only when the
+  corresponding start record already existed. A synchronous end event could
+  therefore arrive before an asynchronous start, leave no terminal record, and
+  permit the delayed start to appear active.
+- Root cause: terminal handlers treated a missing start record as an event to
+  ignore instead of preserving a bounded terminal tombstone. A delayed
+  subagent start also did not consult its ended parent task.
+- v0.9.2 correction: persist bounded terminal-first task and agent tombstones,
+  reject delayed reactivation, and keep a newly observed subagent ended when
+  its parent task has already ended.
+- Regression: deterministic fixtures deliver task and agent terminal events
+  before their starts, then deliver delayed starts and a new subagent start
+  after parent termination. No task or agent may become active.
+- Validation status: local supervision and Governor suites pass. Independent
+  installed-package validation remains required before release.
+
 ## Heuristic / Tuning Issues
 
 No threshold, scoring, prediction, or calibration-sensitive change is included

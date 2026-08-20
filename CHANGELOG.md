@@ -10,6 +10,9 @@
 - Preserve the existing five-event design, asynchronous flags, synchronous
   `SessionEnd`, three-second host ceilings, silent output, and zero-model-turn
   behavior.
+- Persist bounded terminal tombstones when `SessionEnd` or `SubagentStop`
+  arrives before its asynchronous start record, and keep a delayed subagent
+  start ended when its parent task has already ended.
 - Add deterministic tests that run the exact manifest launcher through the
   Windows command boundary, including from an installed plugin path with
   spaces, and require a fresh registry counter and timestamp.

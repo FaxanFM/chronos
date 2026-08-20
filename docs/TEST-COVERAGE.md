@@ -114,7 +114,8 @@ rejection, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,
 duplicate and case-colliding JSON keys, corrupt-state preservation, custom-state
 containment, concurrent cross-process writes, monotonic host timestamp/rank
-ordering, task generation changes, delayed starts after terminal events,
+ordering, task generation changes, terminal events before any start record,
+delayed starts after terminal events, subagent starts after parent termination,
 host-confirmed reactivation, forced-takeover postconditions, two-phase release,
 live mutex contention with deterministic state and queue postconditions, atomic bounded fallback slots, stale reservation
 recovery, protected fallback contents, reconciliation and
