@@ -1,7 +1,7 @@
 {
   "name": "chronos",
-  "version": "0.9.0",
-  "description": "Detect Codex degradation, approval loops, quota amplification, workflow regressions, SQLite churn, and coordinate bounded read workers on Windows.",
+  "version": "0.9.1",
+  "description": "Set up one local Codex Governor for passive task supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only worker coordination.",
   "author": {
     "name": "Dravara, LLC",
     "url": "https://github.com/FaxanFM/chronos"
@@ -13,18 +13,18 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Chronos for Codex",
-    "shortDescription": "Diagnose Codex on Windows",
-    "longDescription": "Check Windows process, memory, disk, diagnostic-log, token-quota, approval persistence, permission-rule, reviewer-escalation, lineage, fork-context, and rollout health; monitor active tasks through silent asynchronous turn and lifecycle signals plus complete host reconciliation; and coordinate bounded Codex read tasks using runtime model discovery, canonical workspace identity, advisory leases, privacy limits, and coordinator verification.",
+    "shortDescription": "Diagnose and govern Codex",
+    "longDescription": "Run one local Governor that passively discovers active Codex tasks, evaluates actionable Heartbeats, and contacts only the exact affected task when intervention is justified. Chronos also diagnoses Windows resource degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. Silent hooks create no model turns, routine worker tasks stay passive, and bounded read-only workers remain under coordinator verification. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
-    "capabilities": ["Resource health checks", "SQLite log-churn detection", "Token-quota risk analysis", "Approval and rule diagnostics", "Heartbeat transition detection", "Autonomous task monitoring", "Fork and lineage diagnostics", "Bounded worker coordination", "Guided recovery"],
+    "capabilities": ["One-Governor setup", "Passive task discovery", "Actionable Heartbeats", "Verified task intervention", "Windows resource diagnostics", "Token and approval analysis", "SQLite churn detection", "Bounded read-worker coordination"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Use Chronos to check installation sources and current Codex resource health.",
-      "Use Chronos to explain current token and approval pressure.",
-      "Enable Chronos supervision in one dedicated Governor task."
+      "Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.",
+      "Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.",
+      "Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

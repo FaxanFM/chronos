@@ -48,8 +48,10 @@ The authoritative immutable v0.8.7 ZIP SHA-256 is
 `580a64fb5f1393005c7fc314979a025f3d64137515a9bb70f41e1824ac60d640`.
 The authoritative immutable v0.8.8 ZIP SHA-256 is
 `686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
-v0.8.8 is the current published Directory package while v0.9.0 completes its
-release gates.
+The authoritative immutable v0.9.0 ZIP SHA-256 is
+`52006ba07fa9ffef0705c0c65261134331a7e6c2543e6baf24210fa42871aa67`.
+v0.8.8 is the current published Directory package while v0.9.1 completes its
+listing, audit, and external-canary gates.
 
 ## Published Release
 
@@ -68,7 +70,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.8.8
+git verify-tag v0.9.0
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -90,16 +92,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.8.8.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.8.8.zip -R FaxanFM/chronos
-gh release verify v0.8.8 -R FaxanFM/chronos
-gh release verify-asset v0.8.8 .\chronos-v0.8.8.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.9.0.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.9.0.zip -R FaxanFM/chronos
+gh release verify v0.9.0 -R FaxanFM/chronos
+gh release verify-asset v0.9.0 .\chronos-v0.9.0.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.8.8.sha256`. These controls prove
+Compare the first command with `chronos-v0.9.0.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -125,7 +127,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.8.8 retains disabled shared-folder write delegation. Inactive Governor
+v0.9.1 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the

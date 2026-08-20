@@ -10,8 +10,10 @@ or per-task model loop.
 After installing or upgrading Chronos, open a fresh Codex task and ask:
 
 ```text
-Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
+Set up Chronos fully on this PC. Verify the installed source, enable
+supervision and Heartbeats in one dedicated Governor, and confirm one Governor
+recurrence with zero worker recurrences. Keep routine worker tasks passive and
+do not ask me to relay routine findings.
 ```
 
 This request opts in to one host-managed recurring Governor turn: at most 24
@@ -24,6 +26,11 @@ Codex requires a one-time review before a non-managed plugin hook can run. Use
 does not bypass this review. If hooks remain disabled or untrusted, the
 Governor uses one compact host inventory as the deterministic fallback. It
 does not ask the user to register tasks or relay routine findings.
+
+Setup is complete only after Codex reports the active source, native status,
+one live dedicated Governor, one active matching Governor recurrence, readable
+Heartbeat status, and zero worker recurrences. An internal claim flag by itself
+is not a successful setup result.
 
 No worker prompt or worker-side script is required. The plugin registers only:
 

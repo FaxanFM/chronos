@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.1
+
+- Replace narrow first-use prompts with three distinct product actions: complete
+  setup, separated full status, and bounded read-only Governor delegation.
+- Make complete setup explicitly verify the installed source and native status,
+  reuse or create one dedicated Governor, enable supervision and due Heartbeat
+  evaluation in its single recurrence, and prove zero worker recurrences.
+- Require a compact setup result instead of exposing unexplained internal state
+  such as `governorClaimed`.
+- Rewrite Directory descriptions and capabilities around the current product,
+  including passive task discovery, actionable Heartbeats, exact-target
+  intervention, Windows diagnostics, and bounded read-worker coordination.
+- Add deterministic release tests for prompt count, uniqueness, length,
+  semantic coverage, listing claims, and end-to-end public setup guidance.
+- Correct the core skill text to describe all five monitoring hooks, including
+  the asynchronous completed-turn signal and synchronous `SessionEnd`.
+
 ## v0.9.0
 
 - Use supported asynchronous command hooks for `SessionStart`,

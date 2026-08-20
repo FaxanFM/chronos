@@ -5,11 +5,12 @@
 [![License](https://img.shields.io/github/license/FaxanFM/chronos)](LICENSE)
 ![No publisher telemetry](https://img.shields.io/badge/publisher_telemetry-none-4ed7a0)
 
-Detect runaway Codex auto-review, approval loops, quota and context
-amplification, broken permission rules, rollout duplication, diagnostic SQLite
-churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics, detects meaningful changes during long-running work,
-and coordinates bounded read tasks without creating an autonomous agent loop.
+Chronos gives Windows Codex users one local Governor for passive task
+supervision, actionable Heartbeats, exact-target intervention, and bounded
+read-only worker coordination. It also diagnoses runaway auto-review, approval
+loops, quota and context pressure, broken permission rules, rollout duplication,
+diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
+stay passive. Chronos sends no publisher telemetry.
 
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
@@ -28,13 +29,18 @@ codex.cmd plugin marketplace add FaxanFM/chronos
 codex.cmd plugin add chronos@chronos
 ```
 
-Open a new Codex task, then ask: `Use Chronos to inspect current Codex health.`
+Open a new Codex task, then ask:
+
+> **Set up Chronos fully on this PC. Verify the installed source, enable
+> supervision and Heartbeats in one dedicated Governor, and confirm one
+> Governor recurrence with zero worker recurrences. Keep routine worker tasks
+> passive and do not ask me to relay routine findings.**
 
 Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
 the OpenAI Plugins Directory. They are separate source identities and the
 Directory install does not replace the Git install in an already loaded task.
-Chronos v0.9.0 distinguishes a confirmed enabled-source conflict from cached
+Chronos v0.9.1 distinguishes a confirmed enabled-source conflict from cached
 packages that may be stale. After it confirms the running Directory package
 and enabled legacy Git source, remove the legacy source through the plugin
 manager and start a fresh task:
@@ -152,19 +158,26 @@ and unknown publication facts.
 
 ## Use
 
-Ask Codex:
+For complete setup, use the first starter prompt or ask:
 
 ```text
-Use Chronos to inspect current Codex resource health.
+Set up Chronos fully on this PC. Verify the installed source, enable
+supervision and Heartbeats in one dedicated Governor, and confirm one Governor
+recurrence with zero worker recurrences. Keep routine worker tasks passive and
+do not ask me to relay routine findings.
 ```
 
-Chronos reports the current condition and recommends a proportionate response.
+Chronos verifies the package source and native status, reuses or creates one
+dedicated Governor, reconciles one host recurrence, enables due Heartbeat
+evaluation there, and proves that worker tasks have no recurrence. Normal Codex
+hook trust review is the only manual boundary. If hooks are not trusted, the
+Governor still uses one complete host inventory as its safe discovery fallback.
 
-To set up low-overhead monitoring, ask once:
+For an on-demand diagnostic without enabling supervision, ask:
 
 ```text
-Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
+Run a complete Chronos status. Separate machine health from workflow, quota,
+approval, rule, SQLite, and supervision issues.
 ```
 
 Review and trust the packaged lifecycle hook once through Codex `/hooks`.
@@ -184,14 +197,8 @@ the automatic fallback; the user does not register tasks or relay routine
 findings. See
 [Supervision](docs/SUPERVISION.md) for setup, routing, usage, and privacy limits.
 
-For long-running or asynchronous work, ask:
-
-```text
-Enable Chronos Heartbeats in one Governor task using GPT-5.6 Terra with Medium reasoning.
-Monitor the other tasks without waking them unless Governor decides intervention is needed.
-```
-
-The Codex host owns the recurring schedule and model choice. Chronos does not
+Heartbeats use the same Governor and recurrence created by full setup. The
+Codex host owns the recurring schedule and model choice. Chronos does not
 install a service or scheduler. Monitored tasks can use any model and do not
 run Heartbeats. Each due cycle compares one bounded normalized snapshot with
 compact local state. A cycle with no actionable transition ends silently. All

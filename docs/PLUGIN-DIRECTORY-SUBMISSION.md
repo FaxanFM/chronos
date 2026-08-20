@@ -8,12 +8,18 @@ was published from the existing Chronos listing. The GitHub release artifact is
 Release record:
 https://github.com/FaxanFM/chronos/releases/tag/v0.8.8.
 
-v0.9.0 is an asynchronous-supervision candidate with artifact
+v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 `chronos-v0.9.0.zip` and SHA-256
 `52006ba07fa9ffef0705c0c65261134331a7e6c2543e6baf24210fa42871aa67`.
-It is not submitted or published until local suites, CI, independent review,
-and an external Windows canary pass. Candidate release URL:
+It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
+
+v0.9.1 is the candidate Directory update. It improves the first-use prompts,
+listing copy, full-setup contract, and deterministic prompt-quality gates. The
+candidate `chronos-v0.9.1.zip` SHA-256 is
+`fe380e10f93b03402ad2407533ab88210e36734db8a0a836a61ff7a8114caef8`.
+Candidate release URL:
+https://github.com/FaxanFM/chronos/releases/tag/v0.9.1.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -34,7 +40,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.9.0.zip` release asset after every gate passes.
+   `chronos-v0.9.1.zip` release asset after every gate passes.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -50,7 +56,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.9.0`
+- Version: `0.9.1`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -67,26 +73,21 @@ Display name: `Chronos for Codex`
 
 Category: `Developer Tools`
 
-Short description: `Diagnose Codex on Windows`
+Short description: `Diagnose and govern Codex`
 
 The display name is under the 30-character final limit. The short description
 is one line and under the 30-character final limit.
 
 Long description:
 
-> Chronos is a local diagnostic and coordination plugin for Windows users
-> whose Codex sessions slow down after hours or days of work. It reports
-> process pressure, diagnostic SQLite churn, token and context amplification,
-> approval loops, permission-rule risks, rollout duplication, and
-> filesystem-helper failures. It separates current machine health from other
-> diagnostic conditions and marks missing or partial evidence. Heartbeat
-> evaluates actionable changes during long-running work. One dedicated
-> Governor coordinates bounded read tasks and receives compact task lifecycle
-> hints, so Chronos does not need to run on every turn. Chronos installs no
-> service and sends no publisher telemetry. It does not modify SQLite rows or
-> schemas, terminate Codex, stop tasks, or enable shared-folder writes.
-> Governor is a coordination aid, not a sandbox or filesystem security
-> boundary.
+> Run one local Governor that passively discovers active Codex tasks, evaluates
+> actionable Heartbeats, and contacts only the exact affected task when
+> intervention is justified. Chronos also diagnoses Windows resource
+> degradation, quota and context pressure, approval and review loops,
+> permission-rule problems, rollout duplication, and SQLite churn. Silent hooks
+> create no model turns, routine worker tasks stay passive, and bounded
+> read-only workers remain under coordinator verification. No publisher
+> telemetry.
 
 Developer name: `Dravara, LLC`
 
@@ -106,33 +107,38 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `Use Chronos to inspect current Codex resource health.`
-2. `Use Chronos to explain current token and approval pressure.`
-3. `Enable Chronos supervision in one dedicated Governor task.`
+1. `Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.`
+2. `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
+3. `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
 
 All three are unique, single-line, under 128 characters, and contain no app
 mention.
 
 ## Positive Reviewer Cases
 
-### 1. On-demand health inspection
+### 1. Complete first-use setup
 
-- Prompt: `Use Chronos to inspect current Codex resource health.`
-- Expected behavior: run the installed inspection script once, on demand.
-- Expected result: compact `CHRONOS` and `CHRONOS EFFICIENCY` summaries with
-  machine health separated from diagnostic severity and explicit coverage.
+- Prompt: `Set up Chronos fully: verify the install, enable supervision and Heartbeats in one Governor, and keep worker recurrence off.`
+- Expected behavior: verify the installed source and native status, perform
+  normal hook trust review, reuse or create one history-free Governor, and
+  reconcile the installation-scoped recurrence without prompting worker tasks.
+- Expected result: a compact summary showing the active source, native status,
+  one live Governor, one active Governor recurrence, readable Heartbeat status,
+  and zero worker recurrences. If hook trust remains pending, host inventory is
+  used as the safe discovery fallback and the limitation is named.
+- Fixture: Windows Codex with host task and automation tools. Task creation
+  unavailability must use the documented current-task fallback without a fork.
+
+### 2. Complete separated status
+
+- Prompt: `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
+- Expected behavior: run native inspection and compact supervision and
+  Heartbeat status reads without creating a Governor or recurrence.
+- Expected result: machine health remains separate from workflow diagnostic
+  levels, every unsupported field stays explicit, and advice is limited to
+  actions justified by observed evidence.
 - Fixture: Windows with Codex installed. Missing local evidence must produce an
   unavailable or partial observation rather than an invented healthy result.
-
-### 2. Explain separated diagnostic levels
-
-- Prompt: `Machine health is HEALTHY but logDb is CRITICAL. Explain this.`
-- Expected behavior: explain that database size/reclaimable space is a separate
-  diagnostic condition and is not proof of current machine failure, SSD wear,
-  or repeated physical writes.
-- Expected result: a concise explanation with proportionate next steps and no
-  process termination or database mutation.
-- Fixture: no local fixture required; the prompt supplies the observations.
 
 ### 3. Interpret incomplete token coverage
 
@@ -154,30 +160,29 @@ mention.
 - Fixture: Windows with Codex installed; a marker-free environment may be used
   if the expected answer clearly treats the prompt as the supplied condition.
 
-### 5. Plan a bounded Governor read task
+### 5. Delegate and verify bounded read work
 
-- Prompt: `Use Chronos Governor to plan one bounded repository read task.`
+- Prompt: `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
 - Expected behavior: inspect Governor status, use only models advertised by the
-  active runtime, request a repository-relative scope, and either return a
-  bounded worker plan or keep the task with the coordinator.
-- Expected result: JSON-prefixed `CHRONOS GOVERNOR` output. No project mutation,
-  merge, commit, or claim of sandbox enforcement.
+  active runtime, use a repository-relative scope, lease only eligible work,
+  and independently verify the returned result in the coordinator task.
+- Expected result: one bounded read-only delegation or an auditable decision to
+  keep the work with the coordinator. No worker project mutation, merge,
+  commit, or claim of sandbox enforcement.
 - Fixture: an ordinary local Git repository. No authentication or private test
   account is required.
 
-### 6. Set up one Governor
+### 6. Repeat setup without duplication
 
-- Prompt: `Enable Chronos supervision in one dedicated Governor task.`
-- Expected behavior: require normal hook trust review, reuse a host-verified
-  Governor or create one fresh task without inherited history, reconcile every
-  recurrence matching the random installation-scoped key, and keep worker tasks
-  free of recurrence and routine messages.
+- Prompt: `Set up Chronos fully again and verify the existing Governor.`
+- Expected behavior: reuse the deterministic installation-scoped winner,
+  reconcile duplicates within the three-attempt budget, and make no new worker
+  recurrence or duplicate Governor.
 - Expected result: exactly one verified Governor and one host-owned recurrence
-  for that installation only after the user's request. Separate PCs keep
-  separate Governors. Default cadence is at most one Governor turn
-  per active hour or per six idle hours, with rotation or pause after 336 cycles
-  or 14 days. No automatic fork, operating-system scheduler, transcript read,
-  or worker-side model loop.
+  for that installation. Separate PCs keep separate Governors. Default cadence
+  is at most one Governor turn per active hour or per six idle hours, with
+  rotation or pause after 336 cycles or 14 days. No automatic fork,
+  operating-system scheduler, transcript read, or worker-side model loop.
 - Fixture: Codex with task tools. If task creation is unavailable, the current
   task is an explicit fallback and the limitation is stated.
 
@@ -236,7 +241,14 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.9.0 uses silent asynchronous lifecycle and completed-turn
+> Chronos for Codex v0.9.1 makes the first starter prompt complete the real
+> setup: installed-source verification, native status, one dedicated Governor,
+> one supervision and Heartbeat recurrence, and zero worker recurrences. The
+> second prompt returns one separated diagnostic status instead of a narrow
+> token explanation. The third prompt demonstrates bounded read-only delegation
+> and coordinator verification. Release tests now enforce three distinct,
+> single-line, action-oriented prompts and their required setup, diagnostic, and
+> delegation concepts. v0.9.1 retains v0.9.0's silent asynchronous lifecycle and completed-turn
 > hooks to discover active tasks without worker prompts or worker model turns.
 > It detects duplicate Git and Directory installations,
 > keeps one Terra Medium Governor per machine, and
@@ -293,7 +305,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.8.8 published; v0.9.0 not submitted**. Retained evidence
+Review status: **v0.8.8 published; v0.9.1 not submitted**. Retained evidence
 confirms the v0.8.8 publication. Exact regional availability remains outside
 this repository's evidence boundary.
 

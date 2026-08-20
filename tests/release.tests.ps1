@@ -39,11 +39,41 @@ try {
     throw "Directory short description must be at most 30 characters."
   }
   $defaultPrompts = @($manifest.interface.defaultPrompt)
-  if ($defaultPrompts.Count -gt 3) {
-    throw "Directory defaultPrompt must contain at most three prompts."
+  if ($defaultPrompts.Count -ne 3) {
+    throw "Directory defaultPrompt must contain exactly three distinct product actions."
   }
   if ($defaultPrompts.Count -ne @($defaultPrompts | Where-Object { $_ -is [string] -and $_.Trim() }).Count) {
     throw "Directory defaultPrompt entries must be non-empty strings."
+  }
+  if (@($defaultPrompts | Select-Object -Unique).Count -ne 3) {
+    throw "Directory defaultPrompt entries must be unique."
+  }
+  foreach ($prompt in $defaultPrompts) {
+    if ($prompt.Length -gt 128 -or $prompt.Contains("`r") -or $prompt.Contains("`n")) {
+      throw "Directory defaultPrompt entries must be single-line and at most 128 characters: $prompt"
+    }
+  }
+  $promptRequirements = @(
+    @{ Index = 0; Terms = @('set up chronos fully', 'install', 'supervision', 'heartbeats', 'governor', 'worker recurrence') },
+    @{ Index = 1; Terms = @('complete chronos status', 'machine health', 'workflow', 'quota', 'approval', 'rule', 'sqlite', 'supervision') },
+    @{ Index = 2; Terms = @('chronos governor', 'delegate', 'read-only', 'bounded workers', 'verify') }
+  )
+  foreach ($promptRequirement in $promptRequirements) {
+    $promptIndex = [int]$promptRequirement.Index
+    $normalizedPrompt = ([string]$defaultPrompts[$promptIndex]).ToLowerInvariant()
+    foreach ($required in @($promptRequirement.Terms)) {
+      if (-not $normalizedPrompt.Contains($required)) {
+        throw "Directory prompt $($promptIndex + 1) is missing its product action: $required"
+      }
+    }
+  }
+  $listingCopy = (([string]$manifest.description) + ' ' +
+    ([string]$manifest.interface.shortDescription) + ' ' +
+    ([string]$manifest.interface.longDescription)).ToLowerInvariant()
+  foreach ($required in @('one local codex governor', 'heartbeats', 'windows', 'read-only', 'no publisher telemetry')) {
+    if (-not $listingCopy.Contains($required)) {
+      throw "Directory listing copy is missing a core product value or boundary: $required"
+    }
   }
   if ($manifest.interface.PSObject.Properties['screenshots']) {
     throw "Skills-only packages must not declare interface screenshots."
@@ -97,6 +127,16 @@ try {
     Get-Content -Raw -LiteralPath $readmePath
     Get-Content -Raw -LiteralPath $pluginReadmePath
   ) -join "`n"
+  foreach ($required in @(
+    'Set up Chronos fully on this PC',
+    'one dedicated Governor',
+    'zero worker recurrences',
+    'do not ask me to relay routine findings'
+  )) {
+    if (-not $publicReadmes.Contains($required)) {
+      throw "Public first-use guidance is missing an end-to-end setup requirement: $required"
+    }
+  }
   foreach ($forbidden in @('self-service agents', 'paid for directly', 'Public runner links', 'managed engagement')) {
     if ($publicReadmes.Contains($forbidden)) {
       throw "Public plugin documentation contains a prohibited service promotion: $forbidden"

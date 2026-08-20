@@ -134,7 +134,11 @@ canary. The registry remains advisory.
 
 ## Release
 
-`tests/release.tests.ps1` builds twice and requires identical ZIP hashes,
+`tests/release.tests.ps1` requires exactly three unique, single-line Directory
+starter prompts under 128 characters. It enforces separate semantic coverage
+for complete setup, separated full status, and bounded read-only delegation,
+plus current listing values and end-to-end public setup guidance. It then builds
+twice and requires identical ZIP hashes,
 tracked-file-only packaging, sorted entries, fixed timestamps, LF text,
 per-file manifest hashes and sizes, canonical Directory distribution identity, pre-materialization package limits, required
 plugin files, repository-file exclusion, and a matching artifact checksum. It

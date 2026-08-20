@@ -2,11 +2,12 @@
 
 # Chronos for Codex - diagnostics, supervision, and read-task coordination
 
-Detect runaway Codex auto-review, approval loops, quota and context
-amplification, broken permission rules, rollout duplication, diagnostic SQLite
-churn, and Windows process degradation. Chronos keeps machine health separate
-from workflow diagnostics, detects meaningful changes during long-running work,
-and coordinates bounded read tasks without creating an autonomous agent loop.
+Chronos gives Windows Codex users one local Governor for passive task
+supervision, actionable Heartbeats, exact-target intervention, and bounded
+read-only worker coordination. It also diagnoses runaway auto-review, approval
+loops, quota and context pressure, broken permission rules, rollout duplication,
+diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
+stay passive. Chronos sends no publisher telemetry.
 
 **[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
 
@@ -74,7 +75,7 @@ codex.cmd plugin add chronos@chronos
 
 Open a new Codex task after installation.
 
-Chronos v0.9.0 checks valid cached source manifests on first use and separates
+Chronos v0.9.1 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms
 the running Directory package and enabled legacy Git source, remove the legacy
 source through the Codex plugin manager, then start a fresh task:
@@ -89,19 +90,26 @@ catalog cannot be hot-swapped.
 
 ## Use
 
-Ask Codex:
+For complete setup, use the first starter prompt or ask:
 
 ```text
-Use Chronos to inspect current Codex resource health.
+Set up Chronos fully on this PC. Verify the installed source, enable
+supervision and Heartbeats in one dedicated Governor, and confirm one Governor
+recurrence with zero worker recurrences. Keep routine worker tasks passive and
+do not ask me to relay routine findings.
 ```
 
-Chronos reports the current condition and recommends a proportionate response.
+Chronos verifies the package source and native status, reuses or creates one
+dedicated Governor, reconciles one host recurrence, enables due Heartbeat
+evaluation there, and proves that worker tasks have no recurrence. Normal Codex
+hook trust review is the only manual boundary. If hooks are not trusted, the
+Governor still uses one complete host inventory as its safe discovery fallback.
 
-To set up monitoring with one Governor task, ask:
+For an on-demand diagnostic without enabling supervision, ask:
 
 ```text
-Enable Chronos supervision. Reuse a verified Chronos Governor or create one
-fresh dedicated task. Use GPT-5.6 Terra with Medium reasoning if available.
+Run a complete Chronos status. Separate machine health from workflow, quota,
+approval, rule, SQLite, and supervision issues.
 ```
 
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
@@ -116,14 +124,8 @@ host task inventory, so disabled hooks do not require user registration or
 message relay. The Governor rotates or pauses after 336 cycles or 14 days. See the
 public [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
-For long-running or asynchronous work, ask:
-
-```text
-Enable Chronos Heartbeats in one Governor task using GPT-5.6 Terra with Medium reasoning.
-Monitor the other tasks without waking them unless Governor decides intervention is needed.
-```
-
-See the public [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
+Heartbeats use the same Governor and recurrence created by full setup. See the
+public [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
 for the normalized collector schema, coverage rules, and host delivery contract.
 
 The Codex host owns the recurring schedule, evaluator model, and delivery to the

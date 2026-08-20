@@ -21,6 +21,19 @@ idle hours, at most 24 or four turns per day. The host rotates or pauses the
 Governor after 336 cycles or 14 days so recurring context cannot grow without a
 bound.
 
+The normal first-use request enables supervision and Heartbeats together:
+
+```text
+Set up Chronos fully on this PC. Verify the installed source, enable
+supervision and Heartbeats in one dedicated Governor, and confirm one Governor
+recurrence with zero worker recurrences. Keep routine worker tasks passive and
+do not ask me to relay routine findings.
+```
+
+Do not create a separate Heartbeat task or recurrence. A complete setup result
+must show readable Heartbeat status from the Governor and zero worker
+recurrences.
+
 The optional reviewed lifecycle hooks provide a passive candidate list when a
 task or subagent starts or ends. The Governor reconciles that registry with
 host task status before collection. The registry does not supply progress,

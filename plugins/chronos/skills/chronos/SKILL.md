@@ -1,6 +1,6 @@
 ---
 name: chronos
-description: Detect and mitigate Codex process, CPU, memory, handle, disk, diagnostic SQLite log, and token-quota degradation on Windows. Use when Codex or the PC is lagging, when logs_2.sqlite is growing or writing heavily, when token or quota use seems disproportionate, when several tasks or goals have run for hours or days, or before and after long-running parallel work.
+description: Fully set up Chronos supervision and Heartbeats in one local Governor, or detect and mitigate Codex process, CPU, memory, handle, disk, diagnostic SQLite log, and token-quota degradation on Windows. Use for first-use setup, long-running task monitoring, Codex or PC lag, logs_2.sqlite growth, disproportionate token or quota use, and before or after long-running parallel work.
 ---
 
 # Chronos
@@ -35,11 +35,25 @@ absent, and do not imply that Chronos changed the active task catalog.
 
 Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
 operating-system scheduler, daemon, service, telemetry file, or persistent log.
-After normal Codex hook trust review, the plugin's four lifecycle hooks update a
-bounded local supervision registry only when a task or subagent starts or ends.
-They do not run on turns, tools, or prompts and return no model context. On
-brief registry contention, a hook writes one bounded DPAPI-protected fallback
-event; the next hook or Governor cycle merges and removes it.
+After normal Codex hook trust review, the plugin's five monitoring hooks update
+a bounded local supervision registry for task and subagent lifecycle events and
+one completed-turn signal. Four run asynchronously; `SessionEnd` remains
+synchronous. They do not run on tools, commands, approvals, or prompts and
+return no model context. On brief registry contention, a hook writes one
+bounded DPAPI-protected fallback event; the next hook or Governor cycle merges
+and removes it.
+
+## Full setup request
+
+When the user asks to set up Chronos fully, treat the request as an explicit
+request to verify the installed source, run compact native status, and apply the
+`chronos-governor` skill's Automatic Supervision Bootstrap. That bootstrap must
+reuse or create one dedicated Governor, enable one host recurrence for
+supervision and due Heartbeat evaluation, and verify zero worker recurrences.
+Do not stop after an inspection or return setup instructions for the user to
+relay. The only manual boundary is normal Codex hook trust review; never bypass
+it. If hooks remain untrusted, complete the safe host-inventory fallback and
+state that passive hook hints are pending trust.
 
 ## Supervision
 
