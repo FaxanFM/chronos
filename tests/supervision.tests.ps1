@@ -578,6 +578,18 @@ try {
   Assert-True ($parentEndedState.sessions.$terminalFirstTaskHash.state -eq 'ended' -and $parentEndedState.sessions.$terminalFirstAgentHash.state -eq 'ended' -and $parentEndedState.sessions.$parentEndedAgentHash.state -eq 'ended') 'Terminal-first or parent-ended lifecycle records were not retained as ended tombstones.'
   Assert-True ((Get-Payload (Invoke-Supervision $terminalFirstState 'discover' $terminalFirstGovernor)).activeAgents -eq 0) 'A subagent start after its parent ended became active.'
 
+  $asyncInversionState = Join-Path $root 'async-inversion.json'
+  $asyncInversionGovernor = 'thread-async-inversion-governor'
+  $asyncInversionAgent = '/root/async_inversion_agent'
+  [void](Invoke-Hook $asyncInversionState @{ session_id = $asyncInversionGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-luna' } $t0)
+  [void](Invoke-Supervision $asyncInversionState 'initialize' $asyncInversionGovernor)
+  $asyncStop = Complete-HookProcess (Start-HookProcess $asyncInversionState ((@{ session_id = $asyncInversionGovernor; cwd = $cwd; hook_event_name = 'SubagentStop'; agent_id = $asyncInversionAgent; model = 'gpt-5.6-luna' } | ConvertTo-Json -Compress)) $t2)
+  $asyncStart = Complete-HookProcess (Start-HookProcess $asyncInversionState ((@{ session_id = $asyncInversionGovernor; cwd = $cwd; hook_event_name = 'SubagentStart'; agent_id = $asyncInversionAgent; model = 'gpt-5.6-luna' } | ConvertTo-Json -Compress)) $t1)
+  Assert-True ($asyncStop.ExitCode -eq 0 -and $asyncStart.ExitCode -eq 0 -and -not $asyncStop.Output -and -not $asyncStop.Error -and -not $asyncStart.Output -and -not $asyncStart.Error) 'Separate asynchronous terminal-first hook processes were noisy or failed.'
+  $asyncInversion = Get-Payload (Invoke-Supervision $asyncInversionState 'discover' $asyncInversionGovernor)
+  Assert-True ($asyncInversion.activeAgents -eq 0 -and @($asyncInversion.checkBatch | Where-Object taskId -eq $asyncInversionAgent).Count -eq 0) 'Completion-inverted asynchronous hooks left a stopped agent active or queued.'
+  Assert-True ($asyncInversion.ignoredStaleEvents -ge 1 -and $asyncInversion.recommendedCadenceMinutes -eq 360 -and $asyncInversion.maximumModelCallsPerDay -eq 4) 'Completion inversion did not preserve stale ordering and idle Governor cadence.'
+
   $fairState = Join-Path $root 'fairness.json'
   $fairGovernor = 'thread-fair-governor'
   [void](Invoke-Hook $fairState @{ session_id = $fairGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-luna' })

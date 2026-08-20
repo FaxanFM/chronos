@@ -125,7 +125,9 @@ successfully exercises the candidate release from a fresh task.
   its parent task has already ended.
 - Regression: deterministic fixtures deliver task and agent terminal events
   before their starts, then deliver delayed starts and a new subagent start
-  after parent termination. No task or agent may become active.
+  after parent termination. A separate-process stop-before-start completion
+  inversion must also retain idle Governor cadence. No task or agent may become
+  active.
 - Validation status: local supervision and Governor suites pass. Independent
   installed-package validation remains required before release.
 
