@@ -61,11 +61,11 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Failed to create SQLite fixture." }
 
   foreach ($source in @('chronos', 'openai-curated-remote')) {
-    $manifestDirectory = Join-Path $duplicateInstallHome "plugins\cache\$source\chronos\0.9.1\.codex-plugin"
+    $manifestDirectory = Join-Path $duplicateInstallHome "plugins\cache\$source\chronos\0.9.2\.codex-plugin"
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
     [System.IO.File]::WriteAllText(
       (Join-Path $manifestDirectory 'plugin.json'),
-      '{"name":"chronos","version":"0.9.1"}',
+      '{"name":"chronos","version":"0.9.2"}',
       [System.Text.UTF8Encoding]::new($false)
     )
   }
@@ -74,22 +74,22 @@ try {
     "[plugins.`"chronos@chronos`"]`nenabled = true`n",
     [System.Text.UTF8Encoding]::new($false)
   )
-  $installedScriptDirectory = Join-Path $duplicateInstallHome 'plugins\cache\openai-curated-remote\chronos\0.9.1\skills\chronos\scripts'
+  $installedScriptDirectory = Join-Path $duplicateInstallHome 'plugins\cache\openai-curated-remote\chronos\0.9.2\skills\chronos\scripts'
   New-Item -ItemType Directory -Path $installedScriptDirectory -Force | Out-Null
   Copy-Item -LiteralPath $chronosScript -Destination (Join-Path $installedScriptDirectory 'chronos.ps1')
   $installedChronosScript = Join-Path $installedScriptDirectory 'chronos.ps1'
-  $directoryManifest = Join-Path $directoryInstallHome 'plugins\cache\openai-curated-remote\chronos\0.9.1\.codex-plugin'
+  $directoryManifest = Join-Path $directoryInstallHome 'plugins\cache\openai-curated-remote\chronos\0.9.2\.codex-plugin'
   New-Item -ItemType Directory -Path $directoryManifest -Force | Out-Null
   [System.IO.File]::WriteAllText(
     (Join-Path $directoryManifest 'plugin.json'),
-    '{"name":"chronos","version":"0.9.1"}',
+    '{"name":"chronos","version":"0.9.2"}',
     [System.Text.UTF8Encoding]::new($false)
   )
 
   $duplicateInstallOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedChronosScript -Action install-status -CodexHome $duplicateInstallHome
   if ($LASTEXITCODE -ne 0) { throw 'Chronos duplicate install-source check failed.' }
-  Assert-Match $duplicateInstallOutput '^CHRONOS INSTALL pluginVersion=0\.9\.1 ' 'Install status must report its package version.'
+  Assert-Match $duplicateInstallOutput '^CHRONOS INSTALL pluginVersion=0\.9\.2 ' 'Install status must report its package version.'
   Assert-Match $duplicateInstallOutput ' sourceObservation=cache_inventory_not_enabled_state ' 'Cache inventory must not be reported as enabled state.'
   Assert-Match $duplicateInstallOutput ' currentSource=openai-curated-remote sourceObservation=cache_inventory_not_enabled_state cachedSourceCount=2 cachedSources=chronos,openai-curated-remote cachedDuplicateSources=true legacyGitSourcePresent=true directorySourcePresent=true legacyGitConfig=enabled sourceConflict=CONFIRMED canonicalSource=openai-curated-remote currentPluginIdentity=chronos@openai-curated-remote canonicalPluginIdentity=chronos@openai-curated-remote sessionReloadRequired=true recommendedAction=remove_legacy_git_install_then_start_new_task$' `
     'The Git and Directory duplicate must recommend the canonical migration.'
@@ -1265,6 +1265,12 @@ try {
     "Chronos skill must explicitly prohibit status-based task blocking."
   Assert-Match $skillText "advise a full Windows\s+restart" `
     "Chronos skill must advise a full PC restart for an unusable helper."
+  Assert-Match $skillText '(?s)## Complete status request.*?Inspector, supervision\s+status, and Heartbeat status' `
+    "Chronos skill must define the complete status starter-prompt behavior."
+  Assert-Match $skillText 'status-only request must not create a\s+Governor task, recurrence, worker, Heartbeat event, or task wake' `
+    "Complete status must remain observational and wake-free."
+  Assert-Match $skillText 'configuration evidence, not proof that the command\s+executed' `
+    "Chronos skill must distinguish hook configuration from observed execution."
 
   Write-Output "Chronos tests passed."
 } finally {

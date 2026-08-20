@@ -14,12 +14,13 @@ v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
-v0.9.1 is the candidate Directory update. It improves the first-use prompts,
-listing copy, full-setup contract, and deterministic prompt-quality gates. The
-candidate `chronos-v0.9.1.zip` SHA-256 is
-`fe380e10f93b03402ad2407533ab88210e36734db8a0a836a61ff7a8114caef8`.
+v0.9.2 is the candidate Directory update. It fixes silent Windows lifecycle
+hook non-execution and retains the improved first-use prompts, listing copy,
+full-setup contract, and deterministic prompt-quality gates. The candidate
+`chronos-v0.9.2.zip` SHA-256 is
+`3a17b4b8b54466e21437d0d00c1e7d0af1f03cee0c876d2bf4b19fa9ee5c71c4`.
 Candidate release URL:
-https://github.com/FaxanFM/chronos/releases/tag/v0.9.1.
+https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -40,7 +41,7 @@ public ChatGPT directory:
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
 5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.9.1.zip` release asset after every gate passes.
+   `chronos-v0.9.2.zip` release asset after every gate passes.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -56,7 +57,7 @@ Official references:
 
 - Type: **Skills only**
 - Package name: `chronos`
-- Version: `0.9.1`
+- Version: `0.9.2`
 - MCP server: none
 - App or custom UI: none
 - Authentication: none
@@ -241,14 +242,21 @@ Do not infer worldwide availability from publication.
 
 ## Candidate Release Notes
 
-> Chronos for Codex v0.9.1 makes the first starter prompt complete the real
+> Chronos for Codex v0.9.2 fixes Windows lifecycle hooks that could appear
+> installed, active, and trusted without executing. The Windows definitions now
+> use one quote-free encoded launcher that resolves the installed plugin path
+> inside PowerShell. Exact source and extracted-package tests execute that
+> launcher through the Codex-style `cmd.exe` boundary and require fresh registry
+> evidence. Host-reported trust remains separate from observed execution, and
+> complete host inventory remains the automatic fallback. v0.9.2 also retains
+> v0.9.1's first starter prompt, which completes the real
 > setup: installed-source verification, native status, one dedicated Governor,
 > one supervision and Heartbeat recurrence, and zero worker recurrences. The
 > second prompt returns one separated diagnostic status instead of a narrow
 > token explanation. The third prompt demonstrates bounded read-only delegation
 > and coordinator verification. Release tests now enforce three distinct,
 > single-line, action-oriented prompts and their required setup, diagnostic, and
-> delegation concepts. v0.9.1 retains v0.9.0's silent asynchronous lifecycle and completed-turn
+> delegation concepts. v0.9.2 retains v0.9.0's silent asynchronous lifecycle and completed-turn
 > hooks to discover active tasks without worker prompts or worker model turns.
 > It detects duplicate Git and Directory installations,
 > keeps one Terra Medium Governor per machine, and
@@ -305,7 +313,7 @@ OpenAI publication date: **unknown**
 
 Submitted at: **unknown**
 
-Review status: **v0.8.8 published; v0.9.1 not submitted**. Retained evidence
+Review status: **v0.8.8 published; v0.9.2 not submitted**. Retained evidence
 confirms the v0.8.8 publication. Exact regional availability remains outside
 this repository's evidence boundary.
 

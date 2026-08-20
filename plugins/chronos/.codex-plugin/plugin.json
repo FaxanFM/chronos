@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Set up one local Codex Governor for passive task supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only worker coordination.",
   "author": {
     "name": "Dravara, LLC",

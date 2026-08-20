@@ -120,7 +120,9 @@ live mutex contention with deterministic state and queue postconditions, atomic 
 recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 full 256-record capacity behavior, silent hook output,
-headless Windows commands, bounded event coverage, correct asynchronous flags
+headless Windows commands, the exact quote-free manifest command through the
+Codex-style `cmd.exe /D /S /C` boundary, a plugin root containing spaces,
+fresh `hookRuns` and `lastHookUtc` evidence, bounded event coverage, correct asynchronous flags
 with synchronous `SessionEnd`, absence of high-frequency prompt/tool hooks, and
 absence of scheduler, process-launch, and network primitives.
 
@@ -144,7 +146,11 @@ per-file manifest hashes and sizes, canonical Directory distribution identity, p
 plugin files, repository-file exclusion, and a matching artifact checksum. It
 also extracts the exact ZIP as a fresh `chronos@openai-curated-remote` cache
 install, verifies canonical registry discovery, the two-skill inventory and version, and runs the packaged `.cmd` Heartbeat and supervision status
-commands so execution-policy handling is part of the release gate.
+commands so execution-policy handling is part of the release gate. The release
+suite also executes the installed package's exact Windows hook definition
+through `cmd.exe` from a path containing spaces and requires silent registry
+activity. This prevents a scan-valid hook definition from passing while its
+payload never starts.
 
 Tagged CI runs inspector, Heartbeat, supervision, Governor, and release tests on two Windows runner
 labels. Privileged publication is a separate job. Actions are pinned, the

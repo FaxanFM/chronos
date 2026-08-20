@@ -50,8 +50,8 @@ The authoritative immutable v0.8.8 ZIP SHA-256 is
 `686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
 The authoritative immutable v0.9.0 ZIP SHA-256 is
 `52006ba07fa9ffef0705c0c65261134331a7e6c2543e6baf24210fa42871aa67`.
-v0.8.8 is the current published Directory package while v0.9.1 completes its
-listing, audit, and external-canary gates.
+v0.8.8 is the current published Directory package. v0.9.2 replaces the failed
+v0.9.0 Windows hook path and completes its audit and external-canary gates.
 
 ## Published Release
 
@@ -127,7 +127,7 @@ version is absent. Chronos cannot repair this from inside a skill that did not
 load. Do not create a compatibility copy, junction, or symbolic link under the
 old version because that would execute newer code under a false version label.
 
-v0.9.1 retains disabled shared-folder write delegation. Inactive Governor
+v0.9.2 retains disabled shared-folder write delegation. Inactive Governor
 version 1 or 2 state can migrate from Git
 metadata into its sandbox-writable per-user state store. It fails closed when
 legacy state contains an active lease; finish or release that work with the
@@ -164,6 +164,13 @@ enabled; the status output states this limitation.
 After upgrading, open a fresh task and review the exact Chronos lifecycle hook
 through `/hooks`. Hook trust is bound to the definition hash and cannot be
 bypassed by the plugin. Then ask Codex to enable Chronos supervision once.
+
+The `/hooks` installed, active, and trusted labels do not prove the command ran.
+Check `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` in supervision
+status. A release canary must capture the baseline, complete a fresh normal
+post-trust task without invoking Chronos, and prove those values advance before
+the Governor reconciles host inventory. v0.9.2 keeps the Windows launcher
+quote-free because Codex passes it through an outer `cmd.exe` command boundary.
 
 First inspect all host automations named `Chronos Governor pulse` and their
 targets. Reuse a live target only after its title and assignment confirm the

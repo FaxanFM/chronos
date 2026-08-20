@@ -75,7 +75,7 @@ codex.cmd plugin add chronos@chronos
 
 Open a new Codex task after installation.
 
-Chronos v0.9.1 checks valid cached source manifests on first use and separates
+Chronos v0.9.2 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms
 the running Directory package and enabled legacy Git source, remove the legacy
 source through the Codex plugin manager, then start a fresh task:

@@ -27,6 +27,14 @@ does not bypass this review. If hooks remain disabled or untrusted, the
 Governor uses one compact host inventory as the deterministic fallback. It
 does not ask the user to register tasks or relay routine findings.
 
+The `/hooks` installed, active, and trusted labels describe host configuration.
+They do not prove that Windows launched the command. Native status reports
+`hookExecutionObservation=observed` only after `hookRuns` and `lastHookUtc`
+advance. Until then it reports `not_observed` and keeps the complete host
+inventory as the liveness authority. A release canary must trust the hooks,
+capture those counters, complete a fresh normal task without invoking Chronos,
+and prove that the counters advance before Governor reconciliation.
+
 Setup is complete only after Codex reports the active source, native status,
 one live dedicated Governor, one active matching Governor recurrence, readable
 Heartbeat status, and zero worker recurrences. An internal claim flag by itself
@@ -45,6 +53,11 @@ execution. `SessionEnd` is always synchronous in Codex. Every hook is headless,
 has a three-second host timeout, exits without model-visible output, and never
 runs for prompts, approvals, or tools. The `Stop` hook records only the task,
 a hashed turn signal, safe model/workspace categories, counters, and timestamps.
+On Windows, the configured command is quote-free at the Codex `cmd.exe`
+boundary. Its constant UTF-16LE `-EncodedCommand` payload resolves
+`PLUGIN_ROOT` inside PowerShell and invokes only
+`skills\chronos\scripts\session-registry.ps1 -Action hook`. This avoids the
+Codex Windows outer-quote failure without accepting runtime script content.
 `SessionEnd` mutex acquisition is capped at 250 ms; asynchronous acquisition is
 capped at 100 ms. If the
 registry is busy, the hook writes one bounded protected fallback event and
@@ -268,8 +281,9 @@ dedicated Governor uses a model on the disclosed bounded host cadence. The
 deterministic supervision engine is model-agnostic; the bootstrap policy alone
 prefers Terra Medium. `hookExecutionObservation`, `lastHookUtc`, and
 `hookTrustObservation` distinguish observed execution from the host-only trust
-state. A disabled or untrusted hook produces no registry event and does not
-block host inventory reconciliation.
+state. The trust field remains `host_verification_required`; Chronos does not
+infer it from local registry data. A disabled, untrusted, or non-executing hook
+produces no registry event and does not block host inventory reconciliation.
 
 Chronos intentionally does not register `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PermissionRequest`, `PreCompact`, or `PostCompact`. This avoids

@@ -8,6 +8,7 @@ $releaseWorkflowPath = Join-Path $repoRoot ".github\workflows\release.yml"
 $testWorkflowPath = Join-Path $repoRoot ".github\workflows\test.yml"
 $readmePath = Join-Path $repoRoot "README.md"
 $pluginReadmePath = Join-Path $repoRoot "plugins\chronos\README.md"
+$coreSkillPath = Join-Path $repoRoot "plugins\chronos\skills\chronos\SKILL.md"
 $operationsPath = Join-Path $repoRoot "docs\OPERATIONS.md"
 $supervisionPath = Join-Path $repoRoot "docs\SUPERVISION.md"
 $heartbeatPath = Join-Path $repoRoot "docs\HEARTBEATS.md"
@@ -101,11 +102,28 @@ try {
     '%TEMP%\Chronos\Supervision\session-registry.json',
     'one compact complete host task-list call',
     'gpt-5.6-terra',
+    'configuration',
+    'hookExecutionObservation=observed',
+    'fresh normal task without invoking Chronos',
+    'quote-free',
+    'cmd.exe',
     'routine user action',
     'DPAPI does not protect against another process already running as that'
   )) {
     if (-not $supervisionContract.Contains($required)) {
       throw "Public supervision contract is missing a release boundary: $required"
+    }
+  }
+  $coreSkill = Get-Content -Raw -LiteralPath $coreSkillPath
+  foreach ($required in @(
+    '## Complete status request',
+    'Inspector, supervision',
+    'Heartbeat status',
+    'status-only request must not create a',
+    'configuration evidence, not proof that the command'
+  )) {
+    if (-not $coreSkill.Contains($required)) {
+      throw "Core Chronos skill is missing the full-status or hook-observation contract: $required"
     }
   }
   $heartbeatContract = (Get-Content -Raw -LiteralPath $heartbeatPath) -replace '\s+', ' '
@@ -260,7 +278,7 @@ try {
     $archive.Dispose()
   }
 
-  $installRoot = Join-Path $testRoot "installed"
+  $installRoot = Join-Path $testRoot "installed plugin with spaces"
   [System.IO.Compression.ZipFile]::ExtractToDirectory($firstArtifact, $installRoot)
   $installedManifestPath = Join-Path $installRoot ".codex-plugin\plugin.json"
   $installedManifest = Get-Content -Raw -LiteralPath $installedManifestPath | ConvertFrom-Json
@@ -305,6 +323,21 @@ try {
   }
   if (([regex]::Matches($installedHookText, '"timeout"\s*:\s*3')).Count -ne 5) {
     throw 'Extracted package must cap every monitoring hook at three seconds.'
+  }
+  $installedWindowsCommands = @(
+    $installedHooks.hooks.PSObject.Properties.Value |
+      ForEach-Object { $_[0].hooks[0].commandWindows }
+  )
+  if (($installedWindowsCommands | Select-Object -Unique).Count -ne 1) {
+    throw 'Extracted lifecycle events do not share one audited Windows launcher.'
+  }
+  $installedWindowsCommand = [string]$installedWindowsCommands[0]
+  if ($installedWindowsCommand.Contains('"') -or $installedWindowsCommand -notmatch ' -EncodedCommand ([A-Za-z0-9+/=]+)$') {
+    throw 'Extracted Windows hook launcher is not quote-free and encoded for the Codex cmd.exe boundary.'
+  }
+  $installedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+  if ($installedWindowsPayload -ne "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\session-registry.ps1') -Action hook") {
+    throw 'Extracted Windows hook payload does not resolve PLUGIN_ROOT safely inside PowerShell.'
   }
   foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
     $parseErrors = $null
@@ -363,6 +396,43 @@ try {
   $hookProcess.Dispose()
   if ($hookExit -ne 0 -or $hookStdout -or $hookStderr) {
     throw "Packaged lifecycle hook was not silent and successful."
+  }
+
+  $configuredHookTemp = Join-Path $testRoot 'configured hook temp'
+  New-Item -ItemType Directory -Path $configuredHookTemp -Force | Out-Null
+  $configuredHookInfo = New-Object Diagnostics.ProcessStartInfo
+  $configuredHookInfo.FileName = $env:ComSpec
+  $configuredHookInfo.Arguments = '/D /S /C "' + $installedWindowsCommand + '"'
+  $configuredHookInfo.UseShellExecute = $false
+  $configuredHookInfo.CreateNoWindow = $true
+  $configuredHookInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+  $configuredHookInfo.RedirectStandardInput = $true
+  $configuredHookInfo.RedirectStandardOutput = $true
+  $configuredHookInfo.RedirectStandardError = $true
+  $configuredHookInfo.EnvironmentVariables['PLUGIN_ROOT'] = $installRoot
+  $configuredHookInfo.EnvironmentVariables['TEMP'] = $configuredHookTemp
+  $configuredHookInfo.EnvironmentVariables['TMP'] = $configuredHookTemp
+  $configuredHookProcess = [Diagnostics.Process]::Start($configuredHookInfo)
+  $configuredHookProcess.StandardInput.Write('{"session_id":"release-configured-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
+  $configuredHookProcess.StandardInput.Close()
+  if (-not $configuredHookProcess.WaitForExit(5000)) {
+    try { $configuredHookProcess.Kill() } catch {}
+    throw 'Packaged configured lifecycle hook exceeded its bounded launch test.'
+  }
+  $configuredHookStdout = $configuredHookProcess.StandardOutput.ReadToEnd()
+  $configuredHookStderr = $configuredHookProcess.StandardError.ReadToEnd()
+  $configuredHookExit = $configuredHookProcess.ExitCode
+  $configuredHookProcess.Dispose()
+  if ($configuredHookExit -ne 0 -or $configuredHookStdout -or $configuredHookStderr) {
+    throw 'Packaged configured lifecycle hook did not execute silently through the Codex cmd.exe boundary.'
+  }
+  $configuredRegistryPath = Join-Path $configuredHookTemp 'Chronos\Supervision\session-registry.json'
+  if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf)) {
+    throw 'Packaged configured lifecycle hook reported success without reaching the registry script.'
+  }
+  $configuredRegistry = Get-Content -Raw -LiteralPath $configuredRegistryPath | ConvertFrom-Json
+  if ($configuredRegistry.health.hookRuns -ne 1 -or -not $configuredRegistry.health.lastHookUtc) {
+    throw 'Packaged configured lifecycle hook did not record fresh lifecycle activity.'
   }
 
   $checksum = (Get-Content -Raw -LiteralPath (Join-Path $first "chronos-v$version.sha256")).Trim()

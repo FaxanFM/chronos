@@ -81,6 +81,32 @@ successfully exercises the candidate release from a fresh task.
   uses its existing cumulative basis and is labeled as such.
 - Regression: two comparable token snapshots and an over-2-GiB truncated tail.
 
+### Windows reported trusted hooks but did not execute them
+
+- Affected versions: v0.9.0 and the unreleased v0.9.1 candidate.
+- Reproduction scope: reproduced on one independent Windows installation and
+  deterministically at the same Windows command-runner boundary in development.
+- Environment: current Windows Codex hosts that pass hook commands through
+  `cmd.exe /C` with an outer quoted command.
+- Evidence: all five hooks appeared installed, active, and trusted, yet two
+  fresh tasks left `hookRuns=2`, `turnSignals=0`, and `lastHookUtc` unchanged.
+  Governor host inventory still discovered the tasks and all other packaged
+  suites passed.
+- Root cause: the manifest embedded quoted executable and `-File` paths inside
+  the command. Codex wrapped that string in another quoted `cmd.exe` command,
+  so Windows misparsed it while the host could still report completion. This
+  matches the upstream OpenAI Codex Windows hook-runner defect tracked in
+  [issue 38168](https://github.com/openai/codex/issues/38168).
+- v0.9.2 correction: use one constant quote-free `-EncodedCommand` launcher.
+  The decoded payload resolves `PLUGIN_ROOT` inside PowerShell and invokes only
+  the packaged registry script. Hook event selection, timeouts, asynchronous
+  flags, persistence, and model-turn behavior are unchanged.
+- Regression: execute the exact configured command through `cmd.exe /D /S /C`
+  from source and from an extracted plugin root containing spaces; require exit
+  zero, no output, a created registry, `hookRuns=1`, and `lastHookUtc`.
+- Validation status: local deterministic reproduction passes. Independent
+  installed-package validation remains required before release.
+
 ## Heuristic / Tuning Issues
 
 No threshold, scoring, prediction, or calibration-sensitive change is included

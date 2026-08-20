@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.9.2
+
+- Fix silent Windows lifecycle-hook non-execution caused by Codex wrapping
+  commands that contain embedded quotes at its `cmd.exe /C` boundary.
+- Replace every Windows hook command with one constant quote-free
+  `-EncodedCommand` launcher. The decoded PowerShell resolves `PLUGIN_ROOT`
+  internally and invokes only Chronos's packaged session-registry script.
+- Preserve the existing five-event design, asynchronous flags, synchronous
+  `SessionEnd`, three-second host ceilings, silent output, and zero-model-turn
+  behavior.
+- Add deterministic tests that run the exact manifest launcher through the
+  Windows command boundary, including from an installed plugin path with
+  spaces, and require a fresh registry counter and timestamp.
+- Distinguish host-reported hook configuration or trust from observed command
+  execution. Host task inventory remains the automatic liveness fallback until
+  a fresh lifecycle event proves hook execution.
+- Add a complete-status skill contract that runs Inspector, supervision, and
+  Heartbeat status without creating a Governor, recurrence, worker, event, or
+  task wake.
+- Retain v0.9.1's full-setup, diagnostic-status, and bounded-delegation starter
+  prompts and their deterministic listing-quality gates.
+
 ## v0.9.1
 
 - Replace narrow first-use prompts with three distinct product actions: complete

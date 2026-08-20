@@ -40,7 +40,7 @@ Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
 the OpenAI Plugins Directory. They are separate source identities and the
 Directory install does not replace the Git install in an already loaded task.
-Chronos v0.9.1 distinguishes a confirmed enabled-source conflict from cached
+Chronos v0.9.2 distinguishes a confirmed enabled-source conflict from cached
 packages that may be stale. After it confirms the running Directory package
 and enabled legacy Git source, remove the legacy source through the plugin
 manager and start a fresh task:

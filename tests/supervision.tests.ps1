@@ -118,6 +118,36 @@ function Invoke-Hook {
   Complete-HookProcess (Start-HookProcess $State ($Data | ConvertTo-Json -Compress -Depth 8) $ObservedAtUtc)
 }
 
+function Invoke-ConfiguredWindowsHook {
+  param([string]$Command, [string]$PluginRoot, [string]$TempRoot, [string]$Json)
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = $env:ComSpec
+  $info.Arguments = '/D /S /C "' + $Command + '"'
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+  $info.RedirectStandardInput = $true
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.EnvironmentVariables['PLUGIN_ROOT'] = $PluginRoot
+  $info.EnvironmentVariables['TEMP'] = $TempRoot
+  $info.EnvironmentVariables['TMP'] = $TempRoot
+  $process = [Diagnostics.Process]::Start($info)
+  $process.StandardInput.Write($Json)
+  $process.StandardInput.Close()
+  if (-not $process.WaitForExit(5000)) {
+    try { $process.Kill() } catch {}
+    throw 'Configured Windows lifecycle hook exceeded its bounded test timeout.'
+  }
+  $result = [pscustomobject]@{
+    ExitCode = $process.ExitCode
+    Output = $process.StandardOutput.ReadToEnd()
+    Error = $process.StandardError.ReadToEnd()
+  }
+  $process.Dispose()
+  $result
+}
+
 try {
   foreach ($file in @($module, $wrapper)) {
     $errors = $null
@@ -134,11 +164,37 @@ try {
   }
   Assert-True ($hookText.Contains('-WindowStyle Hidden')) 'Windows hook commands must be headless.'
   Assert-True ($hookText.Contains('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')) 'Windows hooks must use the system PowerShell path.'
+  $windowsCommands = @(
+    $hooks.hooks.PSObject.Properties.Value |
+      ForEach-Object { $_[0].hooks[0].commandWindows }
+  )
+  Assert-True (($windowsCommands | Select-Object -Unique).Count -eq 1) 'Every lifecycle event must use the same audited Windows launcher.'
+  $windowsCommand = [string]$windowsCommands[0]
+  Assert-True (-not $windowsCommand.Contains('"')) 'Windows hook launcher must remain quote-free for the Codex cmd.exe outer-quote boundary.'
+  Assert-True ($windowsCommand -match ' -EncodedCommand ([A-Za-z0-9+/=]+)$') 'Windows hook launcher must move path-sensitive logic into an encoded PowerShell payload.'
+  $decodedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+  Assert-True ($decodedWindowsPayload -eq "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\session-registry.ps1') -Action hook") 'Windows hook payload did not suppress host noise and resolve the installed plugin path inside PowerShell.'
   Assert-True (([regex]::Matches($hookText, '"async"\s*:\s*true')).Count -eq 4) 'Every non-terminal hook must use supported background execution.'
   Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 5) 'Every packaged hook must retain the three-second host ceiling.'
   Assert-True (-not (($hooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async')) 'SessionEnd must remain explicitly synchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
   Assert-True (-not $hookText.Contains('-Diagnostic')) 'Production hook definitions must not expose diagnostic output.'
+
+  $configuredHookTemp = Join-Path $root 'configured hook temp'
+  New-Item -ItemType Directory -Path $configuredHookTemp -Force | Out-Null
+  $configuredPayload = @{
+    session_id = 'thread-configured-windows-hook'
+    cwd = $repo
+    hook_event_name = 'SessionStart'
+    source = 'startup'
+    model = 'gpt-5.6-terra'
+  } | ConvertTo-Json -Compress
+  $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
+  Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
+  $configuredStatePath = Join-Path $configuredHookTemp 'Chronos\Supervision\session-registry.json'
+  Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Configured Windows hook reported success without reaching the registry script.'
+  $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
+  Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
   $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath
   foreach ($requiredConvergenceControl in @(
     'chronos-supervision-v1',

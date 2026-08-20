@@ -41,7 +41,10 @@ one completed-turn signal. Four run asynchronously; `SessionEnd` remains
 synchronous. They do not run on tools, commands, approvals, or prompts and
 return no model context. On brief registry contention, a hook writes one
 bounded DPAPI-protected fallback event; the next hook or Governor cycle merges
-and removes it.
+and removes it. On Windows, each definition uses a quote-free encoded launcher
+because Codex passes the configured command through `cmd.exe`; the decoded
+payload only resolves the installed plugin root and invokes the registry
+script. Do not rewrite it as a quoted `-File` command.
 
 ## Full setup request
 
@@ -53,7 +56,22 @@ supervision and due Heartbeat evaluation, and verify zero worker recurrences.
 Do not stop after an inspection or return setup instructions for the user to
 relay. The only manual boundary is normal Codex hook trust review; never bypass
 it. If hooks remain untrusted, complete the safe host-inventory fallback and
-state that passive hook hints are pending trust.
+state that passive hook hints are pending trust. An installed, active, or
+trusted `/hooks` entry is configuration evidence, not proof that the command
+executed. Read `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` from
+native supervision status. Report `not_observed` until a fresh post-trust
+lifecycle or completed-turn event advances those fields. Keep host inventory as
+the automatic liveness fallback while execution is unobserved.
+
+## Complete status request
+
+When the user asks for a complete Chronos status, run the Inspector, supervision
+status, and Heartbeat status. Present machine health separately from workflow,
+quota, approval, rule, SQLite, and supervision conditions. A numeric zero is
+not evidence of absence when coverage is partial, unsupported, outside the
+window, or discontinuous; preserve those coverage labels. Report hook trust and
+observed hook execution separately. This status-only request must not create a
+Governor task, recurrence, worker, Heartbeat event, or task wake.
 
 ## Supervision
 
