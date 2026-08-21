@@ -24,6 +24,8 @@ $script:ActiveRetentionDays = 30
 $script:JsonNodeLimit = 8192
 $script:PendingEventLimit = 256
 $script:PendingEventByteLimit = 4096
+$script:PendingEventWriteAttemptLimit = 2
+$script:PendingEventRetryDelayMilliseconds = 10
 $script:SynchronousHookMutexWaitMilliseconds = 250
 $script:AsynchronousHookMutexWaitMilliseconds = 100
 $script:GovernorActiveCadenceMinutes = 60
@@ -763,6 +765,26 @@ function Write-PendingHookEvent {
   }
 }
 
+function Write-PendingHookEventDurably {
+  param([string]$ResolvedStatePath, $PreparedEvent)
+  $lastError = $null
+  for ($attempt = 1; $attempt -le $script:PendingEventWriteAttemptLimit; $attempt++) {
+    try {
+      Write-PendingHookEvent $ResolvedStatePath $PreparedEvent
+      return
+    } catch {
+      $lastError = $_
+      if ($attempt -lt $script:PendingEventWriteAttemptLimit) {
+        [Threading.Thread]::Sleep($script:PendingEventRetryDelayMilliseconds)
+      }
+    }
+  }
+  if ($null -ne $lastError -and [string]$lastError.Exception.Message -match '^supervision_[a-z_]+$') {
+    throw ([string]$lastError.Exception.Message)
+  }
+  throw 'supervision_pending_event_unwritable'
+}
+
 function Read-PendingHookEvents {
   param([string]$ResolvedStatePath)
   $directory = Get-PendingEventDirectory $ResolvedStatePath
@@ -1241,6 +1263,10 @@ function Write-SafeError {
 $mutex = $null
 $acquired = $false
 $hookData = $null
+$preparedHookEvent = $null
+$preparedProtectedId = $null
+$resolved = $null
+$hookDurable = $false
 $eventObservedAt = $script:InvocationObservedAtUtc
 try {
   if ($Action -eq 'hook') {
@@ -1269,8 +1295,6 @@ try {
       try { $eventObservedAt = ConvertTo-UtcTimestamp $ObservedAtUtc } catch { throw 'supervision_hook_timestamp_invalid' }
     }
   }
-  $preparedHookEvent = $null
-  $preparedProtectedId = $null
   if ($Action -eq 'hook') {
     $preparedHookEvent = New-PreparedHookEvent $hookData $eventObservedAt
     $preparedProtectedId = if ([string]$preparedHookEvent.event -eq 'SessionStart') { [string]$preparedHookEvent.protectedSessionId } elseif ([string]$preparedHookEvent.event -eq 'SubagentStart') { [string]$preparedHookEvent.protectedAgentId } else { $null }
@@ -1286,7 +1310,8 @@ try {
   try { $acquired = $mutex.WaitOne($mutexWaitMilliseconds) } catch [Threading.AbandonedMutexException] { $acquired = $true }
   if (-not $acquired) {
     if ($Action -eq 'hook') {
-      Write-PendingHookEvent $resolved $preparedHookEvent
+      Write-PendingHookEventDurably $resolved $preparedHookEvent
+      $hookDurable = $true
       exit 0
     }
     throw 'supervision_mutex_busy'
@@ -1303,6 +1328,7 @@ try {
   if ($Action -eq 'hook') {
     Invoke-HookEvent $state $hookData $now $eventObservedAt $preparedProtectedId ([string]$preparedHookEvent.workspaceHash)
     Write-State $state $resolved -TrustedHookMutation
+    $hookDurable = $true
     Remove-PendingHookEvents $pendingPaths $resolved
     exit 0
   }
@@ -1515,6 +1541,21 @@ try {
   $code = [string]$_.Exception.Message
   if ($code -notmatch '^supervision_[a-z_]+$') { $code = 'supervision_internal_error' }
   if ($Action -eq 'hook') {
+    # A lifecycle hint must reach either the registry or the protected pending
+    # queue before the production hook returns silently. This also catches a
+    # transient direct-state or first pending-slot failure without retrying the
+    # model task or extending the mutex deadline.
+    if (-not $hookDurable -and $null -ne $preparedHookEvent -and -not [string]::IsNullOrWhiteSpace([string]$resolved)) {
+      try {
+        Write-PendingHookEventDurably $resolved $preparedHookEvent
+        $hookDurable = $true
+        exit 0
+      } catch {
+        $fallbackCode = [string]$_.Exception.Message
+        if ($fallbackCode -match '^supervision_[a-z_]+$') { $code = $fallbackCode }
+        else { $code = 'supervision_pending_event_unwritable' }
+      }
+    }
     if ($Diagnostic) {
       Write-SafeError $code 'hook'
       exit 1

@@ -783,13 +783,15 @@ try {
   $raceState = Join-Path $root 'race.json'
   $race = [Collections.Generic.List[object]]::new()
   for ($index = 1; $index -le 8; $index++) {
+    # Diagnostic mode preserves production behavior while surfacing any
+    # normally silent hook failure that would otherwise look like a lost event.
     $race.Add((Start-HookProcess $raceState (@{
       session_id = ('thread-race-{0:d2}' -f $index)
       cwd = $cwd
       hook_event_name = 'SessionStart'
       source = 'startup'
       model = 'gpt-5.6-terra'
-    } | ConvertTo-Json -Compress))) | Out-Null
+    } | ConvertTo-Json -Compress) -Diagnostic)) | Out-Null
   }
   foreach ($invocation in $race) {
     $result = Complete-HookProcess $invocation
@@ -797,6 +799,22 @@ try {
   }
   $raceStatus = Get-Payload (Invoke-Supervision $raceState)
   Assert-True ($raceStatus.engine -eq 'healthy' -and $raceStatus.activeTasks -eq 8 -and $raceStatus.retainedRecords -eq 8) "Concurrent lifecycle writes were lost or corrupted: $($raceStatus | ConvertTo-Json -Compress -Depth 8)"
+
+  # A direct-state failure must preserve the prepared event in the protected
+  # pending queue before the production hook returns silently.
+  $recoveryState = Join-Path $root 'hook-durable-recovery.json'
+  [void](Invoke-Hook $recoveryState @{ session_id = 'thread-recovery-1'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
+  $validRecoveryState = [IO.File]::ReadAllText($recoveryState)
+  [IO.File]::WriteAllText($recoveryState, '{"schema":', [Text.UTF8Encoding]::new($false))
+  $recoveryJson = (@{ session_id = 'thread-recovery-2'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' } | ConvertTo-Json -Compress)
+  $recoveryHook = Complete-HookProcess (Start-HookProcess $recoveryState $recoveryJson -Diagnostic)
+  Assert-True ($recoveryHook.ExitCode -eq 0 -and -not $recoveryHook.Output -and -not $recoveryHook.Error) 'Recoverable direct-state failure did not preserve the hook silently.'
+  $recoveryPending = @(Get-ChildItem -LiteralPath ($recoveryState + '.pending') -File -Filter 'pending-*.json')
+  Assert-True ($recoveryPending.Count -eq 1) 'Recoverable direct-state failure did not queue exactly one durable event.'
+  [IO.File]::WriteAllText($recoveryState, $validRecoveryState, [Text.UTF8Encoding]::new($false))
+  $recoveryStatus = Get-Payload (Invoke-Supervision $recoveryState)
+  Assert-True ($recoveryStatus.engine -eq 'healthy' -and $recoveryStatus.activeTasks -eq 2 -and $recoveryStatus.hookRuns -eq 2) 'Recovered state did not merge the preserved hook event.'
+  Assert-True (@(Get-ChildItem -LiteralPath ($recoveryState + '.pending') -File -Filter 'pending-*.json').Count -eq 0) 'Merged recovery event remained in the pending queue.'
 
   $mutexState = Join-Path $root 'mutex-deadline.json'
   [void](Invoke-Hook $mutexState @{ session_id = 'thread-mutex'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
@@ -841,6 +859,7 @@ try {
   Assert-True ($sourceText.Contains("Join-Path `$localRoot 'session-registry.json'")) 'LocalAppData must remain available only as the legacy supervision migration source.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
   Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'
+  Assert-True ($sourceText.Contains('$script:PendingEventWriteAttemptLimit = 2') -and $sourceText.Contains('Write-PendingHookEventDurably')) 'Bounded pending-event retry or final hook durability fallback is missing.'
   Assert-True (-not $sourceText.Contains("@('Global', 'Local')")) 'A shared registry must not silently fall back from the Global mutex namespace.'
   foreach ($forbidden in @('Register-ScheduledTask', 'New-ScheduledTask', 'Start-Job', 'Start-Process', 'Invoke-WebRequest', 'Invoke-RestMethod', 'HttpClient', 'WebClient')) {
     Assert-True (-not $sourceText.Contains($forbidden)) "Supervision module contains a prohibited host or network primitive: $forbidden"

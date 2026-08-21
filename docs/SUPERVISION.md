@@ -65,9 +65,11 @@ boundary. Its constant UTF-16LE `-EncodedCommand` payload resolves
 Codex Windows outer-quote failure without accepting runtime script content.
 `SessionEnd` mutex acquisition is capped at 250 ms; asynchronous acquisition is
 capped at 100 ms. If the
-registry is busy, the hook writes one bounded protected fallback event and
-exits zero. The next hook or Governor status merges the event under the
-registry mutex.
+registry is busy, or direct registry persistence fails before commit, the hook
+makes at most two bounded attempts to write one protected fallback event and
+exits zero only after one path is durable. The next hook or Governor status
+merges the event under the registry mutex. Diagnostic mode exposes failure when
+neither path can be made durable; production hooks remain silent.
 
 ## Governor Selection
 
@@ -345,7 +347,9 @@ is capped at 256 entries. Chronos merges valid entries and removes them during
 the next hook or Governor status. It removes malformed entries and records a
 degraded counter. The empty directory remains so a concurrent fallback writer
 cannot lose an event while the registry is merging earlier entries. The queue
-is not a transcript, diagnostic log, or telemetry transport.
+writer has a two-attempt local retry budget, and a prepared hook that encounters
+a transient direct-state failure uses the same queue before returning. The
+queue is not a transcript, diagnostic log, or telemetry transport.
 
 ## Usage Boundary
 

@@ -40,9 +40,10 @@ When trusted and dispatched by Codex, the plugin's five monitoring hooks update
 a bounded local supervision registry for task and subagent lifecycle events and
 one completed-turn signal. Four request
 asynchronous execution where supported; `SessionEnd` remains synchronous. They do not run on tools, commands, approvals, or prompts and
-return no model context. On brief registry contention, a hook writes one
-bounded DPAPI-protected fallback event; the next hook or Governor cycle merges
-and removes it. On Windows, each definition uses a quote-free encoded launcher
+return no model context. On brief registry contention or a transient direct
+state-write failure, a hook makes at most two bounded attempts to write one
+DPAPI-protected fallback event; the next hook or Governor cycle merges and
+removes it. On Windows, each definition uses a quote-free encoded launcher
 because Codex passes the configured command through `cmd.exe`; the decoded
 payload only resolves the installed plugin root and invokes the registry
 script. Do not rewrite it as a quoted `-File` command.

@@ -129,6 +129,8 @@ host-confirmed reactivation, forced-takeover postconditions, two-phase release,
 live mutex contention with deterministic state and queue postconditions, atomic bounded fallback slots, stale reservation
 recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
+diagnostic concurrent-hook failures, direct-state failure recovery through the
+two-attempt durable pending queue,
 full 256-record capacity behavior, silent hook output,
 headless Windows commands, the exact quote-free manifest command through the
 Codex-style `cmd.exe /D /S /C` boundary, a plugin root containing spaces,

@@ -59,6 +59,10 @@
   `supervision_governor_conflict` error. Pre-mutation election losers skip
   initialization; both loser entries are no-mutation and cannot fall through to
   generic recurrence cleanup.
+- Preserve prepared lifecycle events when a transient direct registry or first
+  pending-slot write fails. The protected fallback queue now has a bounded
+  two-attempt write budget, and concurrent-hook tests expose normally silent
+  failures plus verify recovery after a corrupt-state interruption.
 
 ## v0.9.1
 
