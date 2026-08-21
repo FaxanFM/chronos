@@ -33,6 +33,11 @@ its compact assignment, and the matching automation to one local Chronos
 installation. Use the complete returned value; the prefix or exact automation
 name alone is not an equivalence key. Never copy a key from another machine.
 
+Native status also reports privacy-safe `codexHomeSource` and
+`codexHomeIdentity` fields. A nonempty `CODEX_HOME` is authoritative; different
+canonical Codex homes are different installations. Stop before host mutation
+when the override is invalid, unavailable, or cannot be resolved consistently.
+
 1. Run `chronos.cmd -Action install-status`, compact Inspector status, and
    Heartbeat status. A confirmed enabled-source conflict or unhealthy native
    state fails closed before host mutation. Cached copies alone are not proof

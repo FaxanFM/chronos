@@ -218,6 +218,13 @@ recurrence. `engine=degraded` with `registryCapacity=exhausted` means Chronos
 retained the existing 256 records and refused a new hint; use host task tools as
 authority.
 
+`CODEX_HOME` defines the installation boundary when it is nonempty; otherwise
+Chronos uses the current user's `.codex` directory. Status returns only
+`codexHomeSource`, a truncated `codexHomeIdentity` hash, and the hashed mutex
+identity. Missing, inaccessible, file-valued, or reparse-point overrides fail
+closed before state creation. Do not redirect two installations into one state
+root.
+
 Never create or enable a Governor recurrence after initialization alone. First
 require readable supervision and Heartbeat status and one successful complete
 host-inventory cycle that contains the Governor exactly once and returns
@@ -295,6 +302,10 @@ reports `prior_state_unavailable_new_root`. When a host supplies
 path and scope need no manual configuration. Explicit state must remain beneath
 the versioned TEMP Heartbeat root or the LocalAppData Heartbeat root; unrelated
 TEMP siblings fail closed before directory creation.
+
+The default scope uses the same canonical `CODEX_HOME` resolution as
+supervision. A sandbox `HOME` change does not split state when `CODEX_HOME`
+remains the same; separate Codex homes do not share Heartbeat state.
 
 For an inaccessible prior scope, require compact status to show
 `priorStateDisposition=unavailable_preserved` and

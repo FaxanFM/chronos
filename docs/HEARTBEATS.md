@@ -494,13 +494,17 @@ Default state is stored at:
 %TEMP%\Chronos\Heartbeat-v2\<scope-sha256>\heartbeat-state.json
 ```
 
-The default scope combines the machine and Codex home only to create the hash.
+The default scope combines the machine and canonical Codex home only to create
+the hash. A nonempty `CODEX_HOME` takes precedence over the current user's
+`.codex` fallback. Status returns only the source and a truncated identity hash.
+Invalid, inaccessible, file-valued, or reparse-point overrides fail closed
+before state creation.
 The current workspace is not part of the default identity, so a Governor
 working-directory change does not split Heartbeat state. Those values are not stored in the file. The default state
 directory retains the current user's inherited TEMP permissions; Chronos does
 not replace them with a transient sandbox identity. On first use after an
-upgrade, Chronos first checks the v0.8.6 CWD-derived default namespace for the
-current working directory, then the prior TEMP namespace and legacy
+upgrade, Chronos first checks the earlier stable default and v0.8.6 CWD-derived
+default namespaces, then the prior TEMP namespace and legacy
 LocalAppData location. A valid source is read and upgraded in memory, rebound
 only in the new destination, and never modified in place. If prior state is inaccessible, Chronos does not
 take ownership or change its permissions. It starts in the versioned namespace

@@ -2,6 +2,7 @@ param(
   [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'cycle', 'release')]
   [string]$Action = 'status',
   [string]$StatePath,
+  [string]$CodexHome,
   [string]$HostInventoryPath,
   [string]$SessionId = $env:CODEX_THREAD_ID,
   [string]$SubjectId,
@@ -57,6 +58,9 @@ $script:InstallationScopeSource = 'unresolved'
 $script:StateStoreSlot = -1
 $script:StateStoreRecovery = 'not_applicable'
 $script:StateStoreIdentity = 'unresolved'
+$script:CodexHomeSource = 'unresolved'
+$script:CodexHomeIdentity = 'unresolved'
+$script:RegistryMutexIdentity = 'unresolved'
 
 function Get-Value {
   param($Object, [string]$Name, $Default = $null)
@@ -240,6 +244,35 @@ function Test-PriorStoreUnavailableError {
   return $false
 }
 
+function Resolve-CodexHomeDirectory {
+  param([string]$Requested)
+  $hasRequested = -not [string]::IsNullOrWhiteSpace($Requested)
+  $hasEnvironment = -not [string]::IsNullOrWhiteSpace([string]$env:CODEX_HOME)
+  $source = if ($hasRequested) { 'explicit' } elseif ($hasEnvironment) { 'environment' } else { 'default' }
+  $candidate = if ($hasRequested) { $Requested } elseif ($hasEnvironment) { [string]$env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+  try {
+    $full = [IO.Path]::GetFullPath($candidate)
+    if ($source -ne 'default') {
+      $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+      if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'supervision_codex_home_invalid'
+      }
+      $full = [IO.Path]::GetFullPath($item.FullName)
+    }
+  } catch {
+    if ([string]$_.Exception.Message -eq 'supervision_codex_home_invalid') { throw }
+    if (Test-PriorStoreUnavailableError $_) { throw 'supervision_codex_home_unavailable' }
+    throw 'supervision_codex_home_invalid'
+  }
+  $full = $full.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+  if ([string]::IsNullOrWhiteSpace($full)) { throw 'supervision_codex_home_invalid' }
+  return [pscustomobject]@{
+    Path = $full
+    Identity = $full.ToUpperInvariant()
+    Source = $source
+  }
+}
+
 function Resolve-StatePath {
   param([string]$Requested)
   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -248,9 +281,14 @@ function Resolve-StatePath {
   $localRoot = [IO.Path]::GetFullPath((Join-Path $localAppData 'Chronos\Supervision'))
   $priorTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision'))
   $privateTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision-v2'))
-  $codexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex'))
-  $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
-  $script:DefaultInstallationScopeId = (Get-TextHash ('Chronos.Supervision.Installation.v3|{0}|{1}' -f $env:COMPUTERNAME, $codexHome)).Substring(0, 32)
+  $resolvedCodexHome = Resolve-CodexHomeDirectory $CodexHome
+  $codexHome = [string]$resolvedCodexHome.Path
+  $codexHomeIdentity = [string]$resolvedCodexHome.Identity
+  $script:CodexHomeSource = [string]$resolvedCodexHome.Source
+  $script:CodexHomeIdentity = (Get-TextHash $codexHomeIdentity).Substring(0, 16)
+  $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)
+  $priorScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
+  $script:DefaultInstallationScopeId = (Get-TextHash ('Chronos.Supervision.Installation.v3|{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)).Substring(0, 32)
   $script:DefaultStateCandidates = @(0..3 | ForEach-Object {
     $slotRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $_)))
     Join-Path $slotRoot 'session-registry.json'
@@ -259,8 +297,8 @@ function Resolve-StatePath {
   $script:LegacyInstallationScopePath = Join-Path $localRoot 'installation-scope.json'
   $script:PriorDefaultStatePath = Join-Path $priorTempRoot 'session-registry.json'
   $script:PriorInstallationScopePath = Join-Path $priorTempRoot 'installation-scope.json'
-  $script:PriorV2DefaultStatePath = Join-Path $privateTempRoot (Join-Path $scopeHash 'session-registry.json')
-  $script:PriorV2InstallationScopePath = Join-Path $privateTempRoot (Join-Path $scopeHash 'installation-scope.json')
+  $script:PriorV2DefaultStatePath = Join-Path $privateTempRoot (Join-Path $priorScopeHash 'session-registry.json')
+  $script:PriorV2InstallationScopePath = Join-Path $privateTempRoot (Join-Path $priorScopeHash 'installation-scope.json')
   $candidate = if ([string]::IsNullOrWhiteSpace($Requested)) {
     $script:StateStoreMode = 'temp_private'
     $script:StateStoreMigration = 'namespace_v3_new_root'
@@ -983,7 +1021,9 @@ function Get-CompactHostTaskStatuses {
 
 function New-RegistryMutex {
   param([string]$Path)
-  $suffix = 'ChronosSupervision-' + (Get-TextHash ([IO.Path]::GetFullPath($Path).ToUpperInvariant())).Substring(0, 24)
+  $pathHash = Get-TextHash ([IO.Path]::GetFullPath($Path).ToUpperInvariant())
+  $script:RegistryMutexIdentity = $pathHash.Substring(0, 16)
+  $suffix = 'ChronosSupervision-' + $pathHash.Substring(0, 24)
   $sid = $null
   $security = $null
   try {
@@ -1274,6 +1314,9 @@ function Get-DiscoveryPayload {
     stateStoreSlot = $script:StateStoreSlot
     stateStoreRecovery = $script:StateStoreRecovery
     stateStoreIdentity = $script:StateStoreIdentity
+    codexHomeSource = $script:CodexHomeSource
+    codexHomeIdentity = $script:CodexHomeIdentity
+    registryMutexIdentity = $script:RegistryMutexIdentity
     hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
     hostRecheckThroughCycle = $script:HostRecheckThroughCycle
     hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
@@ -1430,6 +1473,9 @@ try {
       stateStoreSlot = $script:StateStoreSlot
       stateStoreRecovery = $script:StateStoreRecovery
       stateStoreIdentity = $script:StateStoreIdentity
+      codexHomeSource = $script:CodexHomeSource
+      codexHomeIdentity = $script:CodexHomeIdentity
+      registryMutexIdentity = $script:RegistryMutexIdentity
       priorStateDisposition = $script:PriorStateDisposition
       priorStateWriteAttempted = $script:PriorStateWriteAttempted
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit

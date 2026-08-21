@@ -3,7 +3,7 @@ param(
   [string]$Action = "inspect",
   [int]$MinAgeMinutes = 60,
   [int]$ProcessId = 0,
-  [string]$CodexHome = (Join-Path $HOME ".codex"),
+  [string]$CodexHome = $(if (-not [string]::IsNullOrWhiteSpace([string]$env:CODEX_HOME)) { [string]$env:CODEX_HOME } else { Join-Path $HOME ".codex" }),
   [ValidateRange(1, 10)]
   [int]$SampleSeconds = 2,
   [string]$HeartbeatInputPath,
@@ -52,6 +52,8 @@ if ($Action -eq 'heartbeat') {
   $heartbeatScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
   if (-not (Test-Path -LiteralPath $heartbeatScript)) { throw 'heartbeat_module_missing' }
   if ($HeartbeatInterventionAction -and $HeartbeatAcknowledgeEventId) { throw 'heartbeat_arguments_conflict' }
+  $heartbeatCommon = @{ Scope = $HeartbeatScope }
+  if ($PSBoundParameters.ContainsKey('CodexHome')) { $heartbeatCommon.CodexHome = $CodexHome }
   if ($HeartbeatInterventionAction) {
     $heartbeatArguments = @{
       Action = 'intervention-' + $HeartbeatInterventionAction
@@ -71,17 +73,18 @@ if ($Action -eq 'heartbeat') {
       FailureReason = $HeartbeatFailureReason
     }
     if ($HeartbeatStatePath) { $heartbeatArguments.StatePath = $HeartbeatStatePath }
+    if ($heartbeatCommon.ContainsKey('CodexHome')) { $heartbeatArguments.CodexHome = $heartbeatCommon.CodexHome }
     & $heartbeatScript @heartbeatArguments
   } elseif ($HeartbeatAcknowledgeEventId) {
-    if ($HeartbeatStatePath) { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -StatePath $HeartbeatStatePath -Scope $HeartbeatScope }
-    else { & $heartbeatScript -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -Scope $HeartbeatScope }
+    if ($HeartbeatStatePath) { & $heartbeatScript @heartbeatCommon -Action acknowledge -EventId $HeartbeatAcknowledgeEventId -StatePath $HeartbeatStatePath }
+    else { & $heartbeatScript @heartbeatCommon -Action acknowledge -EventId $HeartbeatAcknowledgeEventId }
   } elseif (-not $HeartbeatInputPath -and -not $HeartbeatInspectorOutputPath) {
-    if ($HeartbeatStatePath) { & $heartbeatScript -Action status -StatePath $HeartbeatStatePath -Scope $HeartbeatScope }
-    else { & $heartbeatScript -Action status -Scope $HeartbeatScope }
+    if ($HeartbeatStatePath) { & $heartbeatScript @heartbeatCommon -Action status -StatePath $HeartbeatStatePath }
+    else { & $heartbeatScript @heartbeatCommon -Action status }
   } elseif ($HeartbeatStatePath) {
-    & $heartbeatScript -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -StatePath $HeartbeatStatePath -Scope $HeartbeatScope
+    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -StatePath $HeartbeatStatePath
   } else {
-    & $heartbeatScript -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -Scope $HeartbeatScope
+    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath
   }
   exit $LASTEXITCODE
 }
@@ -96,6 +99,7 @@ if ($Action -eq 'supervise') {
     SinceRevision = $SupervisionSinceRevision
   }
   if ($SupervisionStatePath) { $arguments.StatePath = $SupervisionStatePath }
+  if ($PSBoundParameters.ContainsKey('CodexHome')) { $arguments.CodexHome = $CodexHome }
   if ($SupervisionHostInventoryPath) { $arguments.HostInventoryPath = $SupervisionHostInventoryPath }
   if ($SupervisionSessionId) { $arguments.SessionId = $SupervisionSessionId }
   if ($SupervisionSubjectId) { $arguments.SubjectId = $SupervisionSubjectId }

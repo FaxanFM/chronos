@@ -75,6 +75,13 @@
   supervision namespace as unavailable read-only evidence. The restarted host
   selects its writable v3 slot without modifying the inaccessible source, and
   the regression no longer depends on hosted-runner ACL enforcement.
+- Use a nonempty canonical `CODEX_HOME` as the installation boundary for
+  supervision and default Heartbeat state, with the current user's `.codex`
+  directory only as fallback. Separate Codex homes now use separate registries,
+  installation identities, mutexes, and Heartbeat scopes.
+- Reject missing, inaccessible, file-valued, and reparse-point `CODEX_HOME`
+  overrides before state creation. Return only privacy-safe source and hashed
+  identity fields, and import compatible earlier state read-only.
 
 ## v0.9.1
 

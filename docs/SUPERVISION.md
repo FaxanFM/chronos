@@ -154,6 +154,13 @@ anchor is imported unchanged. Deleting only `session-registry.json` therefore
 preserves recovery identity. Different PCs have different keys and separate
 Governors because one Governor cannot read another PC's local registry.
 
+A nonempty `CODEX_HOME` is authoritative; the current user's `.codex`
+directory is used only as the fallback. Chronos canonicalizes the directory and
+hashes it before deriving the state slot, installation key, and registry mutex.
+The same Codex home converges across sandbox `HOME` changes and path aliases.
+Separate homes remain isolated. Invalid or inaccessible overrides fail closed
+without creating state or a Governor claim.
+
 The two initial convergence rechecks are bounded host reads inside the existing
 Governor turns. They create no worker turn and no permanent per-cycle scan.
 

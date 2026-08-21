@@ -1022,17 +1022,23 @@ try {
   $savedUserProfile = $env:USERPROFILE
   $savedHomeEnvironment = $env:HOME
   $savedComputerName = $env:COMPUTERNAME
+  $savedCodexHome = $env:CODEX_HOME
   $defaultUpgradeHome = Join-Path $root 'default-upgrade-home'
   $env:USERPROFILE = $defaultUpgradeHome
   $env:HOME = $defaultUpgradeHome
+  [Environment]::SetEnvironmentVariable('CODEX_HOME', $null, 'Process')
   $env:COMPUTERNAME = 'CHRONOS-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
   $defaultCodexHome = Join-Path $defaultUpgradeHome '.codex'
   $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($defaultCodexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
-  $currentDefaultScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($defaultCodexHome))
+  $priorStableDefaultScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($defaultCodexHome))
+  $currentDefaultScope = '{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), ([IO.Path]::GetFullPath($defaultCodexHome)).ToUpperInvariant()
   $priorDefaultHash = Get-TestStableHash $priorDefaultScope
+  $priorStableDefaultHash = Get-TestStableHash $priorStableDefaultScope
   $currentDefaultHash = Get-TestStableHash $currentDefaultScope
   $priorDefaultDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $priorDefaultHash)
   $priorDefaultState = Join-Path $priorDefaultDirectory 'heartbeat-state.json'
+  $priorStableDefaultDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $priorStableDefaultHash)
+  $priorStableDefaultState = Join-Path $priorStableDefaultDirectory 'heartbeat-state.json'
   $currentDefaultDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $currentDefaultHash)
   $currentDefaultState = Join-Path $currentDefaultDirectory 'heartbeat-state.json'
   $defaultUpgradeInput = Join-Path $root 'default-upgrade-input.json'
@@ -1054,12 +1060,83 @@ try {
     Assert-Equal (Get-Content -Raw $priorDefaultState | ConvertFrom-Json).schema 6 'Prior state was upgraded in place.'
     Assert-Equal (Get-FileHash -LiteralPath $priorDefaultState -Algorithm SHA256).Hash $priorDefaultHashBefore 'Prior state content changed during import.'
     Assert-Equal (Get-Item -LiteralPath $priorDefaultState).LastWriteTimeUtc $priorDefaultTimestampBefore 'Prior state timestamp changed during import.'
+
+    Remove-Item -LiteralPath $currentDefaultDirectory -Recurse -Force
+    $stableSeed = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput, '-StatePath', $priorStableDefaultState, '-Scope', $priorStableDefaultScope)
+    Assert-Equal $stableSeed.ExitCode 0 'Could not seed the earlier stable default namespace.'
+    $stableHashBefore = (Get-FileHash -LiteralPath $priorStableDefaultState -Algorithm SHA256).Hash
+    $stableTimestampBefore = (Get-Item -LiteralPath $priorStableDefaultState).LastWriteTimeUtc
+    $stableUpgradeStatus = Invoke-RawModule @('-Action', 'status')
+    Assert-Equal $stableUpgradeStatus.ExitCode 0 'Earlier stable default namespace import failed.'
+    Assert-True ($stableUpgradeStatus.Text -match 'stateStoreMigration=prior_stable_default_state_imported') 'Earlier stable default namespace was not discovered before older fallbacks.'
+    Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).scopeHash $currentDefaultHash 'Stable imported state did not rebind in the current namespace.'
+    Assert-Equal (Get-FileHash -LiteralPath $priorStableDefaultState -Algorithm SHA256).Hash $stableHashBefore 'Earlier stable state content changed during import.'
+    Assert-Equal (Get-Item -LiteralPath $priorStableDefaultState).LastWriteTimeUtc $stableTimestampBefore 'Earlier stable state timestamp changed during import.'
   } finally {
     Remove-Item -LiteralPath $priorDefaultDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $priorStableDefaultDirectory -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $currentDefaultDirectory -Recurse -Force -ErrorAction SilentlyContinue
     $env:USERPROFILE = $savedUserProfile
     $env:HOME = $savedHomeEnvironment
     $env:COMPUTERNAME = $savedComputerName
+    $env:CODEX_HOME = $savedCodexHome
+  }
+
+  # Default Heartbeat ownership follows the canonical Codex installation, not
+  # the sandbox HOME value. Separate installations must never share state.
+  $heartbeatHomeA = Join-Path $root 'heartbeat codex home a'
+  $heartbeatHomeB = Join-Path $root 'heartbeat codex home b'
+  $heartbeatSandboxA = Join-Path $root 'heartbeat sandbox a'
+  $heartbeatSandboxB = Join-Path $root 'heartbeat sandbox b'
+  New-Item -ItemType Directory -Path $heartbeatHomeA, $heartbeatHomeB, $heartbeatSandboxA, $heartbeatSandboxB -Force | Out-Null
+  $heartbeatHomeAIdentity = ([IO.Path]::GetFullPath((Get-Item -LiteralPath $heartbeatHomeA -Force).FullName)).TrimEnd('\').ToUpperInvariant()
+  $heartbeatHomeBIdentity = ([IO.Path]::GetFullPath((Get-Item -LiteralPath $heartbeatHomeB -Force).FullName)).TrimEnd('\').ToUpperInvariant()
+  $heartbeatHomeAHash = Get-TestStableHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $heartbeatHomeAIdentity)
+  $heartbeatHomeBHash = Get-TestStableHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $heartbeatHomeBIdentity)
+  $heartbeatHomeAState = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' (Join-Path $heartbeatHomeAHash 'heartbeat-state.json'))
+  $heartbeatHomeBState = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' (Join-Path $heartbeatHomeBHash 'heartbeat-state.json'))
+  $savedHeartbeatHomeEnvironment = $env:HOME
+  $savedHeartbeatCodexHome = $env:CODEX_HOME
+  try {
+    $env:CODEX_HOME = $heartbeatHomeA
+    $env:HOME = $heartbeatSandboxA
+    $homeACycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput)
+    Assert-Equal $homeACycle.ExitCode 0 'Heartbeat rejected a valid CODEX_HOME environment.'
+    Assert-True (Test-Path -LiteralPath $heartbeatHomeAState -PathType Leaf) 'Heartbeat did not persist beneath the CODEX_HOME-derived scope.'
+    $homeAStatus = Invoke-RawModule @('-Action', 'status')
+    $homeAIdentityToken = (Get-TestStableHash $heartbeatHomeAIdentity).Substring(0, 16)
+    Assert-True ($homeAStatus.Text -match ('codexHomeSource=environment') -and $homeAStatus.Text -match ('codexHomeIdentity=' + $homeAIdentityToken)) 'Heartbeat did not report its privacy-safe CODEX_HOME identity.'
+
+    $env:HOME = $heartbeatSandboxB
+    $sameHomeStatus = Invoke-RawModule @('-Action', 'status')
+    Assert-Equal $sameHomeStatus.ExitCode 0 'One CODEX_HOME did not survive a sandbox HOME change.'
+    Assert-True ($sameHomeStatus.Text -match ('codexHomeIdentity=' + $homeAIdentityToken)) 'One CODEX_HOME split across sandbox HOME identities.'
+
+    $env:CODEX_HOME = $heartbeatHomeB
+    $homeBCycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput)
+    Assert-Equal $homeBCycle.ExitCode 0 'A separate CODEX_HOME did not initialize.'
+    Assert-True ((Test-Path -LiteralPath $heartbeatHomeBState -PathType Leaf) -and $heartbeatHomeAHash -ne $heartbeatHomeBHash) 'Separate CODEX_HOME installations shared Heartbeat state.'
+
+    $homeAlias = (Join-Path $heartbeatHomeA '..\heartbeat codex home a').ToUpperInvariant()
+    $aliasStatus = Invoke-RawModule @('-Action', 'status', '-CodexHome', $homeAlias)
+    Assert-Equal $aliasStatus.ExitCode 0 'A canonical CODEX_HOME alias was rejected.'
+    Assert-True ($aliasStatus.Text -match ('codexHomeSource=explicit') -and $aliasStatus.Text -match ('codexHomeIdentity=' + $homeAIdentityToken)) 'Canonical CODEX_HOME aliases did not converge.'
+
+    $env:CODEX_HOME = $heartbeatHomeB
+    $wrapperStatus = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -CodexHome $heartbeatHomeA 2>&1) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0 -and $wrapperStatus -match ('codexHomeSource=explicit') -and $wrapperStatus -match ('codexHomeIdentity=' + $homeAIdentityToken)) 'The public Chronos wrapper did not forward an explicitly bound CODEX_HOME.'
+
+    $beforeInvalid = @(Get-ChildItem -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2') -Directory -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    $missingHeartbeatHome = Join-Path $root 'missing heartbeat codex home'
+    $invalidHeartbeatHome = Invoke-RawModule @('-Action', 'status', '-CodexHome', $missingHeartbeatHome)
+    Assert-True ($invalidHeartbeatHome.ExitCode -eq 1 -and $invalidHeartbeatHome.Text -match '"error":"heartbeat_codex_home_invalid"') 'A missing CODEX_HOME did not fail closed with a specific Heartbeat error.'
+    $afterInvalid = @(Get-ChildItem -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2') -Directory -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    Assert-Equal ($afterInvalid -join '|') ($beforeInvalid -join '|') 'Invalid CODEX_HOME created Heartbeat state before validation.'
+  } finally {
+    $env:HOME = $savedHeartbeatHomeEnvironment
+    $env:CODEX_HOME = $savedHeartbeatCodexHome
+    Remove-Item -LiteralPath (Split-Path -Parent $heartbeatHomeAState) -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Split-Path -Parent $heartbeatHomeBState) -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   # A protected v0.8.2 default directory cannot strand a later sandbox

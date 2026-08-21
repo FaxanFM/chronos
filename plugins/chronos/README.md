@@ -76,6 +76,11 @@ After installation or upgrade, fully quit and reopen Codex. Then open a fresh
 task. A running Codex process can retain an old versioned skill catalog even
 after the plugin manager replaces the package.
 
+Chronos uses a nonempty `CODEX_HOME` as the local installation boundary and
+falls back to the current user's `.codex` directory. Canonical aliases share
+state and locks; different Codex homes remain isolated. Invalid or inaccessible
+overrides fail closed before state creation.
+
 Chronos v0.9.2 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms
 the running Directory package and enabled legacy Git source, remove the legacy

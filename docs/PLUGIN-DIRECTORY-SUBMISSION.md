@@ -21,11 +21,13 @@ lifecycle events arrive out of order, and requires a full host restart after
 upgrade. It also isolates supervision state across restarted sandbox
 identities, gates recurrence creation on one successful complete-inventory
 cycle, permits Governor repository discovery while ignoring user Git config,
-and makes overlapping Heartbeat cycles explicitly retryable. It retains the
+and makes overlapping Heartbeat cycles explicitly retryable. Supervision and
+Heartbeat now use canonical `CODEX_HOME` installation identity, isolate
+separate Codex homes, and reject invalid overrides before state creation. It retains the
 improved first-use prompts, listing copy, full-setup contract, and deterministic
 prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`69a42bdd97df01611f58b8f265ce292cec4ac332eb0af87a271fc77c725b4c0f`.
+`bdf0c13e4d0d25fc86d158d8dd6b466701e967dfbbf04f95c149c80aac05766a`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

@@ -85,6 +85,10 @@ version `1` and one 128-bit lowercase hexadecimal ID. A new v3 installation
 derives the ID from a SHA-256 hash of the local machine name and canonical Codex
 home. A readable earlier random anchor is imported unchanged so an upgrade does
 not orphan its Governor. The raw machine name and Codex-home path are not stored.
+Chronos uses a nonempty `CODEX_HOME` when supplied and otherwise uses the
+current user's `.codex` directory. It exposes only a truncated hash of that
+canonical identity in status. An invalid or inaccessible override is rejected
+before any registry, Heartbeat state, claim, or mutex-owned record is created.
 The pseudonymous ID scopes one Governor to one local installation and remains
 stable when Chronos selects another bounded writable state slot after a sandbox
 restart. It is not a secret. It contains no raw hostname, username, Windows SID,

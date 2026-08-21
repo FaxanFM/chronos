@@ -3,6 +3,7 @@ param(
   [string]$InputPath,
   [string]$InspectorOutputPath,
   [string]$StatePath,
+  [string]$CodexHome,
   [string]$Scope,
   [string]$EventId,
   [string]$CorroboratingEventId,
@@ -60,6 +61,8 @@ $script:StateStoreWriteReady = $false
 $script:StateStoreProtection = 'hashed_metadata'
 $script:PriorStateDisposition = 'not_applicable'
 $script:PriorStateWriteAttempted = $false
+$script:CodexHomeSource = 'unresolved'
+$script:CodexHomeIdentity = 'unresolved'
 
 if (-not ('ChronosHeartbeatPathIdentity' -as [type])) {
   $pathIdentitySource = @'
@@ -708,6 +711,35 @@ function Get-CanonicalStateIdentity {
   }
 }
 
+function Resolve-CodexHomeDirectory {
+  param([string]$Requested)
+  $hasRequested = -not [string]::IsNullOrWhiteSpace($Requested)
+  $hasEnvironment = -not [string]::IsNullOrWhiteSpace([string]$env:CODEX_HOME)
+  $source = if ($hasRequested) { 'explicit' } elseif ($hasEnvironment) { 'environment' } else { 'default' }
+  $candidate = if ($hasRequested) { $Requested } elseif ($hasEnvironment) { [string]$env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+  try {
+    $full = [IO.Path]::GetFullPath($candidate)
+    if ($source -ne 'default') {
+      $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+      if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'heartbeat_codex_home_invalid'
+      }
+      $full = [IO.Path]::GetFullPath($item.FullName)
+    }
+  } catch {
+    if ([string]$_.Exception.Message -eq 'heartbeat_codex_home_invalid') { throw }
+    $exception = $_.Exception
+    while ($exception) {
+      if ($exception -is [UnauthorizedAccessException] -or $exception -is [IO.IOException]) { throw 'heartbeat_codex_home_unavailable' }
+      $exception = $exception.InnerException
+    }
+    throw 'heartbeat_codex_home_invalid'
+  }
+  $full = $full.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+  if ([string]::IsNullOrWhiteSpace($full)) { throw 'heartbeat_codex_home_invalid' }
+  return [pscustomobject]@{ Path = $full; Identity = $full.ToUpperInvariant(); Source = $source }
+}
+
 function Resolve-StatePath {
   param([string]$Requested, [string]$RequestedScope)
   $localRoot = Join-Path $env:LOCALAPPDATA 'Chronos\Heartbeat'
@@ -716,10 +748,16 @@ function Resolve-StatePath {
   $privateTempRoot = Join-Path $tempRoot 'Chronos\Heartbeat-v2'
   $defaultScope = [string]::IsNullOrWhiteSpace($RequestedScope)
   $priorDefaultScopeHash = $null
+  $priorStableScopeHash = $null
   if ($defaultScope) {
-    $codexHome = Join-Path $HOME '.codex'
-    $RequestedScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome))
-    $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($codexHome)), ([IO.Path]::GetFullPath((Get-Location).Path))
+    $resolvedCodexHome = Resolve-CodexHomeDirectory $CodexHome
+    $script:CodexHomeSource = [string]$resolvedCodexHome.Source
+    $script:CodexHomeIdentity = (Get-StableHash ([string]$resolvedCodexHome.Identity)).Substring(0, 16)
+    $RequestedScope = '{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), ([string]$resolvedCodexHome.Identity)
+    $legacyCodexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex')).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $priorStableScope = '{0}|{1}' -f $env:COMPUTERNAME, $legacyCodexHome
+    $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, $legacyCodexHome, ([IO.Path]::GetFullPath((Get-Location).Path))
+    $priorStableScopeHash = Get-StableHash $priorStableScope
     $priorDefaultScopeHash = Get-StableHash $priorDefaultScope
   }
   if ($RequestedScope.Length -gt 4096) { throw 'heartbeat_scope_invalid' }
@@ -732,12 +770,15 @@ function Resolve-StatePath {
     return [pscustomobject]@{
       Path = $defaultPath
       ScopeHash = $scopeHash
+      PriorStableV2Directory = if ($priorStableScopeHash -and $priorStableScopeHash -ne $scopeHash) { Join-Path $privateTempRoot $priorStableScopeHash } else { $null }
+      PriorStableV2Path = if ($priorStableScopeHash -and $priorStableScopeHash -ne $scopeHash) { Join-Path $privateTempRoot (Join-Path $priorStableScopeHash 'heartbeat-state.json') } else { $null }
+      PriorStableV2ScopeHash = $priorStableScopeHash
       PriorV2Directory = if ($priorDefaultScopeHash) { Join-Path $privateTempRoot $priorDefaultScopeHash } else { $null }
       PriorV2Path = if ($priorDefaultScopeHash) { Join-Path $privateTempRoot (Join-Path $priorDefaultScopeHash 'heartbeat-state.json') } else { $null }
       PriorV2ScopeHash = $priorDefaultScopeHash
-      PriorTempDirectory = (Join-Path $priorTempRoot $scopeHash)
-      PriorTempPath = (Join-Path $priorTempRoot (Join-Path $scopeHash 'heartbeat-state.json'))
-      LegacyPath = (Join-Path $localRoot (Join-Path $scopeHash 'heartbeat-state.json'))
+      PriorTempDirectory = (Join-Path $priorTempRoot $(if ($priorStableScopeHash) { $priorStableScopeHash } else { $scopeHash }))
+      PriorTempPath = (Join-Path $priorTempRoot (Join-Path $(if ($priorStableScopeHash) { $priorStableScopeHash } else { $scopeHash }) 'heartbeat-state.json'))
+      LegacyPath = (Join-Path $localRoot (Join-Path $(if ($priorStableScopeHash) { $priorStableScopeHash } else { $scopeHash }) 'heartbeat-state.json'))
     }
   }
   $script:StateStoreMode = 'explicit'
@@ -745,7 +786,7 @@ function Resolve-StatePath {
   if ([IO.Path]::GetExtension($full) -ne '.json') { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-ContainedPath $full $localRoot) -and -not (Test-ContainedPath $full $privateTempRoot)) { throw 'heartbeat_state_path_invalid' }
   if (-not (Test-NoReparseAncestors $full)) { throw 'heartbeat_state_path_invalid' }
-  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); PriorV2Directory = $null; PriorV2Path = $null; PriorV2ScopeHash = $null; PriorTempDirectory = $null; PriorTempPath = $null; LegacyPath = $null }
+  return [pscustomobject]@{ Path = $full; ScopeHash = (Get-StableHash $RequestedScope); PriorStableV2Directory = $null; PriorStableV2Path = $null; PriorStableV2ScopeHash = $null; PriorV2Directory = $null; PriorV2Path = $null; PriorV2ScopeHash = $null; PriorTempDirectory = $null; PriorTempPath = $null; LegacyPath = $null }
 }
 
 function Initialize-StateStore {
@@ -1173,9 +1214,10 @@ function Import-LegacyStateIfPresent {
   $unavailable = $false
   $invalid = $false
   foreach ($candidate in @(
+    [pscustomobject]@{ Path = [string]$Resolved.PriorStableV2Path; Directory = [string]$Resolved.PriorStableV2Directory; Imported = 'prior_stable_default_state_imported'; DetectDirectory = $true; ExpectedScopeHash = [string]$Resolved.PriorStableV2ScopeHash; RebindScope = $true },
     [pscustomobject]@{ Path = [string]$Resolved.PriorV2Path; Directory = [string]$Resolved.PriorV2Directory; Imported = 'prior_v2_default_state_imported'; DetectDirectory = $true; ExpectedScopeHash = [string]$Resolved.PriorV2ScopeHash; RebindScope = $true },
-    [pscustomobject]@{ Path = [string]$Resolved.PriorTempPath; Directory = [string]$Resolved.PriorTempDirectory; Imported = 'prior_temp_state_imported'; DetectDirectory = $true; ExpectedScopeHash = [string]$Resolved.ScopeHash; RebindScope = $false },
-    [pscustomobject]@{ Path = [string]$Resolved.LegacyPath; Directory = $null; Imported = 'legacy_state_imported'; DetectDirectory = $false; ExpectedScopeHash = [string]$Resolved.ScopeHash; RebindScope = $false }
+    [pscustomobject]@{ Path = [string]$Resolved.PriorTempPath; Directory = [string]$Resolved.PriorTempDirectory; Imported = 'prior_temp_state_imported'; DetectDirectory = $true; ExpectedScopeHash = $(if ($Resolved.PriorStableV2ScopeHash) { [string]$Resolved.PriorStableV2ScopeHash } else { [string]$Resolved.ScopeHash }); RebindScope = [bool]$Resolved.PriorStableV2ScopeHash },
+    [pscustomobject]@{ Path = [string]$Resolved.LegacyPath; Directory = $null; Imported = 'legacy_state_imported'; DetectDirectory = $false; ExpectedScopeHash = $(if ($Resolved.PriorStableV2ScopeHash) { [string]$Resolved.PriorStableV2ScopeHash } else { [string]$Resolved.ScopeHash }); RebindScope = [bool]$Resolved.PriorStableV2ScopeHash }
   )) {
     if ([string]::IsNullOrWhiteSpace($candidate.Path)) { continue }
     if (-not (Test-NoReparseAncestors $candidate.Path)) {
@@ -2793,7 +2835,7 @@ function Write-Status {
   $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
   $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
   $backoffUntil = if ([string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) { 'none' } else { [string]$State.health.backoffUntilUtc }
-  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} priorStateDisposition={19} priorStateWriteAttempted={20} completedCycles={21} stateChanges={22} acknowledgedEvents={23} failedCycles={24} duplicateRuns={25} runtimeBudgetMs={26} runtimeObservedMs={27} runtimeOverrunMs={28} runtimeOverrunPercent={29} runtimeBaselineMs={30} runtimeClassification={31} runtimeOverrunStreak={32} runtimeBackoffApplied={33} backoffUntil={34}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil)
+  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} priorStateDisposition={19} priorStateWriteAttempted={20} completedCycles={21} stateChanges={22} acknowledgedEvents={23} failedCycles={24} duplicateRuns={25} runtimeBudgetMs={26} runtimeObservedMs={27} runtimeOverrunMs={28} runtimeOverrunPercent={29} runtimeBaselineMs={30} runtimeClassification={31} runtimeOverrunStreak={32} runtimeBackoffApplied={33} backoffUntil={34} codexHomeSource={35} codexHomeIdentity={36}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil, $script:CodexHomeSource, $script:CodexHomeIdentity)
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }

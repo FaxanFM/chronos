@@ -56,6 +56,12 @@ codex.cmd plugin remove chronos@chronos
 codex.cmd plugin marketplace remove chronos
 ```
 
+Chronos uses a nonempty `CODEX_HOME` as the local installation boundary. If it
+is unset, Chronos uses the current user's `.codex` directory. Canonical aliases
+of one Codex home share supervision, Heartbeat, and lock identity; different
+Codex homes on the same PC remain isolated. Invalid or inaccessible overrides
+fail closed before Chronos creates state.
+
 <p align="center"><img src="assets/chronos-proof-card.png" width="500" alt="Sanitized example Chronos output separating healthy machine resources from runaway automatic review and approval persistence"></p>
 
 The image is a synthetic, sanitized example. It contains no machine, account,

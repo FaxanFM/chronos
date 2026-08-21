@@ -22,10 +22,24 @@ function Get-TestHash {
   finally { $sha.Dispose() }
 }
 
+function Get-TestCodexHome {
+  param([string]$Requested = '')
+  $candidate = if (-not [string]::IsNullOrWhiteSpace($Requested)) {
+    $Requested
+  } else {
+    Join-Path $HOME '.codex'
+  }
+  $full = [IO.Path]::GetFullPath($candidate)
+  $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
+  if ($item -and $item.PSIsContainer) { $full = [IO.Path]::GetFullPath($item.FullName) }
+  $normalized = $full.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+  [pscustomobject]@{ Path = $normalized; Identity = $normalized.ToUpperInvariant() }
+}
+
 function Get-DefaultSupervisionStatePath {
-  param([string]$TempRoot, [int]$Slot = 0)
-  $codexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex'))
-  $scopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
+  param([string]$TempRoot, [int]$Slot = 0, [string]$CodexHome = '')
+  $resolvedCodexHome = Get-TestCodexHome $CodexHome
+  $scopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $resolvedCodexHome.Identity)
   Join-Path $TempRoot (Join-Path ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $Slot) 'session-registry.json')
 }
 
@@ -144,6 +158,7 @@ function Invoke-ConfiguredWindowsHook {
   $info.EnvironmentVariables['PLUGIN_ROOT'] = $PluginRoot
   $info.EnvironmentVariables['TEMP'] = $TempRoot
   $info.EnvironmentVariables['TMP'] = $TempRoot
+  [void]$info.EnvironmentVariables.Remove('CODEX_HOME')
   $process = [Diagnostics.Process]::Start($info)
   $process.StandardInput.Write($Json)
   $process.StandardInput.Close()
@@ -161,7 +176,14 @@ function Invoke-ConfiguredWindowsHook {
 }
 
 function Invoke-SupervisionInTempRoot {
-  param([string]$TempRoot, [string]$State = '', [string]$Action = 'status', [string]$Session = '')
+  param(
+    [string]$TempRoot,
+    [string]$State = '',
+    [string]$Action = 'status',
+    [string]$Session = '',
+    [string]$CodexHomeOverride = '',
+    [string]$SandboxHome = ''
+  )
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
@@ -174,6 +196,11 @@ function Invoke-SupervisionInTempRoot {
   $info.RedirectStandardError = $true
   $info.EnvironmentVariables['TEMP'] = $TempRoot
   $info.EnvironmentVariables['TMP'] = $TempRoot
+  if ([string]::IsNullOrWhiteSpace($CodexHomeOverride)) { [void]$info.EnvironmentVariables.Remove('CODEX_HOME') }
+  else { $info.EnvironmentVariables['CODEX_HOME'] = $CodexHomeOverride }
+  if (-not [string]::IsNullOrWhiteSpace($SandboxHome)) {
+    $info.EnvironmentVariables['HOME'] = $SandboxHome
+  }
   $process = [Diagnostics.Process]::Start($info)
   if (-not $process.WaitForExit(10000)) {
     try { $process.Kill() } catch {}
@@ -309,7 +336,7 @@ try {
   }
 
   $readableV2Temp = Join-Path $root 'readable v2 temp'
-  $readableV2ScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $readableV2ScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, (Get-TestCodexHome).Path)
   $readableV2State = Join-Path $readableV2Temp (Join-Path 'Chronos\Supervision-v2' (Join-Path $readableV2ScopeHash 'session-registry.json'))
   $readableV2Seed = Invoke-Supervision $readableV2State 'initialize' 'readable-v2-governor'
   Assert-True ($readableV2Seed.ExitCode -eq 0) 'Could not seed a readable v2 supervision namespace.'
@@ -331,7 +358,7 @@ try {
   # be preserved while the v3 default initializes under a writable direct TEMP
   # child with a deterministic installation identity.
   $restartTemp = Join-Path $root 'restarted sandbox temp'
-  $restartScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $restartScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, (Get-TestCodexHome).Path)
   $restartV2Directory = Join-Path $restartTemp (Join-Path 'Chronos\Supervision-v2' $restartScopeHash)
   $restartV2State = Join-Path $restartV2Directory 'session-registry.json'
   $restartV2Scope = Join-Path $restartV2Directory 'installation-scope.json'
@@ -377,6 +404,63 @@ try {
     Assert-True ((Get-Item -LiteralPath $restartV2State -Force).LastWriteTimeUtc -eq $restartV2WriteTime) 'Inaccessible v2 state changed during restarted-host recovery.'
     Remove-Item -LiteralPath $restartTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
+
+  # CODEX_HOME is the installation boundary. The same directory must converge
+  # across sandbox HOME changes, while separate installations must never share
+  # a registry, installation key, or mutex.
+  $codexIdentityTemp = Join-Path $root 'codex home identity temp'
+  $sameCodexHome = Join-Path $root 'same codex home'
+  $otherCodexHome = Join-Path $root 'other codex home'
+  $sandboxHomeA = Join-Path $root 'sandbox home a'
+  $sandboxHomeB = Join-Path $root 'sandbox home b'
+  New-Item -ItemType Directory -Path $codexIdentityTemp, $sameCodexHome, $otherCodexHome, $sandboxHomeA, $sandboxHomeB -Force | Out-Null
+
+  $sameHomeFirst = Invoke-SupervisionInTempRoot -TempRoot $codexIdentityTemp -Action 'initialize' -Session 'same-home-governor' -CodexHomeOverride $sameCodexHome -SandboxHome $sandboxHomeA
+  $sameHomeSecond = Invoke-SupervisionInTempRoot -TempRoot $codexIdentityTemp -CodexHomeOverride $sameCodexHome -SandboxHome $sandboxHomeB
+  Assert-True ($sameHomeFirst.ExitCode -eq 0 -and $sameHomeSecond.ExitCode -eq 0) "One valid CODEX_HOME did not survive a sandbox HOME change. First=$($sameHomeFirst.Text) Second=$($sameHomeSecond.Text)"
+  $sameHomeFirstPayload = Get-Payload $sameHomeFirst
+  $sameHomeSecondPayload = Get-Payload $sameHomeSecond
+  Assert-True ($sameHomeFirstPayload.codexHomeSource -eq 'environment' -and $sameHomeSecondPayload.codexHomeSource -eq 'environment') 'Supervision did not report the CODEX_HOME environment as its identity source.'
+  Assert-True ($sameHomeFirstPayload.codexHomeIdentity -eq $sameHomeSecondPayload.codexHomeIdentity -and $sameHomeFirstPayload.stateStoreIdentity -eq $sameHomeSecondPayload.stateStoreIdentity -and $sameHomeFirstPayload.registryMutexIdentity -eq $sameHomeSecondPayload.registryMutexIdentity -and $sameHomeFirstPayload.hostEquivalenceKey -eq $sameHomeSecondPayload.hostEquivalenceKey) 'One CODEX_HOME split across sandbox HOME identities.'
+
+  $otherHomeStatus = Invoke-SupervisionInTempRoot -TempRoot $codexIdentityTemp -Action 'initialize' -Session 'other-home-governor' -CodexHomeOverride $otherCodexHome -SandboxHome $sandboxHomeA
+  Assert-True ($otherHomeStatus.ExitCode -eq 0) 'A separate valid CODEX_HOME did not initialize its supervision boundary.'
+  $otherHomePayload = Get-Payload $otherHomeStatus
+  Assert-True ($otherHomePayload.codexHomeIdentity -ne $sameHomeFirstPayload.codexHomeIdentity -and $otherHomePayload.stateStoreIdentity -ne $sameHomeFirstPayload.stateStoreIdentity -and $otherHomePayload.registryMutexIdentity -ne $sameHomeFirstPayload.registryMutexIdentity -and $otherHomePayload.hostEquivalenceKey -ne $sameHomeFirstPayload.hostEquivalenceKey) 'Separate CODEX_HOME installations shared supervision ownership.'
+  Assert-True ((Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $codexIdentityTemp 0 $sameCodexHome) -PathType Leaf) -and (Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $codexIdentityTemp 0 $otherCodexHome) -PathType Leaf)) 'Separate CODEX_HOME installations did not retain separate registries.'
+
+  $sameHomeAlias = Join-Path $sameCodexHome '..\same codex home'
+  $aliasStatus = Invoke-SupervisionInTempRoot -TempRoot $codexIdentityTemp -CodexHomeOverride $sameHomeAlias.ToUpperInvariant() -SandboxHome $sandboxHomeB
+  Assert-True ($aliasStatus.ExitCode -eq 0) 'A canonical CODEX_HOME alias was rejected.'
+  $aliasPayload = Get-Payload $aliasStatus
+  Assert-True ($aliasPayload.codexHomeIdentity -eq $sameHomeFirstPayload.codexHomeIdentity -and $aliasPayload.stateStoreIdentity -eq $sameHomeFirstPayload.stateStoreIdentity -and $aliasPayload.registryMutexIdentity -eq $sameHomeFirstPayload.registryMutexIdentity -and $aliasPayload.hostEquivalenceKey -eq $sameHomeFirstPayload.hostEquivalenceKey) 'Canonical CODEX_HOME aliases did not converge.'
+
+  $invalidCodexTemp = Join-Path $root 'invalid codex home temp'
+  New-Item -ItemType Directory -Path $invalidCodexTemp -Force | Out-Null
+  $missingCodexHome = Join-Path $root 'missing codex home'
+  $invalidMissing = Invoke-SupervisionInTempRoot -TempRoot $invalidCodexTemp -CodexHomeOverride $missingCodexHome
+  Assert-True ($invalidMissing.ExitCode -eq 1 -and (Get-Payload $invalidMissing).error -eq 'supervision_codex_home_invalid') 'A missing CODEX_HOME did not fail with the privacy-safe specific error.'
+  $fileCodexHome = Join-Path $root 'file codex home'
+  [IO.File]::WriteAllText($fileCodexHome, 'not-a-directory', [Text.UTF8Encoding]::new($false))
+  $invalidFile = Invoke-SupervisionInTempRoot -TempRoot $invalidCodexTemp -CodexHomeOverride $fileCodexHome
+  Assert-True ($invalidFile.ExitCode -eq 1 -and (Get-Payload $invalidFile).error -eq 'supervision_codex_home_invalid') 'A file-valued CODEX_HOME did not fail closed.'
+  Assert-True (@(Get-ChildItem -LiteralPath $invalidCodexTemp -Filter 'Chronos-Supervision-v3-*' -Force -ErrorAction SilentlyContinue).Count -eq 0) 'Invalid CODEX_HOME created supervision state before validation.'
+
+  $customMigrationTemp = Join-Path $root 'custom codex migration temp'
+  $customMigrationHome = Join-Path $root 'custom migration home'
+  New-Item -ItemType Directory -Path $customMigrationHome -Force | Out-Null
+  $customResolvedHome = Get-TestCodexHome $customMigrationHome
+  $customPriorHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, $customResolvedHome.Path)
+  $customPriorState = Join-Path $customMigrationTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $customPriorHash 'session-registry.json'))
+  $customPriorSeed = Invoke-Supervision $customPriorState 'initialize' 'custom-prior-governor'
+  Assert-True ($customPriorSeed.ExitCode -eq 0) 'Could not seed the custom-CODEX_HOME prior-v2 migration fixture.'
+  $customPriorKey = (Get-Payload $customPriorSeed).hostEquivalenceKey
+  $customPriorWriteTime = (Get-Item -LiteralPath $customPriorState -Force).LastWriteTimeUtc
+  $customMigration = Invoke-SupervisionInTempRoot -TempRoot $customMigrationTemp -CodexHomeOverride $customMigrationHome
+  Assert-True ($customMigration.ExitCode -eq 0) 'A custom CODEX_HOME could not import its readable prior-v2 state.'
+  $customMigrationPayload = Get-Payload $customMigration
+  Assert-True ($customMigrationPayload.hostEquivalenceKey -eq $customPriorKey -and $customMigrationPayload.installationScopeSource -eq 'prior_anchor_imported' -and $customMigrationPayload.priorStateDisposition -eq 'read_only_imported') 'Custom CODEX_HOME migration did not preserve its prior installation key and provenance.'
+  Assert-True ((Get-Item -LiteralPath $customPriorState -Force).LastWriteTimeUtc -eq $customPriorWriteTime) 'Custom CODEX_HOME migration modified its prior-v2 state.'
 
   $slotTemp = Join-Path $root 'bounded slot temp'
   New-Item -ItemType Directory -Path $slotTemp -Force | Out-Null

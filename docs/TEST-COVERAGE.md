@@ -75,6 +75,9 @@ prior-state recovery when the Windows host enforces the simulated ACL even when
 an older LocalAppData fallback is readable, prior-scope junction rejection,
 read-only import when the ACL denial is not enforced, explicit no-prior-write
 status, accessible empty-scope negative control, explicit busy-cycle retry, one
+canonical `CODEX_HOME` identity across sandbox-home and path-alias changes,
+separate Heartbeat state for separate Codex homes, invalid override rejection,
+public-wrapper forwarding,
 active record per target generation, compatible eight-event coalescing,
 incompatible-contract deferral, higher-severity replacement, fixed action
 contracts, self-target rejection, same-subject and same-window Governor-usage
@@ -115,6 +118,10 @@ bounded machine-and-Codex-home-scoped v3 TEMP slots, explicit anchor provenance,
 deterministic installation identity across slot recovery, restarted-sandbox recovery from an inaccessible
 v2 namespace through both permission denial and a deterministic sharing-violation
 fixture, read-only prior-state migration semantics, recurrence
+canonical `CODEX_HOME` convergence across sandbox-home and path-alias changes,
+separate registry, installation-key, and mutex identity for separate Codex
+homes, invalid override rejection before state creation, custom-home prior-v2
+read-only migration,
 ineligibility before a complete Governor-bearing
 host inventory, rejection of an inventory that omits the selected Governor,
 cycle and age limits, mandatory complete per-cycle host inventory

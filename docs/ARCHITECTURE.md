@@ -187,6 +187,12 @@ necessary because a Governor on one PC cannot consume another PC's local
 registry. The identity survives session-registry recovery and bounded default
 state-slot selection.
 
+Installation identity resolves from a nonempty `CODEX_HOME`, then falls back to
+the current user's `.codex` directory. The directory is canonicalized before it
+is hashed. One installation therefore converges across sandbox `HOME` changes
+and path aliases, while separate Codex homes use separate state and mutexes.
+Invalid, inaccessible, file-valued, or reparse-point overrides fail closed.
+
 `chronos.cmd -Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
@@ -226,6 +232,9 @@ metadata plus hashed, bounded delivery and intervention records beneath the
 user's Windows temporary Chronos directory. Intervention state contains
 hashes, enums, counters, and timestamps. It does not persist the raw collector
 snapshot or raw route, subject, owner, or task IDs.
+Heartbeat uses the same canonical Codex-home boundary for its default scope.
+Readable state from an earlier default scope is imported read-only and rebound
+only in the current destination.
 
 Passive supervision persists one bounded registry in the first writable of four
 direct, hashed Windows TEMP child slots. Raw task and agent IDs are DPAPI protected

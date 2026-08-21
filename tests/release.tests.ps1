@@ -24,6 +24,8 @@ $supervisionTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Chronos\Sup
 $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$heartbeatDefaultTestRoot = $null
+$supervisionDefaultTestRoots = @()
 
 function Get-TextHash {
   param([string]$Value)
@@ -126,6 +128,8 @@ try {
     'cmd.exe',
     'routine user action',
     'DPAPI does not protect against another process already running as that'
+    'CODEX_HOME'
+    'Separate homes remain isolated'
   )) {
     if (-not $supervisionContract.Contains($required)) {
       throw "Public supervision contract is missing a release boundary: $required"
@@ -256,10 +260,24 @@ try {
     'acknowledges the event only after one active recurrence with that cadence is verified',
     'Chronos does not infer price, quota impact, or efficiency from a model name',
     'The initial attempt plus one retry is the hard limit'
+    'CODEX_HOME'
+    'fail closed'
   )) {
     if (-not $heartbeatContract.Contains($required)) {
       throw "Public Heartbeat contract is missing an autonomy boundary: $required"
     }
+  }
+  $heartbeatSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\heartbeat.ps1')
+  $supervisionSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\session-registry.ps1')
+  $wrapperSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\chronos.ps1')
+  foreach ($required in @('$env:CODEX_HOME', 'heartbeat_codex_home_invalid', 'heartbeat_codex_home_unavailable', 'codexHomeIdentity')) {
+    if (-not $heartbeatSource.Contains($required)) { throw "Heartbeat CODEX_HOME contract is missing: $required" }
+  }
+  foreach ($required in @('$env:CODEX_HOME', 'supervision_codex_home_invalid', 'supervision_codex_home_unavailable', 'registryMutexIdentity')) {
+    if (-not $supervisionSource.Contains($required)) { throw "Supervision CODEX_HOME contract is missing: $required" }
+  }
+  if (($wrapperSource -split "`n" | Where-Object { $_ -match "ContainsKey\('CodexHome'\)" }).Count -lt 2) {
+    throw 'The public wrapper does not forward explicitly bound CODEX_HOME to both native modules.'
   }
   $publicReadmes = @(
     Get-Content -Raw -LiteralPath $readmePath
@@ -482,6 +500,27 @@ try {
   if ($LASTEXITCODE -ne 0 -or ($launcherOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
     throw "Extracted package launcher did not apply the supported Windows PowerShell invocation.`n$($launcherOutput -join "`n")"
   }
+  $installedCustomCodexHome = Join-Path $testRoot 'custom installed codex home'
+  New-Item -ItemType Directory -Path $installedCustomCodexHome -Force | Out-Null
+  $installedCustomIdentity = ([IO.Path]::GetFullPath((Get-Item -LiteralPath $installedCustomCodexHome -Force).FullName)).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).ToUpperInvariant()
+  $installedCustomIdentityToken = (Get-TextHash $installedCustomIdentity).Substring(0, 16)
+  $installedCustomHeartbeatIdentityToken = (Get-TextHash ($installedCustomIdentity | ConvertTo-Json -Compress)).Substring(0, 16)
+  $installedCustomScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $installedCustomIdentity)
+  $heartbeatDefaultTestRoot = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $installedCustomScopeHash)
+  $customHeartbeatOutput = @(& $installedLauncher -Action heartbeat -CodexHome $installedCustomCodexHome 2>&1)
+  $customHeartbeatExitCode = $LASTEXITCODE
+  $customHeartbeatText = $customHeartbeatOutput -join "`n"
+  if ($customHeartbeatExitCode -ne 0 -or $customHeartbeatText -notmatch 'codexHomeSource=explicit\b' -or $customHeartbeatText -notmatch ('codexHomeIdentity=' + [regex]::Escape($installedCustomHeartbeatIdentityToken) + '\b')) {
+    throw "Extracted package did not bind Heartbeat to explicit CODEX_HOME.`n$customHeartbeatText"
+  }
+  $supervisionScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $installedCustomIdentity)
+  $supervisionDefaultTestRoots = @(0..3 | ForEach-Object { Join-Path ([IO.Path]::GetTempPath()) ('Chronos-Supervision-v3-{0}-{1}' -f $supervisionScopeHash.Substring(0, 24), $_) })
+  $customSupervisionOutput = @(& $installedLauncher -Action supervise -SupervisionAction status -CodexHome $installedCustomCodexHome 2>&1)
+  $customSupervisionExitCode = $LASTEXITCODE
+  $customSupervisionText = $customSupervisionOutput -join "`n"
+  if ($customSupervisionExitCode -ne 0 -or $customSupervisionText -notmatch '"codexHomeSource":"explicit"' -or $customSupervisionText -notmatch ('"codexHomeIdentity":"' + [regex]::Escape($installedCustomIdentityToken) + '"')) {
+    throw "Extracted package did not bind supervision to explicit CODEX_HOME.`n$customSupervisionText"
+  }
   $installedSupervisionState = Join-Path $supervisionTestRoot "installed-supervision-state.json"
   $installedSupervisionOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action supervise -SupervisionAction status `
@@ -535,6 +574,7 @@ try {
   $configuredHookInfo.EnvironmentVariables['PLUGIN_ROOT'] = $installRoot
   $configuredHookInfo.EnvironmentVariables['TEMP'] = $configuredHookTemp
   $configuredHookInfo.EnvironmentVariables['TMP'] = $configuredHookTemp
+  [void]$configuredHookInfo.EnvironmentVariables.Remove('CODEX_HOME')
   $configuredHookProcess = [Diagnostics.Process]::Start($configuredHookInfo)
   $configuredHookProcess.StandardInput.Write('{"session_id":"release-configured-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
   $configuredHookProcess.StandardInput.Close()
@@ -549,7 +589,8 @@ try {
   if ($configuredHookExit -ne 0 -or $configuredHookStdout -or $configuredHookStderr) {
     throw 'Packaged configured lifecycle hook did not execute silently through the Codex cmd.exe boundary.'
   }
-  $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $configuredCodexHomeIdentity = ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).ToUpperInvariant()
+  $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $configuredCodexHomeIdentity)
   $configuredRegistryPath = Join-Path $configuredHookTemp (Join-Path ('Chronos-Supervision-v3-{0}-0' -f $configuredScopeHash.Substring(0, 24)) 'session-registry.json')
   if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf)) {
     throw 'Packaged configured lifecycle hook reported success without reaching the registry script.'
@@ -625,6 +666,12 @@ try {
     if ($resolvedHeartbeatTest.StartsWith($approvedHeartbeatRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
       Remove-Item -LiteralPath $resolvedHeartbeatTest -Recurse -Force -ErrorAction SilentlyContinue
     }
+  }
+  if ($heartbeatDefaultTestRoot) {
+    Remove-Item -LiteralPath $heartbeatDefaultTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  foreach ($supervisionDefaultTestRoot in @($supervisionDefaultTestRoots)) {
+    Remove-Item -LiteralPath $supervisionDefaultTestRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 

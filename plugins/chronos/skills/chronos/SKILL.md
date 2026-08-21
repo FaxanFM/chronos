@@ -73,6 +73,11 @@ whether hooks execute or not. Hooks are an optional accelerator only.
 `hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
 must not make setup fail after complete inventory and topology postconditions
 pass.
+
+Treat a nonempty `CODEX_HOME` as the installation boundary. Otherwise use the
+current user's `.codex` directory. The native modules canonicalize and hash this
+value; they never return the raw path. Invalid or inaccessible overrides fail
+closed before state, claim, or recurrence eligibility can exist.
 ## Complete status request
 
 When the user asks for a complete Chronos status, run the Inspector, supervision
