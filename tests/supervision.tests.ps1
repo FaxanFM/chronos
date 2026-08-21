@@ -334,6 +334,7 @@ try {
   $restartScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
   $restartV2Directory = Join-Path $restartTemp (Join-Path 'Chronos\Supervision-v2' $restartScopeHash)
   $restartV2State = Join-Path $restartV2Directory 'session-registry.json'
+  $restartV2Scope = Join-Path $restartV2Directory 'installation-scope.json'
   New-Item -ItemType Directory -Path $restartV2Directory -Force | Out-Null
   $restartSeed = Invoke-Supervision $restartV2State 'initialize' 'prior-v2-governor'
   Assert-True ($restartSeed.ExitCode -eq 0) 'Could not seed the prior v2 supervision namespace.'
@@ -342,7 +343,22 @@ try {
   $restartRestrictedAcl = Get-Acl -LiteralPath $restartV2Directory
   [void]$restartRestrictedAcl.AddAccessRule($denyRule)
   Set-Acl -LiteralPath $restartV2Directory -AclObject $restartRestrictedAcl
+  $restartStateLock = $null
+  $restartScopeLock = $null
   try {
+    try {
+      $restartAccessProbe = New-Object IO.FileStream($restartV2State, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+      $restartAccessProbe.Dispose()
+      # Hosted Windows runners can retain read access despite a same-user deny
+      # rule. Exclusive handles provide the same read-unavailable contract
+      # without depending on runner token privileges or process timing.
+      $restartStateLock = New-Object IO.FileStream($restartV2State, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    } catch {}
+    try {
+      $restartScopeProbe = New-Object IO.FileStream($restartV2Scope, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+      $restartScopeProbe.Dispose()
+      $restartScopeLock = New-Object IO.FileStream($restartV2Scope, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    } catch {}
     $restartStatus = Invoke-SupervisionInTempRoot $restartTemp
     Assert-True ($restartStatus.ExitCode -eq 0) 'An inaccessible active v2 namespace blocked restarted-host supervision recovery.'
     $restartPayload = Get-Payload $restartStatus
@@ -355,6 +371,8 @@ try {
     $restartRepeat = Get-Payload (Invoke-SupervisionInTempRoot $restartTemp)
     Assert-True ($restartRepeat.hostEquivalenceKey -eq $restartPayload.hostEquivalenceKey) 'Recovered installation identity changed across restarted-host status calls.'
   } finally {
+    if ($restartStateLock) { $restartStateLock.Dispose() }
+    if ($restartScopeLock) { $restartScopeLock.Dispose() }
     Set-Acl -LiteralPath $restartV2Directory -AclObject $restartV2Acl -ErrorAction SilentlyContinue
     Assert-True ((Get-Item -LiteralPath $restartV2State -Force).LastWriteTimeUtc -eq $restartV2WriteTime) 'Inaccessible v2 state changed during restarted-host recovery.'
     Remove-Item -LiteralPath $restartTemp -Recurse -Force -ErrorAction SilentlyContinue
@@ -982,7 +1000,7 @@ try {
 
   $sourceText = Get-Content -Raw -LiteralPath $module
   Assert-True ($sourceText.Contains("'Chronos-Supervision-v3-{0}-{1}'") -and $sourceText.Contains('$script:DefaultStateCandidates') -and $sourceText.Contains('bounded_default_slot_selection')) 'Default supervision state must use bounded direct TEMP slots that recover from an inaccessible prior sandbox namespace.'
-  Assert-True ($sourceText.Contains('Chronos.Supervision.Installation.v3') -and $sourceText.Contains('bounded_v3_state_root_anchor') -and $sourceText.Contains('deterministic_host_codex_home_hash')) 'Default installation identity must survive a recovered state slot and report its provenance.'
+  Assert-True ($sourceText.Contains('Chronos.Supervision.Installation.v3') -and $sourceText.Contains('bounded_v3_state_root_anchor') -and $sourceText.Contains('deterministic_host_codex_home_hash') -and $sourceText.Contains('Test-PriorStoreUnavailableError')) 'Default installation identity must survive unavailable prior state and a recovered state slot while reporting its provenance.'
   Assert-True ($sourceText.Contains("Join-Path `$localRoot 'session-registry.json'")) 'LocalAppData must remain available only as the legacy supervision migration source.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
   Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'

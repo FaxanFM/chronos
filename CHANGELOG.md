@@ -71,6 +71,10 @@
   pending-slot write fails. The protected fallback queue now has a bounded
   two-attempt write budget, and concurrent-hook tests expose normally silent
   failures plus verify recovery after a corrupt-state interruption.
+- Treat both permission denial and Windows sharing violations on a prior
+  supervision namespace as unavailable read-only evidence. The restarted host
+  selects its writable v3 slot without modifying the inaccessible source, and
+  the regression no longer depends on hosted-runner ACL enforcement.
 
 ## v0.9.1
 

@@ -113,7 +113,8 @@ cadence, stable and isolated opaque installation equivalence keys, malformed
 scope rejection, reconciliation retry budget and postcondition,
 bounded machine-and-Codex-home-scoped v3 TEMP slots, explicit anchor provenance,
 deterministic installation identity across slot recovery, restarted-sandbox recovery from an inaccessible
-v2 namespace, read-only prior-state migration semantics, recurrence
+v2 namespace through both permission denial and a deterministic sharing-violation
+fixture, read-only prior-state migration semantics, recurrence
 ineligibility before a complete Governor-bearing
 host inventory, rejection of an inventory that omits the selected Governor,
 cycle and age limits, mandatory complete per-cycle host inventory

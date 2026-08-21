@@ -228,6 +228,18 @@ function Test-NoReparseAncestors {
   return $true
 }
 
+function Test-PriorStoreUnavailableError {
+  param($Record)
+  if ($null -eq $Record) { return $false }
+  if ($Record.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied) { return $true }
+  $exception = $Record.Exception
+  while ($exception) {
+    if ($exception -is [UnauthorizedAccessException] -or $exception -is [IO.IOException]) { return $true }
+    $exception = $exception.InnerException
+  }
+  return $false
+}
+
 function Resolve-StatePath {
   param([string]$Requested)
   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -342,10 +354,7 @@ function Read-InstallationScopeId {
     return [string]$scope.id
   } catch {
     if ([string]$_.Exception.Message -eq 'supervision_install_scope_path_invalid') { throw }
-    $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
-      $_.Exception -is [UnauthorizedAccessException] -or
-      $_.Exception.InnerException -is [UnauthorizedAccessException]
-    if ($accessDenied) { throw }
+    if (Test-PriorStoreUnavailableError $_) { throw }
     throw 'supervision_install_scope_invalid'
   }
 }
@@ -397,10 +406,7 @@ function Get-OrCreateInstallationScopeId {
         $script:InstallationScopeSource = 'prior_anchor_imported'
         return Write-InstallationScopeId $path $priorId
       } catch {
-        $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
-          $_.Exception -is [UnauthorizedAccessException] -or
-          $_.Exception.InnerException -is [UnauthorizedAccessException]
-        if ($accessDenied) {
+        if (Test-PriorStoreUnavailableError $_) {
           $script:StateStoreMigration = 'prior_state_unavailable_new_root'
           $script:PriorStateDisposition = 'unavailable_preserved'
           continue
@@ -610,7 +616,7 @@ function Assert-State {
 }
 
 function Read-State {
-  param([string]$Path, [switch]$ValidateProtectedIds)
+  param([string]$Path, [switch]$ValidateProtectedIds, [switch]$PreserveUnavailable)
   if (-not (Test-Path -LiteralPath $Path)) { return New-State }
   try {
     $item = Get-Item -LiteralPath $Path -Force
@@ -623,10 +629,7 @@ function Read-State {
     Assert-State $state -ValidateProtectedIds:$ValidateProtectedIds
     return $state
   } catch {
-    $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
-      $_.Exception -is [UnauthorizedAccessException] -or
-      $_.Exception.InnerException -is [UnauthorizedAccessException]
-    if ($accessDenied) { throw }
+    if ($PreserveUnavailable -and (Test-PriorStoreUnavailableError $_)) { throw }
     throw 'supervision_state_invalid'
   }
 }
@@ -678,16 +681,13 @@ function Import-LegacyStateIfPresent {
         $script:StateStoreMigration = 'prior_state_invalid_new_root'
         continue
       }
-      $legacy = Read-State $priorPath -ValidateProtectedIds
+      $legacy = Read-State $priorPath -ValidateProtectedIds -PreserveUnavailable
       Write-State $legacy $ResolvedStatePath
       $script:StateStoreMigration = 'prior_state_imported'
       $script:PriorStateDisposition = 'read_only_imported'
       return
     } catch {
-      $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
-        $_.Exception -is [UnauthorizedAccessException] -or
-        $_.Exception.InnerException -is [UnauthorizedAccessException]
-      if ($accessDenied) {
+      if (Test-PriorStoreUnavailableError $_) {
         $script:StateStoreMigration = 'prior_state_unavailable_new_root'
         $script:PriorStateDisposition = 'unavailable_preserved'
         continue
