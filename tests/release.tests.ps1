@@ -130,6 +130,8 @@ try {
     'DPAPI does not protect against another process already running as that'
     'CODEX_HOME'
     'Separate homes remain isolated'
+    'ancestor junction'
+    'Unscoped v2, fixed-TEMP, and LocalAppData state predates'
   )) {
     if (-not $supervisionContract.Contains($required)) {
       throw "Public supervision contract is missing a release boundary: $required"
@@ -270,10 +272,10 @@ try {
   $heartbeatSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\heartbeat.ps1')
   $supervisionSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\session-registry.ps1')
   $wrapperSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos\scripts\chronos.ps1')
-  foreach ($required in @('$env:CODEX_HOME', 'heartbeat_codex_home_invalid', 'heartbeat_codex_home_unavailable', 'codexHomeIdentity')) {
+  foreach ($required in @('$env:CODEX_HOME', 'heartbeat_codex_home_invalid', 'heartbeat_codex_home_unavailable', 'codexHomeIdentity', 'AllowUnscopedLegacyMigration', 'Test-NoReparseAncestors $full')) {
     if (-not $heartbeatSource.Contains($required)) { throw "Heartbeat CODEX_HOME contract is missing: $required" }
   }
-  foreach ($required in @('$env:CODEX_HOME', 'supervision_codex_home_invalid', 'supervision_codex_home_unavailable', 'registryMutexIdentity')) {
+  foreach ($required in @('$env:CODEX_HOME', 'supervision_codex_home_invalid', 'supervision_codex_home_unavailable', 'registryMutexIdentity', 'AllowUnscopedLegacyMigration', 'Test-NoReparseAncestors $full')) {
     if (-not $supervisionSource.Contains($required)) { throw "Supervision CODEX_HOME contract is missing: $required" }
   }
   if (($wrapperSource -split "`n" | Where-Object { $_ -match "ContainsKey\('CodexHome'\)" }).Count -lt 2) {

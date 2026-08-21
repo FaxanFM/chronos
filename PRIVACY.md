@@ -89,6 +89,11 @@ Chronos uses a nonempty `CODEX_HOME` when supplied and otherwise uses the
 current user's `.codex` directory. It exposes only a truncated hash of that
 canonical identity in status. An invalid or inaccessible override is rejected
 before any registry, Heartbeat state, claim, or mutex-owned record is created.
+The validation rejects a reparse point in any path component, including an
+ancestor junction. Unscoped legacy state and installation anchors are eligible
+only for the default `.codex` home. Explicit or environment-provided homes do
+not import them; separate homes cannot clone one legacy identity or pending
+Heartbeat outbox. Eligible imports read the source without modifying it.
 The pseudonymous ID scopes one Governor to one local installation and remains
 stable when Chronos selects another bounded writable state slot after a sandbox
 restart. It is not a secret. It contains no raw hostname, username, Windows SID,

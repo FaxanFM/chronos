@@ -50,6 +50,7 @@ $script:PriorDefaultStatePath = $null
 $script:PriorInstallationScopePath = $null
 $script:PriorV2DefaultStatePath = $null
 $script:PriorV2InstallationScopePath = $null
+$script:AllowUnscopedLegacyMigration = $false
 $script:PriorStateDisposition = 'not_checked'
 $script:PriorStateWriteAttempted = $false
 $script:DefaultStateCandidates = @()
@@ -259,6 +260,7 @@ function Resolve-CodexHomeDirectory {
       }
       $full = [IO.Path]::GetFullPath($item.FullName)
     }
+    if (-not (Test-NoReparseAncestors $full)) { throw 'supervision_codex_home_invalid' }
   } catch {
     if ([string]$_.Exception.Message -eq 'supervision_codex_home_invalid') { throw }
     if (Test-PriorStoreUnavailableError $_) { throw 'supervision_codex_home_unavailable' }
@@ -286,6 +288,9 @@ function Resolve-StatePath {
   $codexHomeIdentity = [string]$resolvedCodexHome.Identity
   $script:CodexHomeSource = [string]$resolvedCodexHome.Source
   $script:CodexHomeIdentity = (Get-TextHash $codexHomeIdentity).Substring(0, 16)
+  # Pre-CODEX_HOME state is globally scoped. Only an invocation using the true
+  # default home may import it; custom homes always start with isolated identity.
+  $script:AllowUnscopedLegacyMigration = $script:CodexHomeSource -eq 'default'
   $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)
   $priorScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
   $script:DefaultInstallationScopeId = (Get-TextHash ('Chronos.Supervision.Installation.v3|{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)).Substring(0, 32)
@@ -428,7 +433,11 @@ function Get-OrCreateInstallationScopeId {
     return Read-InstallationScopeId $path
   }
   if ($script:StateStoreMode -eq 'temp_private') {
-    foreach ($priorPath in @($script:PriorV2InstallationScopePath, $script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)) {
+    $priorScopePaths = @($script:PriorV2InstallationScopePath)
+    if ($script:AllowUnscopedLegacyMigration) {
+      $priorScopePaths += @($script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)
+    }
+    foreach ($priorPath in $priorScopePaths) {
       if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
       try {
         $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
@@ -711,7 +720,11 @@ function Write-State {
 function Import-LegacyStateIfPresent {
   param([string]$ResolvedStatePath)
   if ($script:StateStoreMode -ne 'temp_private' -or (Test-Path -LiteralPath $ResolvedStatePath)) { return }
-  foreach ($priorPath in @($script:PriorV2DefaultStatePath, $script:PriorDefaultStatePath, $script:LegacyDefaultStatePath)) {
+  $priorStatePaths = @($script:PriorV2DefaultStatePath)
+  if ($script:AllowUnscopedLegacyMigration) {
+    $priorStatePaths += @($script:PriorDefaultStatePath, $script:LegacyDefaultStatePath)
+  }
+  foreach ($priorPath in $priorStatePaths) {
     if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
     try {
       $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop

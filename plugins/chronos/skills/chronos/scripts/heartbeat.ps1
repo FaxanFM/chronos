@@ -63,6 +63,7 @@ $script:PriorStateDisposition = 'not_applicable'
 $script:PriorStateWriteAttempted = $false
 $script:CodexHomeSource = 'unresolved'
 $script:CodexHomeIdentity = 'unresolved'
+$script:AllowUnscopedLegacyMigration = $false
 
 if (-not ('ChronosHeartbeatPathIdentity' -as [type])) {
   $pathIdentitySource = @'
@@ -726,6 +727,7 @@ function Resolve-CodexHomeDirectory {
       }
       $full = [IO.Path]::GetFullPath($item.FullName)
     }
+    if (-not (Test-NoReparseAncestors $full)) { throw 'heartbeat_codex_home_invalid' }
   } catch {
     if ([string]$_.Exception.Message -eq 'heartbeat_codex_home_invalid') { throw }
     $exception = $_.Exception
@@ -754,11 +756,16 @@ function Resolve-StatePath {
     $script:CodexHomeSource = [string]$resolvedCodexHome.Source
     $script:CodexHomeIdentity = (Get-StableHash ([string]$resolvedCodexHome.Identity)).Substring(0, 16)
     $RequestedScope = '{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), ([string]$resolvedCodexHome.Identity)
-    $legacyCodexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex')).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
-    $priorStableScope = '{0}|{1}' -f $env:COMPUTERNAME, $legacyCodexHome
-    $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, $legacyCodexHome, ([IO.Path]::GetFullPath((Get-Location).Path))
-    $priorStableScopeHash = Get-StableHash $priorStableScope
-    $priorDefaultScopeHash = Get-StableHash $priorDefaultScope
+    # Older default scopes predate CODEX_HOME isolation. A custom home must not
+    # clone their pending events, delivery state, or intervention ownership.
+    $script:AllowUnscopedLegacyMigration = $script:CodexHomeSource -eq 'default'
+    if ($script:AllowUnscopedLegacyMigration) {
+      $legacyCodexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex')).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+      $priorStableScope = '{0}|{1}' -f $env:COMPUTERNAME, $legacyCodexHome
+      $priorDefaultScope = '{0}|{1}|{2}' -f $env:COMPUTERNAME, $legacyCodexHome, ([IO.Path]::GetFullPath((Get-Location).Path))
+      $priorStableScopeHash = Get-StableHash $priorStableScope
+      $priorDefaultScopeHash = Get-StableHash $priorDefaultScope
+    }
   }
   if ($RequestedScope.Length -gt 4096) { throw 'heartbeat_scope_invalid' }
   if ([string]::IsNullOrWhiteSpace($Requested)) {

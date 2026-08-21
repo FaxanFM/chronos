@@ -60,7 +60,11 @@ Chronos uses a nonempty `CODEX_HOME` as the local installation boundary. If it
 is unset, Chronos uses the current user's `.codex` directory. Canonical aliases
 of one Codex home share supervision, Heartbeat, and lock identity; different
 Codex homes on the same PC remain isolated. Invalid or inaccessible overrides
-fail closed before Chronos creates state.
+fail closed before Chronos creates state. Chronos also rejects a reparse point
+in any `CODEX_HOME` path component, including an ancestor junction. Unscoped
+state from releases before `CODEX_HOME` isolation is considered only when
+Chronos uses the default `.codex` home. An explicit or environment-provided
+home never imports that shared legacy state.
 
 <p align="center"><img src="assets/chronos-proof-card.png" width="500" alt="Sanitized example Chronos output separating healthy machine resources from runaway automatic review and approval persistence"></p>
 

@@ -498,7 +498,8 @@ The default scope combines the machine and canonical Codex home only to create
 the hash. A nonempty `CODEX_HOME` takes precedence over the current user's
 `.codex` fallback. Status returns only the source and a truncated identity hash.
 Invalid, inaccessible, file-valued, or reparse-point overrides fail closed
-before state creation.
+before state creation. This check covers every path component, including an
+ancestor junction.
 The current workspace is not part of the default identity, so a Governor
 working-directory change does not split Heartbeat state. Those values are not stored in the file. The default state
 directory retains the current user's inherited TEMP permissions; Chronos does
@@ -512,6 +513,10 @@ and reports `prior_state_unavailable_new_root`. Compact status reports the
 state-store mode, write preflight, protection mode, and migration result without
 returning a path. A host can supply
 `-HeartbeatScope` for a stable explicit scope.
+These older default namespaces are unscoped and are considered only when
+Chronos uses the default `.codex` home. An explicit or environment-provided
+`CODEX_HOME` starts from its isolated destination and cannot clone pending
+outbox work from the shared older scope.
 Compact status also reports `priorStateDisposition` and
 `priorStateWriteAttempted`. `unavailable_preserved` with `false` means Chronos
 detected an inaccessible prior scope and made no migration write, rename,

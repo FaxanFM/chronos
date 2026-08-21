@@ -79,7 +79,10 @@ after the plugin manager replaces the package.
 Chronos uses a nonempty `CODEX_HOME` as the local installation boundary and
 falls back to the current user's `.codex` directory. Canonical aliases share
 state and locks; different Codex homes remain isolated. Invalid or inaccessible
-overrides fail closed before state creation.
+overrides fail closed before state creation. A reparse point in any path
+component, including an ancestor junction, is invalid. Unscoped state from
+older releases is eligible for read-only import only for the default `.codex`
+home; an explicit or environment-provided home cannot consume it.
 
 Chronos v0.9.2 checks valid cached source manifests on first use and separates
 cached duplication from a confirmed enabled-source conflict. If it confirms

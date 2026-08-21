@@ -159,7 +159,15 @@ directory is used only as the fallback. Chronos canonicalizes the directory and
 hashes it before deriving the state slot, installation key, and registry mutex.
 The same Codex home converges across sandbox `HOME` changes and path aliases.
 Separate homes remain isolated. Invalid or inaccessible overrides fail closed
-without creating state or a Governor claim.
+without creating state or a Governor claim. A reparse point in any path
+component, including an ancestor junction, is invalid.
+
+Unscoped v2, fixed-TEMP, and LocalAppData state predates `CODEX_HOME` identity.
+Chronos considers those sources only when it is using the default `.codex`
+home. An explicit or environment-provided home can import only its own
+home-scoped prior-v2 state. Sequential and concurrent first use by separate
+custom homes therefore cannot clone one legacy installation key or registry.
+All legacy sources remain read-only during this decision.
 
 The two initial convergence rechecks are bounded host reads inside the existing
 Governor turns. They create no worker turn and no permanent per-cycle scan.
@@ -296,7 +304,8 @@ hash for its opaque identity, so selecting a recovery slot cannot create a
 second Governor identity. No raw machine name or Codex-home path is stored. On first
 use after an upgrade, Chronos imports a readable prior installation anchor and
 state without changing the v2, fixed-TEMP, or LocalAppData source. This preserves
-the existing Governor equivalence key. An inaccessible prior root is left unchanged
+the existing Governor equivalence key for the eligible default home. Custom
+homes do not claim these unscoped sources. An inaccessible prior root is left unchanged
 and reported as `prior_state_unavailable_new_root` with
 `priorStateWriteAttempted=false`; authoritative host inventory rebuilds the
 advisory registry. Chronos reports only the selected slot number, a short state

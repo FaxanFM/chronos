@@ -1132,11 +1132,84 @@ try {
     Assert-True ($invalidHeartbeatHome.ExitCode -eq 1 -and $invalidHeartbeatHome.Text -match '"error":"heartbeat_codex_home_invalid"') 'A missing CODEX_HOME did not fail closed with a specific Heartbeat error.'
     $afterInvalid = @(Get-ChildItem -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2') -Directory -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     Assert-Equal ($afterInvalid -join '|') ($beforeInvalid -join '|') 'Invalid CODEX_HOME created Heartbeat state before validation.'
+
+    $heartbeatReparseTarget = Join-Path $root 'heartbeat reparse target'
+    $heartbeatReparseHome = Join-Path $heartbeatReparseTarget 'codex home'
+    $heartbeatReparseAlias = Join-Path $root 'heartbeat reparse alias'
+    New-Item -ItemType Directory -Path $heartbeatReparseHome -Force | Out-Null
+    New-Item -ItemType Junction -Path $heartbeatReparseAlias -Target $heartbeatReparseTarget | Out-Null
+    $beforeHeartbeatReparse = @(Get-ChildItem -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2') -Directory -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    $reparseHeartbeatHome = Invoke-RawModule @('-Action', 'status', '-CodexHome', (Join-Path $heartbeatReparseAlias 'codex home'))
+    Assert-True ($reparseHeartbeatHome.ExitCode -eq 1 -and $reparseHeartbeatHome.Text -match '"error":"heartbeat_codex_home_invalid"') 'A Heartbeat CODEX_HOME below a junction ancestor did not fail closed.'
+    $afterHeartbeatReparse = @(Get-ChildItem -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Heartbeat-v2') -Directory -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    Assert-Equal ($afterHeartbeatReparse -join '|') ($beforeHeartbeatReparse -join '|') 'Rejected reparse-ancestor CODEX_HOME created Heartbeat state.'
+    Assert-Equal (Invoke-RawModule @('-Action', 'status', '-CodexHome', $heartbeatReparseHome)).ExitCode 0 'The direct non-reparse Heartbeat CODEX_HOME target was rejected.'
   } finally {
     $env:HOME = $savedHeartbeatHomeEnvironment
     $env:CODEX_HOME = $savedHeartbeatCodexHome
     Remove-Item -LiteralPath (Split-Path -Parent $heartbeatHomeAState) -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Split-Path -Parent $heartbeatHomeBState) -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # Earlier default scopes are global to the pre-CODEX_HOME installation. A
+  # pending delivery there must not be rebound into multiple custom homes.
+  $savedLegacyHeartbeatHome = $env:HOME
+  $savedLegacyHeartbeatProfile = $env:USERPROFILE
+  $savedLegacyHeartbeatComputer = $env:COMPUTERNAME
+  $savedLegacyHeartbeatCodexHome = $env:CODEX_HOME
+  $legacyHeartbeatDefaultHome = Join-Path $root 'heartbeat legacy default home'
+  $legacyHeartbeatFallback = Join-Path $legacyHeartbeatDefaultHome '.codex'
+  $legacyHeartbeatHomeA = Join-Path $root 'heartbeat legacy isolated a'
+  $legacyHeartbeatHomeB = Join-Path $root 'heartbeat legacy isolated b'
+  New-Item -ItemType Directory -Path $legacyHeartbeatFallback, $legacyHeartbeatHomeA, $legacyHeartbeatHomeB -Force | Out-Null
+  $env:HOME = $legacyHeartbeatDefaultHome
+  $env:USERPROFILE = $legacyHeartbeatDefaultHome
+  $env:COMPUTERNAME = 'CHRONOS-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
+  [Environment]::SetEnvironmentVariable('CODEX_HOME', $null, 'Process')
+  $legacyHeartbeatScope = '{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath($legacyHeartbeatFallback))
+  $legacyHeartbeatHash = Get-TestStableHash $legacyHeartbeatScope
+  $legacyHeartbeatDirectory = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $legacyHeartbeatHash)
+  $legacyHeartbeatState = Join-Path $legacyHeartbeatDirectory 'heartbeat-state.json'
+  $legacyHeartbeatBaselineInput = Join-Path $root 'heartbeat-legacy-baseline.json'
+  $legacyHeartbeatStallInput = Join-Path $root 'heartbeat-legacy-stall.json'
+  [IO.File]::WriteAllText($legacyHeartbeatBaselineInput, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"legacy-isolation","sourceSequence":1,"runId":"legacy-isolation-1","origin":"test","forceCadence":true,"collectorCoverage":{"agent_stall":"observed"},"agents":[{"id":"legacy-agent","active":true,"progressHash":"a","totalTokens":1000}]}', [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($legacyHeartbeatStallInput, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:06:00Z","sourceEpoch":"legacy-isolation","sourceSequence":2,"runId":"legacy-isolation-2","origin":"test","forceCadence":true,"collectorCoverage":{"agent_stall":"observed"},"agents":[{"id":"legacy-agent","active":true,"progressHash":"a","totalTokens":50000,"tokensSinceMeaningfulChange":49000,"repeatedEquivalentActions":5,"minutesSinceMeaningfulChange":25}]}', [Text.UTF8Encoding]::new($false))
+  $legacyHeartbeatAState = $null
+  $legacyHeartbeatBState = $null
+  try {
+    Assert-Equal (Invoke-RawModule @('-Action', 'cycle', '-InputPath', $legacyHeartbeatBaselineInput, '-StatePath', $legacyHeartbeatState, '-Scope', $legacyHeartbeatScope)).ExitCode 0 'Could not seed the earlier stable Heartbeat scope.'
+    Assert-Equal (Invoke-RawModule @('-Action', 'cycle', '-InputPath', $legacyHeartbeatStallInput, '-StatePath', $legacyHeartbeatState, '-Scope', $legacyHeartbeatScope)).ExitCode 0 'Could not seed a pending legacy Heartbeat delivery.'
+    Assert-Equal @((Get-Content -Raw -LiteralPath $legacyHeartbeatState | ConvertFrom-Json).outbox).Count 1 'Legacy Heartbeat fixture did not retain one pending delivery.'
+    $legacyHeartbeatSourceHash = (Get-FileHash -LiteralPath $legacyHeartbeatState -Algorithm SHA256).Hash
+
+    $legacyHeartbeatAIdentity = ([IO.Path]::GetFullPath($legacyHeartbeatHomeA)).TrimEnd('\').ToUpperInvariant()
+    $legacyHeartbeatBIdentity = ([IO.Path]::GetFullPath($legacyHeartbeatHomeB)).TrimEnd('\').ToUpperInvariant()
+    $legacyHeartbeatAHash = Get-TestStableHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $legacyHeartbeatAIdentity)
+    $legacyHeartbeatBHash = Get-TestStableHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $legacyHeartbeatBIdentity)
+    $legacyHeartbeatAState = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' (Join-Path $legacyHeartbeatAHash 'heartbeat-state.json'))
+    $legacyHeartbeatBState = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' (Join-Path $legacyHeartbeatBHash 'heartbeat-state.json'))
+
+    $env:CODEX_HOME = $legacyHeartbeatHomeA
+    $legacyHeartbeatACycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput)
+    $legacyHeartbeatAStatus = Invoke-RawModule @('-Action', 'status')
+    $env:CODEX_HOME = $legacyHeartbeatHomeB
+    $legacyHeartbeatBCycle = Invoke-RawModule @('-Action', 'cycle', '-InputPath', $defaultUpgradeInput)
+    $legacyHeartbeatBStatus = Invoke-RawModule @('-Action', 'status')
+    Assert-Equal $legacyHeartbeatACycle.ExitCode 0 'First isolated Heartbeat home failed to persist a normal cycle.'
+    Assert-Equal $legacyHeartbeatBCycle.ExitCode 0 'Second isolated Heartbeat home failed to persist a normal cycle.'
+    Assert-Equal $legacyHeartbeatAStatus.ExitCode 0 'First isolated Heartbeat home failed status.'
+    Assert-Equal $legacyHeartbeatBStatus.ExitCode 0 'Second isolated Heartbeat home failed status.'
+    Assert-Equal @((Get-Content -Raw -LiteralPath $legacyHeartbeatAState | ConvertFrom-Json).outbox).Count 0 'First custom home cloned a pending legacy delivery.'
+    Assert-Equal @((Get-Content -Raw -LiteralPath $legacyHeartbeatBState | ConvertFrom-Json).outbox).Count 0 'Second custom home cloned a pending legacy delivery.'
+    Assert-Equal (Get-FileHash -LiteralPath $legacyHeartbeatState -Algorithm SHA256).Hash $legacyHeartbeatSourceHash 'Custom-home isolation modified earlier Heartbeat state.'
+  } finally {
+    $env:HOME = $savedLegacyHeartbeatHome
+    $env:USERPROFILE = $savedLegacyHeartbeatProfile
+    $env:COMPUTERNAME = $savedLegacyHeartbeatComputer
+    $env:CODEX_HOME = $savedLegacyHeartbeatCodexHome
+    Remove-Item -LiteralPath $legacyHeartbeatDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    if ($legacyHeartbeatAState) { Remove-Item -LiteralPath (Split-Path -Parent $legacyHeartbeatAState) -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($legacyHeartbeatBState) { Remove-Item -LiteralPath (Split-Path -Parent $legacyHeartbeatBState) -Recurse -Force -ErrorAction SilentlyContinue }
   }
 
   # A protected v0.8.2 default directory cannot strand a later sandbox

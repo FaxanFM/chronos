@@ -77,6 +77,8 @@ read-only import when the ACL denial is not enforced, explicit no-prior-write
 status, accessible empty-scope negative control, explicit busy-cycle retry, one
 canonical `CODEX_HOME` identity across sandbox-home and path-alias changes,
 separate Heartbeat state for separate Codex homes, invalid override rejection,
+ancestor-junction rejection before state, unscoped legacy-state isolation
+across sequential custom-home cycles, pending-outbox non-cloning,
 public-wrapper forwarding,
 active record per target generation, compatible eight-event coalescing,
 incompatible-contract deferral, higher-severity replacement, fixed action
@@ -121,7 +123,8 @@ fixture, read-only prior-state migration semantics, recurrence
 canonical `CODEX_HOME` convergence across sandbox-home and path-alias changes,
 separate registry, installation-key, and mutex identity for separate Codex
 homes, invalid override rejection before state creation, custom-home prior-v2
-read-only migration,
+read-only migration, ancestor-junction rejection, and sequential plus
+concurrent custom-home isolation from one unscoped legacy registry and anchor,
 ineligibility before a complete Governor-bearing
 host inventory, rejection of an inventory that omits the selected Governor,
 cycle and age limits, mandatory complete per-cycle host inventory

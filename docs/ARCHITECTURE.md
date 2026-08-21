@@ -192,6 +192,10 @@ the current user's `.codex` directory. The directory is canonicalized before it
 is hashed. One installation therefore converges across sandbox `HOME` changes
 and path aliases, while separate Codex homes use separate state and mutexes.
 Invalid, inaccessible, file-valued, or reparse-point overrides fail closed.
+The reparse check covers the complete path, including ancestor junctions.
+Unscoped legacy state is eligible only for the default `.codex` home. Custom
+homes can use only state that was already scoped to that same home, so one old
+identity or outbox cannot be cloned into several installations.
 
 `chronos.cmd -Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
@@ -234,7 +238,8 @@ hashes, enums, counters, and timestamps. It does not persist the raw collector
 snapshot or raw route, subject, owner, or task IDs.
 Heartbeat uses the same canonical Codex-home boundary for its default scope.
 Readable state from an earlier default scope is imported read-only and rebound
-only in the current destination.
+only in the current destination when the default `.codex` home owns that
+unscoped migration. Explicit or environment-provided homes do not import it.
 
 Passive supervision persists one bounded registry in the first writable of four
 direct, hashed Windows TEMP child slots. Raw task and agent IDs are DPAPI protected

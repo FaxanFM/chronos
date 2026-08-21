@@ -37,6 +37,8 @@ Native status also reports privacy-safe `codexHomeSource` and
 `codexHomeIdentity` fields. A nonempty `CODEX_HOME` is authoritative; different
 canonical Codex homes are different installations. Stop before host mutation
 when the override is invalid, unavailable, or cannot be resolved consistently.
+This includes a reparse point in any path component. Do not treat unscoped
+legacy state as belonging to an explicit or environment-provided Codex home.
 
 1. Run `chronos.cmd -Action install-status`, compact Inspector status, and
    Heartbeat status. A confirmed enabled-source conflict or unhealthy native

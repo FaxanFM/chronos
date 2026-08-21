@@ -77,7 +77,10 @@ pass.
 Treat a nonempty `CODEX_HOME` as the installation boundary. Otherwise use the
 current user's `.codex` directory. The native modules canonicalize and hash this
 value; they never return the raw path. Invalid or inaccessible overrides fail
-closed before state, claim, or recurrence eligibility can exist.
+closed before state, claim, or recurrence eligibility can exist. Reject a
+reparse point in any path component, including an ancestor junction. Consider
+unscoped state from older releases only for the default `.codex` home; an
+explicit or environment-provided home must not import it.
 ## Complete status request
 
 When the user asks for a complete Chronos status, run the Inspector, supervision

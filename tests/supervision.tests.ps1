@@ -218,10 +218,16 @@ function Invoke-SupervisionInTempRoot {
 }
 
 function Start-SupervisionInTempRoot {
-  param([string]$TempRoot)
+  param(
+    [string]$TempRoot,
+    [string]$CodexHomeOverride = '',
+    [string]$Action = 'status',
+    [string]$Session = ''
+  )
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
-  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction status' -f $wrapper
+  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
+  if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -229,6 +235,8 @@ function Start-SupervisionInTempRoot {
   $info.RedirectStandardError = $true
   $info.EnvironmentVariables['TEMP'] = $TempRoot
   $info.EnvironmentVariables['TMP'] = $TempRoot
+  if ([string]::IsNullOrWhiteSpace($CodexHomeOverride)) { [void]$info.EnvironmentVariables.Remove('CODEX_HOME') }
+  else { $info.EnvironmentVariables['CODEX_HOME'] = $CodexHomeOverride }
   [Diagnostics.Process]::Start($info)
 }
 
@@ -446,6 +454,18 @@ try {
   Assert-True ($invalidFile.ExitCode -eq 1 -and (Get-Payload $invalidFile).error -eq 'supervision_codex_home_invalid') 'A file-valued CODEX_HOME did not fail closed.'
   Assert-True (@(Get-ChildItem -LiteralPath $invalidCodexTemp -Filter 'Chronos-Supervision-v3-*' -Force -ErrorAction SilentlyContinue).Count -eq 0) 'Invalid CODEX_HOME created supervision state before validation.'
 
+  $reparseTargetParent = Join-Path $root 'supervision reparse target'
+  $reparseRealHome = Join-Path $reparseTargetParent 'codex home'
+  $reparseAliasParent = Join-Path $root 'supervision reparse alias'
+  New-Item -ItemType Directory -Path $reparseRealHome -Force | Out-Null
+  New-Item -ItemType Junction -Path $reparseAliasParent -Target $reparseTargetParent | Out-Null
+  $beforeReparseReject = @(Get-ChildItem -LiteralPath $invalidCodexTemp -Filter 'Chronos-Supervision-v3-*' -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+  $reparseAncestor = Invoke-SupervisionInTempRoot -TempRoot $invalidCodexTemp -CodexHomeOverride (Join-Path $reparseAliasParent 'codex home')
+  Assert-True ($reparseAncestor.ExitCode -eq 1 -and (Get-Payload $reparseAncestor).error -eq 'supervision_codex_home_invalid') 'A CODEX_HOME below a junction ancestor did not fail closed.'
+  $afterReparseReject = @(Get-ChildItem -LiteralPath $invalidCodexTemp -Filter 'Chronos-Supervision-v3-*' -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+  Assert-True (($beforeReparseReject -join '|') -eq ($afterReparseReject -join '|')) 'A rejected reparse-ancestor CODEX_HOME created supervision state.'
+  Assert-True ((Invoke-SupervisionInTempRoot -TempRoot $invalidCodexTemp -CodexHomeOverride $reparseRealHome).ExitCode -eq 0) 'The direct non-reparse CODEX_HOME target was rejected.'
+
   $customMigrationTemp = Join-Path $root 'custom codex migration temp'
   $customMigrationHome = Join-Path $root 'custom migration home'
   New-Item -ItemType Directory -Path $customMigrationHome -Force | Out-Null
@@ -461,6 +481,50 @@ try {
   $customMigrationPayload = Get-Payload $customMigration
   Assert-True ($customMigrationPayload.hostEquivalenceKey -eq $customPriorKey -and $customMigrationPayload.installationScopeSource -eq 'prior_anchor_imported' -and $customMigrationPayload.priorStateDisposition -eq 'read_only_imported') 'Custom CODEX_HOME migration did not preserve its prior installation key and provenance.'
   Assert-True ((Get-Item -LiteralPath $customPriorState -Force).LastWriteTimeUtc -eq $customPriorWriteTime) 'Custom CODEX_HOME migration modified its prior-v2 state.'
+
+  # Unscoped pre-CODEX_HOME state may be consumed only by a true default-home
+  # invocation. Custom homes must never clone its Governor ownership identity.
+  $legacyIsolationTemp = Join-Path $root 'legacy isolation temp'
+  $legacyIsolationDirectory = Join-Path $legacyIsolationTemp 'Chronos\Supervision'
+  $legacyIsolationState = Join-Path $legacyIsolationDirectory 'session-registry.json'
+  $legacyIsolationScope = Join-Path $legacyIsolationDirectory 'installation-scope.json'
+  $legacySeed = Invoke-Supervision $legacyIsolationState 'initialize' 'legacy-isolation-governor'
+  Assert-True ($legacySeed.ExitCode -eq 0) 'Could not seed global legacy supervision state.'
+  $legacySeedPayload = Get-Payload $legacySeed
+  $legacyStateHash = (Get-FileHash -LiteralPath $legacyIsolationState -Algorithm SHA256).Hash
+  $legacyScopeHash = (Get-FileHash -LiteralPath $legacyIsolationScope -Algorithm SHA256).Hash
+  $legacyHomeA = Join-Path $root 'legacy isolated home a'
+  $legacyHomeB = Join-Path $root 'legacy isolated home b'
+  New-Item -ItemType Directory -Path $legacyHomeA, $legacyHomeB -Force | Out-Null
+  $legacyHomeAResult = Invoke-SupervisionInTempRoot -TempRoot $legacyIsolationTemp -Action 'initialize' -Session 'isolated-a' -CodexHomeOverride $legacyHomeA
+  $legacyHomeBResult = Invoke-SupervisionInTempRoot -TempRoot $legacyIsolationTemp -Action 'initialize' -Session 'isolated-b' -CodexHomeOverride $legacyHomeB
+  Assert-True ($legacyHomeAResult.ExitCode -eq 0 -and $legacyHomeBResult.ExitCode -eq 0) 'Separate custom homes could not initialize beside global legacy state.'
+  $legacyHomeAPayload = Get-Payload $legacyHomeAResult
+  $legacyHomeBPayload = Get-Payload $legacyHomeBResult
+  Assert-True ($legacyHomeAPayload.hostEquivalenceKey -ne $legacyHomeBPayload.hostEquivalenceKey -and $legacyHomeAPayload.hostEquivalenceKey -ne $legacySeedPayload.hostEquivalenceKey -and $legacyHomeBPayload.hostEquivalenceKey -ne $legacySeedPayload.hostEquivalenceKey) 'Global legacy ownership was cloned into separate CODEX_HOME installations.'
+  Assert-True ($legacyHomeAPayload.stateStoreIdentity -ne $legacyHomeBPayload.stateStoreIdentity -and $legacyHomeAPayload.registryMutexIdentity -ne $legacyHomeBPayload.registryMutexIdentity) 'Separate homes shared registry or mutex identity during global-legacy isolation.'
+  Assert-True (-not $legacyHomeAPayload.recurrenceEligible -and -not $legacyHomeBPayload.recurrenceEligible) 'Legacy isolation made a new home recurrence-eligible without complete inventory.'
+  Assert-True ((Get-FileHash -LiteralPath $legacyIsolationState -Algorithm SHA256).Hash -eq $legacyStateHash -and (Get-FileHash -LiteralPath $legacyIsolationScope -Algorithm SHA256).Hash -eq $legacyScopeHash) 'Sequential isolation modified global legacy state or its anchor.'
+
+  $concurrentLegacyTemp = Join-Path $root 'concurrent legacy isolation temp'
+  $concurrentLegacyDirectory = Join-Path $concurrentLegacyTemp 'Chronos\Supervision'
+  New-Item -ItemType Directory -Path $concurrentLegacyDirectory -Force | Out-Null
+  Copy-Item -LiteralPath $legacyIsolationState -Destination (Join-Path $concurrentLegacyDirectory 'session-registry.json')
+  Copy-Item -LiteralPath $legacyIsolationScope -Destination (Join-Path $concurrentLegacyDirectory 'installation-scope.json')
+  $concurrentStateHash = (Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'session-registry.json') -Algorithm SHA256).Hash
+  $concurrentScopeHash = (Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'installation-scope.json') -Algorithm SHA256).Hash
+  $legacyProcessA = Start-SupervisionInTempRoot -TempRoot $concurrentLegacyTemp -CodexHomeOverride $legacyHomeA -Action 'initialize' -Session 'concurrent-isolated-a'
+  $legacyProcessB = Start-SupervisionInTempRoot -TempRoot $concurrentLegacyTemp -CodexHomeOverride $legacyHomeB -Action 'initialize' -Session 'concurrent-isolated-b'
+  $legacyConcurrentA = Complete-SupervisionInTempRoot $legacyProcessA
+  $legacyConcurrentB = Complete-SupervisionInTempRoot $legacyProcessB
+  Assert-True ($legacyConcurrentA.ExitCode -eq 0 -and $legacyConcurrentB.ExitCode -eq 0) 'Concurrent custom-home isolation failed.'
+  $legacyConcurrentAPayload = Get-Payload $legacyConcurrentA
+  $legacyConcurrentBPayload = Get-Payload $legacyConcurrentB
+  $concurrentLegacyInheritors = @(@($legacyConcurrentAPayload.hostEquivalenceKey, $legacyConcurrentBPayload.hostEquivalenceKey) | Where-Object { $_ -eq $legacySeedPayload.hostEquivalenceKey })
+  Assert-True ($legacyConcurrentAPayload.hostEquivalenceKey -ne $legacyConcurrentBPayload.hostEquivalenceKey -and $concurrentLegacyInheritors.Count -le 1) 'Concurrent custom homes cloned one global legacy identity.'
+  Assert-True ($legacyConcurrentAPayload.stateStoreIdentity -ne $legacyConcurrentBPayload.stateStoreIdentity -and $legacyConcurrentAPayload.registryMutexIdentity -ne $legacyConcurrentBPayload.registryMutexIdentity) 'Concurrent custom homes shared state or mutex identity.'
+  Assert-True (-not $legacyConcurrentAPayload.recurrenceEligible -and -not $legacyConcurrentBPayload.recurrenceEligible) 'Concurrent legacy isolation created recurrence eligibility.'
+  Assert-True ((Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'session-registry.json') -Algorithm SHA256).Hash -eq $concurrentStateHash -and (Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'installation-scope.json') -Algorithm SHA256).Hash -eq $concurrentScopeHash) 'Concurrent isolation modified global legacy state or its anchor.'
 
   $slotTemp = Join-Path $root 'bounded slot temp'
   New-Item -ItemType Directory -Path $slotTemp -Force | Out-Null

@@ -222,8 +222,10 @@ authority.
 Chronos uses the current user's `.codex` directory. Status returns only
 `codexHomeSource`, a truncated `codexHomeIdentity` hash, and the hashed mutex
 identity. Missing, inaccessible, file-valued, or reparse-point overrides fail
-closed before state creation. Do not redirect two installations into one state
-root.
+closed before state creation. The check includes every path component, so an
+ancestor junction also fails closed. Do not redirect two installations into
+one state root. Unscoped legacy state is considered only for the default
+`.codex` home. An explicit or environment-provided home never imports it.
 
 Never create or enable a Governor recurrence after initialization alone. First
 require readable supervision and Heartbeat status and one successful complete
@@ -294,7 +296,9 @@ broadcast or assign the action to the user. Surface only genuine user authority.
 Default Heartbeat state is under
 `%TEMP%\Chronos\Heartbeat-v2\<scope-sha256>\heartbeat-state.json`. Valid
 readable state from the prior TEMP namespace or legacy LocalAppData location is
-imported on first use. If prior state belongs to an inaccessible sandbox
+imported on first use only when Chronos uses the default `.codex` home. A
+custom `CODEX_HOME` does not import those unscoped sources or their pending
+outbox records. If prior state belongs to an inaccessible sandbox
 identity, Chronos leaves it unchanged, starts in the versioned namespace, and
 reports `prior_state_unavailable_new_root`. When a host supplies
 `-HeartbeatStatePath`, it must also supply the same stable

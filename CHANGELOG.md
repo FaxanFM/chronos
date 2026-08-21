@@ -82,6 +82,13 @@
 - Reject missing, inaccessible, file-valued, and reparse-point `CODEX_HOME`
   overrides before state creation. Return only privacy-safe source and hashed
   identity fields, and import compatible earlier state read-only.
+- Reject a reparse point in any `CODEX_HOME` ancestor, not only the final
+  directory, before Heartbeat or supervision state can be selected.
+- Limit unscoped pre-`CODEX_HOME` migration to the default `.codex` home.
+  Explicit and environment-provided homes cannot clone one legacy supervision
+  identity, registry, or pending Heartbeat outbox into multiple installations.
+  Add sequential and concurrent regression coverage and keep each source
+  unchanged.
 
 ## v0.9.1
 
