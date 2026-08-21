@@ -129,6 +129,41 @@ try {
       throw "Public supervision contract is missing a release boundary: $required"
     }
   }
+  $governorSkill = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos-governor\SKILL.md')) -replace '\s+', ' '
+  $orderedSetupTerms = @(
+    'Retain this complete matching-recurrence candidate set',
+    'Before initializing the selected task',
+    'prove that zero matching recurrences are active',
+    'Have the selected task run `-SupervisionAction initialize`',
+    'require the successful initialization payload',
+    'recurrenceEligible=true',
+    'Update the deterministic winner in place'
+  )
+  $setupOffset = 0
+  foreach ($term in $orderedSetupTerms) {
+    $nextOffset = $governorSkill.IndexOf($term, $setupOffset, [StringComparison]::Ordinal)
+    if ($nextOffset -lt 0) {
+      throw "Governor setup contract is missing or misorders the recurrence fence: $term"
+    }
+    $setupOffset = $nextOffset + $term.Length
+  }
+  $failureRows = @(
+    'initialization failure',
+    'supervision status unreadable',
+    'Heartbeat status unreadable',
+    'incomplete inventory',
+    'inventory missing Governor',
+    'inventory contains Governor more than once'
+  )
+  foreach ($failureRow in $failureRows) {
+    $expectedRow = "| $failureRow | 0 | 0 | no |"
+    if (-not $supervisionContract.Contains($expectedRow)) {
+      throw "Supervision failure matrix does not fail closed for: $failureRow"
+    }
+  }
+  if (-not $supervisionContract.Contains('| complete inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
+    throw 'Supervision success matrix does not activate exactly one Governor recurrence after eligibility.'
+  }
   $coreSkill = Get-Content -Raw -LiteralPath $coreSkillPath
   foreach ($required in @(
     '## Complete status request',

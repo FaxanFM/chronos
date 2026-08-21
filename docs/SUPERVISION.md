@@ -88,21 +88,29 @@ The host uses this reconciliation order:
 4. Let that task claim the mutex-protected registry. This mutex fences one
    machine and state root only. Any concurrent local loser must stop and must
    not create a recurrence.
-5. Update or create the deterministic winning automation, pause or remove every
-   non-winner, and re-list host state. Recompute the winner after each mutation
-   for at most three attempts. Setup is complete only when exactly one active
-   recurrence carrying the complete equivalence key targets exactly one claimed,
-   live Governor and zero active duplicates remain. After three failed attempts,
-   stop for that pulse, preserve state, and retry later. Routine convergence
-   failure must not become a user chore.
-6. Repeat the same host-global winner and postcondition check before discovery
+5. Before initialization, pause or remove every active recurrence in the
+   complete matching candidate set, including a winner retained from an earlier
+   setup. Re-list host state and prove zero active matching recurrences. Recompute
+   the candidate set after each mutation for at most three attempts. If zero
+   cannot be proven, stop before initialization and schedule no recovery turn.
+6. Initialize the selected Governor, require readable supervision and Heartbeat
+   status, then run one complete host inventory containing that Governor exactly
+   once. Continue only when the cycle returns `recurrenceEligible=true`.
+7. Only after that gate succeeds, update or create the deterministic winning
+   automation, pause or remove every non-winner, and re-list host state. Setup is
+   complete only when exactly one active recurrence carrying the complete
+   equivalence key targets exactly one claimed, live Governor and zero active
+   duplicates remain. After three failed attempts, stop for that pulse and leave
+   zero active matching recurrences. Routine convergence failure must not become
+   a user chore.
+8. Repeat the same host-global winner and postcondition check before discovery
    on Governor cycles zero and one. This catches concurrently created state that
    was not yet visible during setup. A loser stops its own recurrence and stands
    down. A losing task clears only its own local claim, and only through
    two-phase release after its recurrence is proven absent. It never clears a
    winner's claim. Normal cycles after that do not rescan all automations unless claim
    loss, rotation, or recovery requires it.
-7. Use the current task only when task creation is unavailable and the user
+9. Use the current task only when task creation is unavailable and the user
    explicitly requested setup.
 
 Chronos never automatically forks a working task. A fork can duplicate a large
@@ -266,6 +274,18 @@ recurrence in the pre-initialization candidate set, including a pre-existing
 active recurrence. Re-list host state and prove zero active Chronos recurrences
 within three bounded mutation and verification attempts. Do not schedule a
 recovery recurrence.
+
+The deterministic setup regression matrix is:
+
+| Injected result | Active Governor recurrences | Active worker recurrences | Recovery turn scheduled |
+| --- | ---: | ---: | --- |
+| initialization failure | 0 | 0 | no |
+| supervision status unreadable | 0 | 0 | no |
+| Heartbeat status unreadable | 0 | 0 | no |
+| incomplete inventory | 0 | 0 | no |
+| inventory missing Governor | 0 | 0 | no |
+| inventory contains Governor more than once | 0 | 0 | no |
+| complete inventory and `recurrenceEligible=true` | 1 | 0 | no |
 
 The registry is capped at 256 KiB and 256 retained records. Task and agent identifiers are
 encrypted with Windows DPAPI for the current Windows user and indexed by

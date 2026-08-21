@@ -44,9 +44,10 @@
   config files and without changing user Git config.
 - Return an explicit retry contract for a unique Heartbeat cycle that overlaps
   the bounded state mutex wait. Do not silently discard the cycle.
-- Snapshot all matching Governor recurrences before initialization. Any failed
-  setup now pauses or removes both pre-existing and newly created matches,
-  verifies zero active recurrences, and never schedules its own recovery turn.
+- Snapshot all matching Governor recurrences, pause or remove them, and verify
+  zero active matches before initialization. Any failed setup rechecks both
+  pre-existing and newly created matches and never schedules its own recovery
+  turn.
 
 ## v0.9.1
 

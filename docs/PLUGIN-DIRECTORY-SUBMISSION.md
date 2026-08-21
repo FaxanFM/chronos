@@ -25,7 +25,7 @@ and makes overlapping Heartbeat cycles explicitly retryable. It retains the
 improved first-use prompts, listing copy, full-setup contract, and deterministic
 prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`849404469345710433a6b1d89e7398ef91cf9d025944ca1d709a7f649bc3d110`.
+`52474384132cf09c9837529c6024c380f6df0ba15891ea6cc3296b4b8e5190b5`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

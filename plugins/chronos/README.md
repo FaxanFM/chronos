@@ -103,7 +103,9 @@ do not ask me to relay routine findings.
 
 Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, enables due Heartbeat evaluation there, and proves that
-worker tasks have no recurrence. It creates or reconciles the single Governor
+worker tasks have no recurrence. Before initialization, it pauses or removes
+matching Governor recurrences and verifies zero active matches. It creates or
+reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
 complete host inventory contains the verified Governor. Any failed or partial
 setup pauses or removes every matching recurrence, including one that existed

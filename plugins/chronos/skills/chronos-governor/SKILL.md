@@ -52,12 +52,19 @@ name alone is not an equivalence key. Never copy a key from another machine.
    advertises that exact task-model choice. Field validation requires reliable
    tool use and recovery judgment in the coordinator role. Never silently
    substitute another model.
-5. Have the selected task run `-SupervisionAction initialize`. The registry
+5. Before initializing the selected task, pause or delete every active
+   recurrence from the complete matching-recurrence candidate set, including
+   the deterministic winner from an earlier setup. Re-list host state and prove
+   that zero matching recurrences are active. Recompute the candidate set after
+   every mutation and use at most three bounded mutation and verification
+   attempts. If zero cannot be proven, stop before initialization and create no
+   additional task, recurrence, or recovery turn.
+6. Have the selected task run `-SupervisionAction initialize`. The registry
    mutex fences only one machine and state root. If another local task already
    won, the loser must stop, create no automation, and may be archived after host
    verification. Use `-Force` only after host task status proves the recorded
    owner is not live.
-6. Before creating or enabling any recurrence, require the successful
+7. Before creating or enabling any recurrence, require the successful
    initialization payload, re-read supervision and Heartbeat status, and run one
    complete host-inventory `cycle` that contains the selected Governor exactly
    once. Continue only when native state is writable, Heartbeat is readable,
@@ -68,7 +75,7 @@ name alone is not an equivalence key. Never copy a key from another machine.
    recurrence, then re-list host state and prove that zero matching recurrences
    are active. Use at most three bounded mutation and verification attempts.
    Retain only bounded local recovery state. Do not schedule a recovery turn.
-7. Reconcile all matching automations after the claim and complete inventory
+8. Reconcile all matching automations after the claim and complete inventory
    cycle succeed. Update the
    deterministic winner in place when possible, or create one when none exists.
    Attach it to the selected task, pause or delete every non-winner, then re-list
@@ -79,7 +86,7 @@ name alone is not an equivalence key. Never copy a key from another machine.
    failure, stop all further setup retries in that pulse. Preserve the candidate
    state and retry later; never turn routine convergence failure into a user
    chore or rely on a create or allow result alone as proof.
-8. Before `discover` on Governor cycles zero and one, repeat the host candidate
+9. Before `discover` on Governor cycles zero and one, repeat the host candidate
    scan and exact postcondition check. This catches a concurrently created
    recurrence that was not visible during setup. A non-winning Governor must
    pause or delete its own recurrence, verify that the deterministic winner
@@ -89,12 +96,12 @@ name alone is not an equivalence key. Never copy a key from another machine.
    claim. After cycle one, do not rescan all host
    automations during normal cycles unless claim loss, rotation, or recovery
    requires reconciliation.
-9. Use the cadence returned by supervision: 60 minutes with active monitored
+10. Use the cadence returned by supervision: 60 minutes with active monitored
    work and 360 minutes while idle. The setup is an explicit opt-in to those
    recurring model turns. A Governor is bounded to 336 cycles or 14 days. At the
    bound, perform a verified fresh-task handoff when host tools support it;
    otherwise pause the recurrence and retain the reason in Governor-local state.
-10. If task creation is unavailable, use the current task only when the user's
+11. If task creation is unavailable, use the current task only when the user's
    setup request is explicit. State that it is the fallback and do not duplicate
    the current conversation through `fork_thread`.
 

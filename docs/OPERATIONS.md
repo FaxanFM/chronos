@@ -221,7 +221,8 @@ host-inventory cycle that contains the Governor exactly once and returns
 `recurrenceEligible=true`. Before initialization, retain the complete set of
 matching host recurrences. Any failure pauses or removes all of them, including
 a pre-existing recurrence, and re-lists host state to verify zero active Chronos
-recurrences. Never use a recurrence to recover from failed setup.
+recurrences. This zero-recurrence fence is verified before initialization begins.
+Never use a recurrence to recover from failed setup.
 
 Delayed start events cannot revive terminal records. After host task
 status proves that an ended task is active again, the Governor can use
