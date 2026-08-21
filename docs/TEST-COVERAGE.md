@@ -63,7 +63,8 @@ suppression, per-family cadence and coverage, bounded persistence, malformed and
 oversized input or state, duplicate and case-colliding JSON keys, strict Boolean
 and integer handling, secret-shaped values, Windows and Unix absolute-path
 identifiers, state replacement, duplicate scheduler execution, case-alias
-cross-process serialization, cross-session mutex naming, hard-link rejection,
+cross-process serialization, event-controlled mutex contention without fixed
+wall-clock hold assumptions, cross-session mutex naming, hard-link rejection,
 abandoned-mutex recovery, originating source-epoch binding, source sequence and
 counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,

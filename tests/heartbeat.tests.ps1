@@ -31,6 +31,7 @@ using System.Threading;
 public sealed class ChronosHeartbeatMutexFixture : IDisposable {
   private readonly Mutex mutex;
   private readonly ManualResetEventSlim ready = new ManualResetEventSlim(false);
+  private readonly ManualResetEventSlim release = new ManualResetEventSlim(false);
   private readonly Thread thread;
   private readonly int holdMilliseconds;
   private readonly bool abandon;
@@ -48,13 +49,15 @@ public sealed class ChronosHeartbeatMutexFixture : IDisposable {
     mutex.WaitOne();
     ready.Set();
     if (abandon) return;
-    Thread.Sleep(holdMilliseconds);
+    if (holdMilliseconds < 0) release.Wait();
+    else Thread.Sleep(holdMilliseconds);
     mutex.ReleaseMutex();
   }
 
   public bool WaitReady(int timeoutMilliseconds) { return ready.Wait(timeoutMilliseconds); }
+  public void Release() { release.Set(); }
   public void WaitDone() { thread.Join(); }
-  public void Dispose() { thread.Join(); ready.Dispose(); mutex.Dispose(); }
+  public void Dispose() { release.Set(); thread.Join(); release.Dispose(); ready.Dispose(); mutex.Dispose(); }
 }
 '@
 }
@@ -631,12 +634,15 @@ try {
   $busyInput = Join-Path $busy.Path 'busy.json'
   [IO.File]::WriteAllText($busyInput, (@{ schemaVersion = 1; capturedAtUtc = $busy.BaseTime.ToString('o'); sourceEpoch = 'busy'; sourceSequence = 1; runId = 'busy-run'; origin = 'test'; forceCadence = $true; collectorCoverage = @{ agent_stall = 'observed' }; agents = @() } | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
   $busyMutexName = 'Global\ChronosHeartbeat-' + (Get-TestHash (Get-TestCanonicalStateIdentity $busy.State)).Substring(0, 24)
-  $busyHolder = [ChronosHeartbeatMutexFixture]::new($busyMutexName, 7000, $false)
+  # Hold until the assertion completes. A fixed wall-clock hold is racy because
+  # child PowerShell startup time varies across Windows runners.
+  $busyHolder = [ChronosHeartbeatMutexFixture]::new($busyMutexName, -1, $false)
   try {
     Assert-True ($busyHolder.WaitReady(5000)) 'Cycle contention fixture did not acquire the Heartbeat mutex.'
     $busyResult = Invoke-RawModule @('-InputPath', $busyInput, '-StatePath', $busy.State)
     Assert-True ($busyResult.ExitCode -ne 0 -and $busyResult.Text -match 'heartbeat_mutex_busy' -and $busyResult.Text -match '"retryRequired":true') 'A unique overlapping cycle was silently discarded instead of returning an explicit retry contract.'
   } finally {
+    $busyHolder.Release()
     $busyHolder.WaitDone()
     $busyHolder.Dispose()
   }

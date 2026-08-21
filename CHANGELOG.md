@@ -44,6 +44,9 @@
   config files and without changing user Git config.
 - Return an explicit retry contract for a unique Heartbeat cycle that overlaps
   the bounded state mutex wait. Do not silently discard the cycle.
+- Make the Heartbeat contention regression hold its mutex until the assertion
+  explicitly releases it. The gate no longer depends on child PowerShell
+  startup completing within a fixed wall-clock window.
 - Snapshot all matching Governor recurrences, pause or remove them, and verify
   zero active matches before initialization. Any failed setup rechecks both
   pre-existing and newly created matches and never schedules its own recovery
