@@ -140,7 +140,7 @@ try {
     'repeat the all-same-name observation, current-key filtering',
     'repeat the deterministic setup-contender election',
     'prove that zero current-key recurrences are active',
-    'Have the selected task run `-SupervisionAction initialize`',
+    'Have only the elected selected task run `-SupervisionAction initialize`',
     'require the successful initialization payload',
     'recurrenceEligible=true',
     'Update the deterministic winner in place',
@@ -154,6 +154,35 @@ try {
       throw "Governor setup contract is missing or misorders the recurrence fence: $term"
     }
     $setupOffset = $nextOffset + $term.Length
+  }
+  $preElectionLoserTerms = @(
+    'the selected task is no longer first',
+    'skip `-SupervisionAction initialize` entirely',
+    'enter the loser-verification branch below'
+  )
+  $loserOffset = 0
+  foreach ($term in $preElectionLoserTerms) {
+    $nextOffset = $governorSkill.IndexOf($term, $loserOffset, [StringComparison]::Ordinal)
+    if ($nextOffset -lt 0) {
+      throw "Governor election-loser path is missing, fallthrough, or misordered: $term"
+    }
+    $loserOffset = $nextOffset + $term.Length
+  }
+  $conflictLoserTerms = @(
+    'Have only the elected selected task run `-SupervisionAction initialize`',
+    'error=supervision_governor_conflict',
+    'do not execute the generic initialization-failure cleanup in step 7',
+    'Enter the same loser-verification branch below',
+    'Never fall through from this branch to step 7',
+    'Except for the two non-fallthrough loser-verification entries above'
+  )
+  $conflictOffset = 0
+  foreach ($term in $conflictLoserTerms) {
+    $nextOffset = $governorSkill.IndexOf($term, $conflictOffset, [StringComparison]::Ordinal)
+    if ($nextOffset -lt 0) {
+      throw "Governor conflict-loser path is missing, fallthrough, or misordered: $term"
+    }
+    $conflictOffset = $nextOffset + $term.Length
   }
   $failureRows = @(
     'initialization failure',
@@ -174,7 +203,8 @@ try {
     throw 'Supervision success matrix does not activate exactly one Governor recurrence after eligibility.'
   }
   foreach ($required in @(
-    'Treat an explicit already-claimed result as a concurrent-loser outcome',
+    'This branch has exactly two entries',
+    'error=supervision_governor_conflict',
     'mutates no recurrence belonging to the verified winner',
     'exactly one current-key Governor recurrence'
   )) {

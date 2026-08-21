@@ -52,6 +52,10 @@
   mutation set. Foreign and unverified keys are never changed, a concurrent
   installer loser cannot delete the winner, and post-eligibility reconciliation
   failure returns the current-key recurrence count to zero.
+- Bind concurrent-loser handling to the native
+  `supervision_governor_conflict` error. Pre-mutation election losers skip
+  initialization; both loser entries are no-mutation and cannot fall through to
+  generic recurrence cleanup.
 
 ## v0.9.1
 

@@ -177,17 +177,20 @@ one complete host inventory per Governor cycle as its autonomous discovery
 authority. v0.9.2 keeps the Windows launcher quote-free because Codex passes it
 through an outer `cmd.exe` command boundary.
 
-First inspect all host automations named `Chronos Governor pulse` and their
-targets. Reuse a live target only after its title and assignment confirm the
-dedicated role. Otherwise reuse a claimed Governor after the same check, or
-create one fresh task without inherited history. Do not automatically fork a
-working task. After the mutex-protected claim succeeds, reconcile one matching
-automation, stop every duplicate, and re-list host state before reporting
-success. Use `chronos.cmd -Action supervise -SupervisionAction status` for compact registry
+First inspect all host automations named `Chronos Governor pulse`, but derive
+mutation authority only from the complete current installation key. Reuse a live
+target only after its title and assignment confirm the dedicated role. Otherwise
+reuse a claimed Governor after the same check, or create one fresh task without
+inherited history. Do not automatically fork a working task. Elect one contender,
+fence current-key recurrences to zero, initialize, require readable status and a
+complete Governor-bearing inventory, then reconcile one current-key automation.
+Use `chronos.cmd -Action supervise -SupervisionAction status` for compact registry
 health.
 
-`supervision_governor_conflict` means another record owns the role. Do not use
-`-Force` unless host task status proves that task is no longer live.
+`supervision_governor_conflict` means another record owns the role. It enters the
+non-fallthrough, no-mutation loser-verification branch and never runs generic
+initialization-failure recurrence cleanup. Do not use `-Force` unless host task
+status proves that task is no longer live.
 `supervision_state_invalid`, `supervision_state_path_invalid`,
 `supervision_mutex_busy`, and `supervision_crypto_unavailable` preserve or skip
 local state and never justify deleting a task or workspace file. Worker tasks

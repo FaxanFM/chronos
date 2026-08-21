@@ -97,18 +97,22 @@ The host uses this reconciliation order:
    Immediately before the first mutation, rebuild the all-same-name observation,
    current-key mutation set, and role-verified task list, then repeat the
    deterministic contender election. A new recurrence or task can therefore
-   change the winner; a newly identified loser performs no mutation. Otherwise
-   re-list host state and prove zero active current-key recurrences. Recompute
+   change the winner; a newly identified loser skips initialization and enters
+   the no-mutation loser-verification branch. Otherwise re-list host state and
+   prove zero active current-key recurrences. Recompute
    the mutation set after each host read or mutation for at most three attempts.
    Leave foreign and unverified keys unchanged. If zero cannot be proven, stop
    before initialization and schedule no recovery turn.
-5. Let the selected task claim the mutex-protected registry. This mutex fences
-   one machine and state root only. An explicit already-claimed result starts the
-   concurrent-loser path. The loser re-reads native and host state, creates no
-   recurrence, does not mutate the role-verified current-key winner, proves no
-   recurrence targets the losing task, and stands down. The winning setup owns
-   convergence to exactly one current-key Governor recurrence and zero worker
-   recurrences.
+5. Let only the elected task claim the mutex-protected registry. This mutex fences
+   one machine and state root only. Native `error=supervision_governor_conflict`
+   is the other entry to the no-mutation loser-verification branch; it is not a
+   generic initialization failure and must not run current-key cleanup. The loser
+   re-reads native and host state, creates no recurrence, does not mutate the
+   role-verified current-key winner, proves no recurrence targets the losing task,
+   and stands down. If one live role-compatible current-key winner cannot be
+   verified within three bounded reads, the loser stops with no recurrence
+   mutation and no recovery turn. The winning setup owns convergence to exactly
+   one current-key Governor recurrence and zero worker recurrences.
 6. Require readable supervision and Heartbeat
    status, then run one complete host inventory containing that Governor exactly
    once. Continue only when the cycle returns `recurrenceEligible=true`.
@@ -287,8 +291,10 @@ returning a path.
 
 Initialization alone never authorizes a recurrence. The first complete host
 inventory cycle must contain the selected Governor exactly once and return
-`recurrenceEligible=true`. Except for a verified concurrent loser that must not
-mutate the winner, a failed initialization, unreadable status, missing Governor,
+`recurrenceEligible=true`. Pre-mutation election loss skips initialization.
+Native `error=supervision_governor_conflict` enters the same no-mutation loser
+branch and is explicitly excluded from generic failure cleanup. Except for those
+two non-fallthrough cases, a failed initialization, unreadable status, missing Governor,
 or failed inventory cycle requires pausing or removing every current-key
 recurrence, including a pre-existing active recurrence. Re-list host state and
 prove zero active current-key recurrences within three bounded mutation and

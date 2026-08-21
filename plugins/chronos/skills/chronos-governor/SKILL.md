@@ -67,31 +67,41 @@ name alone is not an equivalence key. Never copy a key from another machine.
    mutation, repeat the all-same-name observation, current-key filtering, and
    role-verified task listing in steps 2 and 3, then repeat the deterministic
    setup-contender election. If a new recurrence or task changes the winner, or
-   the selected task is no longer first, take the no-mutation loser path in step
-   6. Otherwise re-list host state and prove
+   the selected task is no longer first, skip `-SupervisionAction initialize`
+   entirely and enter the loser-verification branch below. Otherwise re-list host
+   state and prove
    that zero current-key recurrences are active. Recompute the mutation set after
    every host read or mutation and use at most three bounded mutation and
    verification attempts. Leave foreign-key and unverified-key observations
    unchanged. If zero cannot be proven, stop before initialization and create no
    additional task, recurrence, or recovery turn.
-6. Have the selected task run `-SupervisionAction initialize`. The registry
-   mutex fences only one machine and state root. Treat an explicit already-claimed
-   result as a concurrent-loser outcome, not as generic initialization failure.
-   Re-read native status and host state. Only when they identify one live,
+6. Have only the elected selected task run `-SupervisionAction initialize`. The
+   registry mutex fences only one machine and state root. If native initialization
+   returns `error=supervision_governor_conflict`, do not execute the generic
+   initialization-failure cleanup in step 7 and do not retry initialization.
+   Enter the same loser-verification branch below. Any other initialization error
+   proceeds to the fail-closed current-key cleanup in step 7. Use `-Force` only
+   after host task status proves the recorded owner is not live.
+
+   **Loser verification:** This branch has exactly two entries: pre-mutation
+   election loss in step 5, which skips initialization, or the literal native
+   `error=supervision_governor_conflict` in step 6. Re-read native status and host
+   state without recurrence mutation. Only when they identify one live,
    role-verified winner with the complete current key may the loser stand down.
    The loser creates no automation, mutates no recurrence belonging to the
    verified winner, verifies that no recurrence targets the losing task and no
    worker recurrence exists, and may be archived. The winning setup alone owns
    recurrence convergence; after at most three bounded reads, final converged
-   state is exactly one current-key Governor recurrence. Use `-Force` only after
-   host task status proves the recorded owner is not live.
+   state is exactly one current-key Governor recurrence. If the winner cannot be
+   verified within the bound, stop with no recurrence mutation and no recovery
+   turn. Never fall through from this branch to step 7.
 7. Before creating or enabling any recurrence, require the successful
    initialization payload, re-read supervision and Heartbeat status, and run one
    complete host-inventory `cycle` that contains the selected Governor exactly
    once. Continue only when native state is writable, Heartbeat is readable,
    the cycle returns `recurrenceEligible=true`, and its compact status includes
-   the selected Governor. Except for the verified concurrent-loser outcome in
-   step 6, if initialization, status, Heartbeat, or the complete
+   the selected Governor. Except for the two non-fallthrough loser-verification
+   entries above, if initialization, status, Heartbeat, or the complete
    cycle fails, create no recurrence. Pause or delete every recurrence
    in the current-key mutation set, including a pre-existing active recurrence,
    then re-list host state and prove that zero current-key recurrences are
