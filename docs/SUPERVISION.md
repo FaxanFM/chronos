@@ -116,8 +116,9 @@ The host uses this reconciliation order:
    mutation and no recovery turn. The winning setup owns convergence to exactly
    one current-key Governor recurrence and zero worker recurrences.
 6. Require readable supervision and Heartbeat
-   status, then run one complete host inventory containing that Governor exactly
-   once. Continue only when the cycle returns `recurrenceEligible=true`.
+   status, then run one complete caller-aware host inventory that accounts for
+   that Governor exactly once. Continue only when the cycle returns
+   `recurrenceEligible=true`.
 7. Only after that gate succeeds, update or create the deterministic winning
    automation, pause or remove every non-winner, and re-list host state. Setup is
    complete only when exactly one active recurrence carrying the complete
@@ -216,6 +217,15 @@ chronos.cmd -Action supervise -SupervisionAction release `
 The Governor calls the host task list once, writes only opaque task IDs, safe
 status categories, optional opaque generations, a capture time, and a
 `complete=true` flag to a bounded temporary JSON file, then calls `cycle`.
+Schema v1 means the host list includes its caller and therefore requires the
+Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
+`callerVisibility=included` under the same rule, or
+`callerVisibility=excluded_by_host` only when the host list omits the current
+caller; in that case `tasks` must omit the Governor and Chronos adds only the
+registry-verified cycle caller during normalization. It never infers omission or
+makes a second status call. The result reports `hostInventoryRawObserved`,
+`hostInventoryObserved`, `hostInventoryCallerVisibility`, and
+`hostInventoryGovernorSource` so the one-call boundary is auditable.
 Missing or incomplete inventory fails closed and does not advance the cycle.
 Host task state is the liveness authority. The native action
 adds tasks missed by hooks, reactivates verified live tasks, and closes absent
@@ -301,7 +311,12 @@ ancestor left by an earlier sandbox identity. The directory retains the current
 user's inherited TEMP permissions. Task and agent identifiers remain protected
 by Windows DPAPI. A fresh v3 installation uses a deterministic host-and-Codex-home
 hash for its opaque identity, so selecting a recovery slot cannot create a
-second Governor identity. No raw machine name or Codex-home path is stored. On first
+second Governor identity. When a structurally valid v3 state is readable but its
+protected IDs belong to an unavailable sandbox identity, Chronos preserves that
+state, selects the next bounded slot, and copies only the validated installation
+anchor with `installationScopeSource=recovered_v3_anchor` so recurrence identity
+stays stable. An explicit state path still fails
+closed. No raw machine name or Codex-home path is stored. On first
 use after an upgrade, Chronos imports a readable prior installation anchor and
 state without changing the v2, fixed-TEMP, or LocalAppData source. This preserves
 the existing Governor equivalence key for the eligible default home. Custom
@@ -314,8 +329,9 @@ protection mode, migration result, and prior-state disposition. It does not
 return a path.
 
 Initialization alone never authorizes a recurrence. The first complete host
-inventory cycle must contain the selected Governor exactly once and return
-`recurrenceEligible=true`. Pre-mutation election loss skips initialization.
+inventory cycle must account for the selected Governor exactly once under the
+caller-visibility contract and return `recurrenceEligible=true`. Pre-mutation
+election loss skips initialization.
 Native `error=supervision_governor_conflict` enters the same no-mutation loser
 branch and is explicitly excluded from generic failure cleanup. Except for those
 two non-fallthrough cases, a failed initialization, unreadable status, missing Governor,

@@ -64,9 +64,9 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('fully set up chronos', 'restart', 'governor recurrence only if', 'supervision', 'heartbeat', 'inventory pass', 'no worker recurrence') },
+    @{ Index = 0; Terms = @('set up chronos', 'post-restart', 'supervision', 'heartbeat', 'run inventory', 'activate one governor recurrence', 'no worker recurrence') },
     @{ Index = 1; Terms = @('complete chronos status', 'machine health', 'workflow', 'quota', 'approval', 'rule', 'sqlite', 'supervision') },
-    @{ Index = 2; Terms = @('chronos governor', 'delegate', 'read-only', 'bounded workers', 'verify') }
+    @{ Index = 2; Terms = @('chronos governor', 'read-only', 'delegate only', 'v2 support', 'otherwise complete', 'verify') }
   )
   foreach ($promptRequirement in $promptRequirements) {
     $promptIndex = [int]$promptRequirement.Index
@@ -113,6 +113,8 @@ try {
     'deterministic host-and-Codex-home hash',
     'recurrenceEligible=true',
     'one compact complete host task-list call',
+    'callerVisibility=excluded_by_host',
+    'hostInventoryRawObserved',
     'gpt-5.6-terra',
     'configuration',
     'hookExecutionObservation=observed',
@@ -132,12 +134,23 @@ try {
     'Separate homes remain isolated'
     'ancestor junction'
     'Unscoped v2, fixed-TEMP, and LocalAppData state predates'
+    'recovered_v3_anchor'
   )) {
     if (-not $supervisionContract.Contains($required)) {
       throw "Public supervision contract is missing a release boundary: $required"
     }
   }
   $governorSkill = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos-governor\SKILL.md')) -replace '\s+', ' '
+  foreach ($transportPreflightTerm in @(
+    'Before calling Governor `status` or `plan`',
+    'fork_turns="none"',
+    'do not reserve a plan',
+    'Do not create and cancel a plan merely to discover transport incompatibility'
+  )) {
+    if (-not $governorSkill.Contains($transportPreflightTerm)) {
+      throw "Governor skill is missing the pre-plan V2 fallback boundary: $transportPreflightTerm"
+    }
+  }
   foreach ($hardGateTerm in @(
     '**Hard gate:**',
     'Do not create or enable any Governor recurrence until native initialization succeeds',

@@ -200,7 +200,8 @@ identity or outbox cannot be cloned into several installations.
 `chronos.cmd -Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
-is advisory; one complete host inventory per Governor cycle is authoritative.
+is advisory; one complete caller-aware host inventory per Governor cycle is
+authoritative.
 Hooks are optional acceleration and are not required for autonomy. Terminal lifecycle state has
 precedence over delayed start events. Bootstrap reconciles matching host
 automations first, reuses a role-verified Governor, otherwise creates one fresh
@@ -212,6 +213,10 @@ fork a working task. Each Governor cycle supplies one bounded host inventory so
 missed or disabled hooks do not require manual task registration. The host owns
 task creation, Terra Medium selection, one optional recurrence, compact rotating
 task batches, and delivery. Worker tasks run no Chronos model cycle. The
+inventory uses schema v1 when the host includes the caller. Schema v2 explicitly
+declares caller exclusion and adds only the registry-verified Governor inside
+the
+same cycle, so no second host-status query is needed. The
 recurrence is bounded to 336 cycles or 14 days. See
 [Supervision](SUPERVISION.md).
 

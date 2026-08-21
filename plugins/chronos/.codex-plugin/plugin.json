@@ -22,9 +22,9 @@
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.",
+      "Set up Chronos post-restart: check supervision/Heartbeat, run inventory, activate one Governor recurrence, no worker recurrence.",
       "Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.",
-      "Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task."
+      "Use Chronos Governor for suitable read-only work; delegate only with safe V2 support, otherwise complete and verify it here."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

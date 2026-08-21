@@ -57,9 +57,10 @@ reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
 This is a hard gate, not a best-effort sequence: the host must create or enable
 no recurrence until initialization succeeds, supervision and Heartbeat status
-are readable, one complete inventory contains the selected Governor exactly
-once, and the cycle returns `recurrenceEligible=true`. Any earlier failure must
-end with zero active current-key recurrences and no recovery recurrence.
+are readable, one complete caller-aware inventory accounts for the selected
+Governor exactly once, and the cycle returns `recurrenceEligible=true`. Any
+earlier failure must end with zero active current-key recurrences and no recovery
+recurrence.
 Do not stop after an inspection or return setup instructions for the user to
 relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
 complete setup through authoritative host inventory without asking the user to
@@ -112,7 +113,10 @@ automations.
 
 Only the Governor task runs `-SupervisionAction initialize`, `cycle`,
 `reconcile-host`, and `discover`. Every Governor recurrence must use `cycle`
-with one fresh complete host inventory. Passive `discover` does not increment
+with one fresh complete host inventory. Schema v1 requires the Governor in the
+raw list. Schema v2 may declare `callerVisibility=excluded_by_host`, omit only
+the current Governor, and let the same cycle account for that registry-verified
+caller without a second host query. Passive `discover` does not increment
 the Governor cycle counter. The `.cmd` launcher always applies the required noninteractive
 Windows PowerShell 5.1 execution-policy flags.
 Host task tools remain the authority for whether a task is live. The registry

@@ -29,7 +29,7 @@ legacy identity or outbox cannot be cloned into custom installations. It retains
 improved first-use prompts, listing copy, full-setup contract, and deterministic
 prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`ca2f290a0651fce58052869dfcb28a918239e519b3b86212203959caee4d7f2f`.
+`3c8cc8831006ca84d6ca930b0d33f25a2f47ed37d21f51167cf1d94600189fc9`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -119,9 +119,9 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.`
+1. `Set up Chronos post-restart: check supervision/Heartbeat, run inventory, activate one Governor recurrence, no worker recurrence.`
 2. `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
-3. `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
+3. `Use Chronos Governor for suitable read-only work; delegate only with safe V2 support, otherwise complete and verify it here.`
 
 All three are unique, single-line, at most 128 characters, and contain no app
 mention.
@@ -130,7 +130,7 @@ mention.
 
 ### 1. Complete first-use setup
 
-- Prompt: `Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.`
+- Prompt: `Set up Chronos post-restart: check supervision/Heartbeat, run inventory, activate one Governor recurrence, no worker recurrence.`
 - Expected behavior: verify the installed source and native status, perform
   optional hook trust review when the host presents it, reuse or create one history-free Governor, and
   reconcile the installation-scoped recurrence without prompting worker tasks.
@@ -178,10 +178,11 @@ mention.
 
 ### 5. Delegate and verify bounded read work
 
-- Prompt: `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
-- Expected behavior: inspect Governor status, use only models advertised by the
-  active runtime, use a repository-relative scope, lease only eligible work,
-  and independently verify the returned result in the coordinator task.
+- Prompt: `Use Chronos Governor for suitable read-only work; delegate only with safe V2 support, otherwise complete and verify it here.`
+- Expected behavior: preflight the active V2 worker contract before Governor
+  status or planning. Without safe V2 support, complete and verify the work in
+  the coordinator without reserving a plan. With V2, use only advertised models,
+  a repository-relative scope, eligible read work, and coordinator verification.
 - Expected result: one bounded read-only delegation or an auditable decision to
   keep the work with the coordinator. No worker project mutation, merge,
   commit, or claim of sandbox enforcement.
@@ -265,8 +266,8 @@ Do not infer worldwide availability from publication.
 > labels hooks as optional acceleration and makes complete host inventory the
 > autonomous task-discovery authority on every Governor cycle. Install or
 > upgrade requires a full Codex quit and reopen before a fresh task so the host
-> does not retain a removed versioned skill catalog. v0.9.2 also retains
-> v0.9.1's first starter prompt, which completes the real
+> does not retain a removed versioned skill catalog. v0.9.2 uses the revised
+> first starter prompt, which completes the real
 > setup: installed-source verification, native status, one dedicated Governor,
 > one supervision and Heartbeat recurrence, and zero worker recurrences. The
 > second prompt returns one separated diagnostic status instead of a narrow

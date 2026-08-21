@@ -45,7 +45,7 @@ sources: Codex treats `chronos@chronos` and
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
-- Uses one complete host inventory per Governor cycle as task-discovery
+- Uses one complete caller-aware host inventory per Governor cycle as task-discovery
   authority. Five reviewed headless hooks optionally accelerate task and
   subagent lifecycle hints with no model-visible output or worker recurrence.
   A host that does not dispatch them still needs no user task registration.
@@ -116,7 +116,8 @@ only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
-complete host inventory contains the verified Governor. Any failed or partial
+complete caller-aware host inventory accounts for the verified Governor exactly
+once. Any failed or partial
 setup pauses or removes every current-key recurrence, including one that existed
 before the attempt, and verifies zero current-key Chronos recurrences. A verified
 concurrent loser leaves the winner unchanged and stands down. Normal Codex
@@ -166,6 +167,9 @@ Use Chronos Governor to delegate this bounded low-complexity task.
 ```
 
 Governor validates the worker models advertised by the active runtime and
+preflights Multi-Agent V2 before reserving a plan. Without safe V2 support it
+completes and verifies the work in the coordinator task without spawning or
+canceling a worker plan. With V2 available, it
 selects deterministically from that inventory. It sends focused read-only
 assignments with `fork_turns=none`. It is a coordination aid, not a sandbox or
 security boundary; all edits, integration, publishing, and final acceptance

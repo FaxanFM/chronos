@@ -53,8 +53,10 @@ $script:PriorV2InstallationScopePath = $null
 $script:AllowUnscopedLegacyMigration = $false
 $script:PriorStateDisposition = 'not_checked'
 $script:PriorStateWriteAttempted = $false
+$script:PriorMigrationBlocked = $false
 $script:DefaultStateCandidates = @()
 $script:DefaultInstallationScopeId = $null
+$script:RecoveredV3InstallationScopeId = $null
 $script:InstallationScopeSource = 'unresolved'
 $script:StateStoreSlot = -1
 $script:StateStoreRecovery = 'not_applicable'
@@ -351,6 +353,19 @@ function Initialize-StateStore {
         $readProbe = New-Object IO.FileStream($existingPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
         $readProbe.Dispose()
       }
+      if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        $existingState = Read-State $candidate -PreserveUnavailable
+        try {
+          Assert-StateProtectedIdentity $existingState
+        } catch {
+          if ([string]$_.Exception.Message -ne 'supervision_state_identity_unavailable') { throw }
+          $scopePath = Join-Path $directory 'installation-scope.json'
+          if ($null -eq $script:RecoveredV3InstallationScopeId -and (Test-Path -LiteralPath $scopePath -PathType Leaf)) {
+            try { $script:RecoveredV3InstallationScopeId = Read-InstallationScopeId $scopePath } catch {}
+          }
+          throw
+        }
+      }
       $script:StateStoreWriteReady = $true
       $script:StateStoreSlot = $slot
       if ($script:StateStoreMode -eq 'temp_private') {
@@ -359,7 +374,17 @@ function Initialize-StateStore {
       }
       return $candidate
     } catch {
-      if ($script:StateStoreMode -ne 'temp_private') { throw 'supervision_state_store_unwritable' }
+      $failureCode = [string]$_.Exception.Message
+      if ($script:StateStoreMode -ne 'temp_private') {
+        if ($failureCode -in @('supervision_state_invalid', 'supervision_state_identity_unavailable')) { throw 'supervision_state_invalid' }
+        throw 'supervision_state_store_unwritable'
+      }
+      if ($failureCode -eq 'supervision_state_invalid') { throw }
+      if ($failureCode -ne 'supervision_state_identity_unavailable' -and
+          $failureCode -ne 'supervision_state_store_unwritable' -and
+          -not (Test-PriorStoreUnavailableError $_)) {
+        throw 'supervision_state_store_unwritable'
+      }
     } finally {
       if ($probe) { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
     }
@@ -433,17 +458,23 @@ function Get-OrCreateInstallationScopeId {
     return Read-InstallationScopeId $path
   }
   if ($script:StateStoreMode -eq 'temp_private') {
+    if (-not [string]::IsNullOrWhiteSpace($script:RecoveredV3InstallationScopeId)) {
+      $script:InstallationScopeSource = 'recovered_v3_anchor'
+      return Write-InstallationScopeId $path $script:RecoveredV3InstallationScopeId
+    }
     $priorScopePaths = @($script:PriorV2InstallationScopePath)
     if ($script:AllowUnscopedLegacyMigration) {
       $priorScopePaths += @($script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)
     }
-    foreach ($priorPath in $priorScopePaths) {
+    foreach ($priorPath in $(if ($script:PriorMigrationBlocked) { @() } else { $priorScopePaths })) {
       if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
       try {
         $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
         if ($priorItem.PSIsContainer -or ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $priorPath)) {
           $script:StateStoreMigration = 'prior_state_invalid_new_root'
-          continue
+          $script:PriorStateDisposition = 'invalid_preserved'
+          $script:PriorMigrationBlocked = $true
+          break
         }
         $priorId = Read-InstallationScopeId $priorPath
         if ($script:StateStoreMigration -in @('namespace_v3_new_root', 'default_state_slot_recovered')) {
@@ -456,10 +487,14 @@ function Get-OrCreateInstallationScopeId {
         if (Test-PriorStoreUnavailableError $_) {
           $script:StateStoreMigration = 'prior_state_unavailable_new_root'
           $script:PriorStateDisposition = 'unavailable_preserved'
-          continue
+          $script:PriorMigrationBlocked = $true
+          break
         }
         if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) {
           $script:StateStoreMigration = 'prior_state_invalid_new_root'
+          $script:PriorStateDisposition = 'invalid_preserved'
+          $script:PriorMigrationBlocked = $true
+          break
         }
       }
     }
@@ -608,6 +643,21 @@ function Assert-ExactKeys {
   }
 }
 
+function Assert-StateProtectedIdentity {
+  param($State)
+  $protectedIds = [Collections.Generic.List[object]]::new()
+  if ($null -ne $State.governor) {
+    $protectedIds.Add([pscustomobject]@{ Hash = [string]$State.governor.idHash; ProtectedId = [string]$State.governor.protectedId }) | Out-Null
+  }
+  foreach ($key in @($State.sessions.Keys)) {
+    $protectedIds.Add([pscustomobject]@{ Hash = [string]$key; ProtectedId = [string]$State.sessions[$key].protectedId }) | Out-Null
+  }
+  foreach ($entry in $protectedIds) {
+    try { $plainId = Unprotect-OpaqueId $entry.ProtectedId } catch { throw 'supervision_state_identity_unavailable' }
+    if ((Get-TextHash $plainId) -ne $entry.Hash) { throw 'supervision_state_invalid' }
+  }
+}
+
 function Assert-State {
   param($State, [switch]$ValidateProtectedIds)
   Assert-ExactKeys $State @('schema', 'revision', 'governor', 'sessions', 'health')
@@ -632,7 +682,6 @@ function Assert-State {
     Assert-ExactKeys $State.governor @('idHash', 'protectedId', 'claimedAtUtc', 'lastSeenUtc', 'cycleCount', 'idleCycles', 'lastCycleUtc')
     if ([string]$State.governor.idHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     if (-not (Test-ProtectedIdShape $State.governor.protectedId)) { throw 'supervision_state_invalid' }
-    if ($ValidateProtectedIds -and (Get-TextHash (Unprotect-OpaqueId $State.governor.protectedId)) -ne [string]$State.governor.idHash) { throw 'supervision_state_invalid' }
     [void](ConvertTo-UtcTimestamp $State.governor.claimedAtUtc)
     [void](ConvertTo-UtcTimestamp $State.governor.lastSeenUtc)
     if (-not (Test-IsInteger $State.governor.cycleCount) -or [long]$State.governor.cycleCount -lt 0 -or
@@ -644,7 +693,6 @@ function Assert-State {
     $record = $State.sessions[$key]
     Assert-ExactKeys $record @('idHash', 'protectedId', 'kind', 'parentHash', 'workspaceHash', 'model', 'state', 'source', 'generationHash', 'firstSeenUtc', 'lastSeenUtc', 'endedAtUtc', 'lastEventUtc', 'lastEventRank', 'recordRevision', 'lastSignalHash', 'turnSignals')
     if ([string]$record.idHash -ne [string]$key -or -not (Test-ProtectedIdShape $record.protectedId)) { throw 'supervision_state_invalid' }
-    if ($ValidateProtectedIds -and (Get-TextHash (Unprotect-OpaqueId $record.protectedId)) -ne [string]$key) { throw 'supervision_state_invalid' }
     if ([string]$record.kind -notin @('task', 'agent') -or [string]$record.state -notin @('active', 'ended')) { throw 'supervision_state_invalid' }
     if ($null -ne $record.parentHash -and [string]$record.parentHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
     if ($null -ne $record.generationHash -and [string]$record.generationHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_state_invalid' }
@@ -660,6 +708,7 @@ function Assert-State {
     if (-not (Test-IsInteger $record.turnSignals) -or [long]$record.turnSignals -lt 0) { throw 'supervision_state_invalid' }
   }
   if ($null -ne $State.governor -and -not $State.sessions.Contains([string]$State.governor.idHash)) { throw 'supervision_state_invalid' }
+  if ($ValidateProtectedIds) { Assert-StateProtectedIdentity $State }
 }
 
 function Read-State {
@@ -730,7 +779,9 @@ function Import-LegacyStateIfPresent {
       $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
       if ($priorItem.PSIsContainer -or ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $priorPath)) {
         $script:StateStoreMigration = 'prior_state_invalid_new_root'
-        continue
+        $script:PriorStateDisposition = 'invalid_preserved'
+        $script:PriorMigrationBlocked = $true
+        return
       }
       $legacy = Read-State $priorPath -ValidateProtectedIds -PreserveUnavailable
       Write-State $legacy $ResolvedStatePath
@@ -741,10 +792,14 @@ function Import-LegacyStateIfPresent {
       if (Test-PriorStoreUnavailableError $_) {
         $script:StateStoreMigration = 'prior_state_unavailable_new_root'
         $script:PriorStateDisposition = 'unavailable_preserved'
-        continue
+        $script:PriorMigrationBlocked = $true
+        return
       }
       if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) {
         $script:StateStoreMigration = 'prior_state_invalid_new_root'
+        $script:PriorStateDisposition = 'invalid_preserved'
+        $script:PriorMigrationBlocked = $true
+        return
       }
     }
   }
@@ -946,8 +1001,16 @@ function Read-HostInventory {
     $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
     Assert-StrictJson $text 'supervision_host_inventory_invalid'
     $inventory = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
-    Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'tasks')
-    if (-not (Test-IsInteger $inventory.schemaVersion) -or [int]$inventory.schemaVersion -ne 1 -or -not ($inventory.complete -is [bool])) { throw 'invalid' }
+    Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'callerVisibility', 'tasks')
+    if (-not (Test-IsInteger $inventory.schemaVersion) -or [int]$inventory.schemaVersion -notin @(1, 2) -or -not ($inventory.complete -is [bool])) { throw 'invalid' }
+    $schemaVersion = [int]$inventory.schemaVersion
+    $callerVisibility = 'included'
+    if ($schemaVersion -eq 1) {
+      if ($inventory.Contains('callerVisibility')) { throw 'invalid' }
+    } else {
+      if (-not $inventory.Contains('callerVisibility') -or [string]$inventory.callerVisibility -notin @('included', 'excluded_by_host')) { throw 'invalid' }
+      $callerVisibility = [string]$inventory.callerVisibility
+    }
     $captured = ConvertTo-UtcTimestamp $inventory.capturedAtUtc
     if ($captured -gt $Now.AddMinutes(5) -or $captured -lt $Now.AddMinutes(-15)) { throw 'invalid' }
     $tasks = @($inventory.tasks)
@@ -973,10 +1036,47 @@ function Read-HostInventory {
         Generation = $generation
       }) | Out-Null
     }
-    return [pscustomobject]@{ CapturedAt = $captured; Complete = [bool]$inventory.complete; Tasks = @($normalized) }
+    return [pscustomobject]@{
+      SchemaVersion = $schemaVersion
+      CapturedAt = $captured
+      Complete = [bool]$inventory.complete
+      CallerVisibility = $callerVisibility
+      RawObserved = $normalized.Count
+      Tasks = @($normalized)
+    }
   } catch {
     if ([string]$_.Exception.Message -match '^supervision_host_inventory_') { throw }
     throw 'supervision_host_inventory_invalid'
+  }
+}
+
+function Complete-HostInventoryForGovernor {
+  param($Inventory, [string]$CurrentGovernorId)
+  $governorCount = @($Inventory.Tasks | Where-Object { [string]$_.Id -eq $CurrentGovernorId }).Count
+  $tasks = @($Inventory.Tasks)
+  $governorSource = 'inventory'
+  if ([string]$Inventory.CallerVisibility -eq 'included') {
+    if ($governorCount -ne 1) { throw 'supervision_governor_not_in_host_inventory' }
+  } elseif ([string]$Inventory.CallerVisibility -eq 'excluded_by_host') {
+    if ($governorCount -ne 0) { throw 'supervision_host_inventory_invalid' }
+    $tasks += [pscustomobject]@{
+      Id = $CurrentGovernorId
+      Active = $true
+      Status = 'live'
+      Generation = $null
+    }
+    $governorSource = 'intrinsic_cycle_caller'
+  } else {
+    throw 'supervision_host_inventory_invalid'
+  }
+  return [pscustomobject]@{
+    SchemaVersion = [int]$Inventory.SchemaVersion
+    CapturedAt = $Inventory.CapturedAt
+    Complete = [bool]$Inventory.Complete
+    CallerVisibility = [string]$Inventory.CallerVisibility
+    GovernorSource = $governorSource
+    RawObserved = [int]$Inventory.RawObserved
+    Tasks = @($tasks)
   }
 }
 
@@ -1568,12 +1668,15 @@ try {
   }
   if ($Action -eq 'reconcile-host') {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
-    $inventory = Read-HostInventory $HostInventoryPath $now
+    $inventory = Complete-HostInventoryForGovernor (Read-HostInventory $HostInventoryPath $now) $current
     $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
     $state.governor.lastSeenUtc = $now.ToString('o')
     $payload = Get-DiscoveryPayload $state 'reconcile-host' $current $SinceRevision $now
     $payload['hostInventoryObserved'] = [int]$reconciled.Observed
+    $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
+    $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
+    $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostTasksAdded'] = [int]$reconciled.Added
     $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated
     $payload['hostTaskGenerationsChanged'] = [int]$reconciled.GenerationChanged
@@ -1609,7 +1712,7 @@ try {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
     $inventory = Read-HostInventory $HostInventoryPath $now
     if (-not [bool]$inventory.Complete) { throw 'supervision_host_inventory_incomplete' }
-    if (@($inventory.Tasks | Where-Object { [string]$_.Id -eq $current }).Count -ne 1) { throw 'supervision_governor_not_in_host_inventory' }
+    $inventory = Complete-HostInventoryForGovernor $inventory $current
     $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
     $state.governor.cycleCount = [long]$state.governor.cycleCount + 1
     $state.governor.lastCycleUtc = $now.ToString('o')
@@ -1618,7 +1721,10 @@ try {
     $state.governor.idleCycles = if ($activeCount -gt 0) { 0L } else { [long]$state.governor.idleCycles + 1 }
     $payload = Get-DiscoveryPayload $state 'cycle' $current $SinceRevision $now
     $payload['hostInventoryObserved'] = [int]$reconciled.Observed
+    $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = $true
+    $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
+    $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostInventoryCycle'] = [long]$state.governor.cycleCount
     $payload['hostTasksAdded'] = [int]$reconciled.Added
     $payload['hostTasksReactivated'] = [int]$reconciled.Reactivated

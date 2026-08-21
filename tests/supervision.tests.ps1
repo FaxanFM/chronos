@@ -362,6 +362,29 @@ try {
     Remove-Item -LiteralPath $readableV2Temp -Recurse -Force -ErrorAction SilentlyContinue
   }
 
+  # An existing higher-precedence namespace is authoritative even when invalid.
+  # A readable lower-precedence registry must not mask its preserved disposition.
+  $precedenceTemp = Join-Path $root 'prior precedence temp'
+  $precedenceScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, (Get-TestCodexHome).Path)
+  $precedenceV2State = Join-Path $precedenceTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $precedenceScopeHash 'session-registry.json'))
+  $precedenceFixedState = Join-Path $precedenceTemp 'Chronos\Supervision\session-registry.json'
+  New-Item -ItemType Directory -Path (Split-Path -Parent $precedenceV2State), (Split-Path -Parent $precedenceFixedState) -Force | Out-Null
+  [IO.File]::WriteAllText($precedenceV2State, '{"schema":4,"invalid":true}', [Text.UTF8Encoding]::new($false))
+  $precedenceLowerSeed = Invoke-Supervision $precedenceFixedState 'initialize' 'lower-precedence-governor'
+  Assert-True ($precedenceLowerSeed.ExitCode -eq 0) 'Could not seed the lower-precedence registry fixture.'
+  $precedenceV2Hash = (Get-FileHash -LiteralPath $precedenceV2State -Algorithm SHA256).Hash
+  $precedenceFixedHash = (Get-FileHash -LiteralPath $precedenceFixedState -Algorithm SHA256).Hash
+  try {
+    $precedenceResult = Invoke-SupervisionInTempRoot $precedenceTemp
+    Assert-True ($precedenceResult.ExitCode -eq 0) 'Invalid authoritative prior state blocked isolated v3 status.'
+    $precedencePayload = Get-Payload $precedenceResult
+    Assert-True ($precedencePayload.stateStoreMigration -eq 'prior_state_invalid_new_root' -and $precedencePayload.priorStateDisposition -eq 'invalid_preserved') 'A lower-precedence registry masked invalid authoritative prior-state evidence.'
+    Assert-True (-not $precedencePayload.governorClaimed -and $precedencePayload.installationScopeSource -eq 'deterministic_host_codex_home_hash') 'Blocked prior migration mixed in lower-precedence Governor ownership or installation identity.'
+  } finally {
+    Assert-True ((Get-FileHash -LiteralPath $precedenceV2State -Algorithm SHA256).Hash -eq $precedenceV2Hash -and (Get-FileHash -LiteralPath $precedenceFixedState -Algorithm SHA256).Hash -eq $precedenceFixedHash) 'Prior-state precedence validation modified a source registry.'
+    Remove-Item -LiteralPath $precedenceTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
   # An inaccessible active v2 namespace from a previous sandbox identity must
   # be preserved while the v3 default initializes under a writable direct TEMP
   # child with a deterministic installation identity.
@@ -544,6 +567,33 @@ try {
     Remove-Item -LiteralPath $slotTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
 
+  # A structurally valid v3 state encrypted for an unavailable sandbox identity
+  # is preserved in place while the next bounded slot reuses its installation anchor.
+  $identitySlotTemp = Join-Path $root 'identity slot temp'
+  New-Item -ItemType Directory -Path $identitySlotTemp -Force | Out-Null
+  try {
+    $identitySeed = Invoke-SupervisionInTempRoot $identitySlotTemp '' 'initialize' 'identity-slot-governor'
+    Assert-True ($identitySeed.ExitCode -eq 0) 'Could not seed the v3 identity-recovery fixture.'
+    $identitySeedPayload = Get-Payload $identitySeed
+    $identitySlotZeroState = Get-DefaultSupervisionStatePath $identitySlotTemp 0
+    $identityState = Get-Content -Raw -LiteralPath $identitySlotZeroState | ConvertFrom-Json
+    $identityState.governor.protectedId = [Convert]::ToBase64String([byte[]](0..31))
+    [IO.File]::WriteAllText($identitySlotZeroState, ($identityState | ConvertTo-Json -Compress -Depth 12), [Text.UTF8Encoding]::new($false))
+    $identitySlotZeroHash = (Get-FileHash -LiteralPath $identitySlotZeroState -Algorithm SHA256).Hash
+    $explicitIdentityFailure = Get-Payload (Invoke-Supervision $identitySlotZeroState)
+    Assert-True (-not $explicitIdentityFailure.ok -and $explicitIdentityFailure.error -eq 'supervision_state_invalid') 'Explicit state did not fail closed on an inaccessible protected identity.'
+    $identityRecovery = Invoke-SupervisionInTempRoot $identitySlotTemp
+    Assert-True ($identityRecovery.ExitCode -eq 0) 'Default v3 state did not recover from an inaccessible protected identity.'
+    $identityRecoveryPayload = Get-Payload $identityRecovery
+    Assert-True ($identityRecoveryPayload.stateStoreSlot -eq 1 -and $identityRecoveryPayload.stateStoreMigration -eq 'default_state_slot_recovered') 'Protected-identity recovery did not select the next bounded slot.'
+    Assert-True ($identityRecoveryPayload.installationScopeSource -eq 'recovered_v3_anchor' -and $identityRecoveryPayload.hostEquivalenceKey -eq $identitySeedPayload.hostEquivalenceKey) 'Protected-identity recovery orphaned the installation equivalence key.'
+    $identityInitialize = Invoke-SupervisionInTempRoot $identitySlotTemp '' 'initialize' 'identity-slot-governor-recovered'
+    Assert-True ($identityInitialize.ExitCode -eq 0 -and (Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $identitySlotTemp 1) -PathType Leaf)) 'Recovered protected-identity slot could not initialize.'
+    Assert-True ((Get-FileHash -LiteralPath $identitySlotZeroState -Algorithm SHA256).Hash -eq $identitySlotZeroHash) 'Protected-identity recovery modified the preserved source state.'
+  } finally {
+    Remove-Item -LiteralPath $identitySlotTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
   $concurrentDefaultTemp = Join-Path $root 'concurrent default temp'
   New-Item -ItemType Directory -Path $concurrentDefaultTemp -Force | Out-Null
   try {
@@ -657,6 +707,21 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $governorOmitted = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $governorOmittedInventory)
   Assert-True (-not $governorOmitted.ok -and $governorOmitted.error -eq 'supervision_governor_not_in_host_inventory') 'A complete inventory that omitted its Governor advanced the cycle.'
+  $callerExcludedInventory = Join-Path $root 'caller-excluded-inventory.json'
+  [IO.File]::WriteAllText($callerExcludedInventory, ([ordered]@{
+    schemaVersion = 2; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true; callerVisibility = 'excluded_by_host'
+    tasks = @([ordered]@{ id = 'thread-other-live'; status = 'running'; generation = 'generation-other' })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $callerExcludedCycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $callerExcludedInventory)
+  Assert-True ($callerExcludedCycle.ok -and $callerExcludedCycle.hostInventoryRawObserved -eq 1 -and $callerExcludedCycle.hostInventoryObserved -eq 2) 'Caller-excluded inventory did not remain one authoritative raw call with one intrinsic Governor.'
+  Assert-True ($callerExcludedCycle.hostInventoryCallerVisibility -eq 'excluded_by_host' -and $callerExcludedCycle.hostInventoryGovernorSource -eq 'intrinsic_cycle_caller') 'Caller-excluded inventory did not report its normalization source.'
+  Assert-True (@($callerExcludedCycle.hostTaskStatuses).Count -eq 2 -and @($callerExcludedCycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and $callerExcludedCycle.recurrenceEligible) 'Caller-excluded inventory did not return one compact status per live task or authorize recurrence.'
+  [IO.File]::WriteAllText($callerExcludedInventory, ([ordered]@{
+    schemaVersion = 2; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true; callerVisibility = 'excluded_by_host'
+    tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = $null })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $callerVisibilityMismatch = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $callerExcludedInventory)
+  Assert-True (-not $callerVisibilityMismatch.ok -and $callerVisibilityMismatch.error -eq 'supervision_host_inventory_invalid') 'A caller-visibility contradiction advanced the cycle.'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $false
     tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = 'cycle-governor-generation' })
@@ -672,7 +737,7 @@ try {
     )
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $cycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $hostInventoryPath)
-  Assert-True ($cycle.ok -and $cycle.governorCycleCount -eq 1 -and $cycle.hostInventoryCycle -eq 1 -and $cycle.hostInventoryComplete -and $cycle.hostInventoryObserved -eq 3) 'A complete host inventory did not advance exactly one Governor cycle.'
+  Assert-True ($cycle.ok -and $cycle.governorCycleCount -eq 2 -and $cycle.hostInventoryCycle -eq 2 -and $cycle.hostInventoryComplete -and $cycle.hostInventoryObserved -eq 3 -and $cycle.hostInventoryRawObserved -eq 3) 'A complete host inventory did not advance exactly one additional Governor cycle.'
   Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'A verified complete inventory cycle did not authorize the one Governor recurrence.'
   Assert-True (@($cycle.hostTaskStatuses).Count -eq 3 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'ended').Count -eq 1) 'The cycle did not return one normalized status per host task.'
   Assert-True (($cycle.hostTaskStatuses | ConvertTo-Json -Compress) -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Compact host statuses exposed a raw task ID or generation.'

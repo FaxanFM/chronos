@@ -12,7 +12,8 @@ loops, quota and context pressure, broken permission rules, rollout duplication,
 diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
 stay passive. Chronos sends no publisher telemetry.
 
-One complete host inventory per Governor cycle is the task-discovery authority.
+One complete caller-aware host inventory per Governor cycle is the
+task-discovery authority.
 Lifecycle hooks are an optional accelerator: a Windows host may show them as
 active and trusted without dispatching them. Missing hook execution never
 disables autonomous discovery or asks the user to register tasks.
@@ -119,8 +120,9 @@ paths, identifiers, prompts, commands, credentials, or private source.
   bounded instruction to the exact verified affected task. Stable event IDs,
   one active intervention per target generation, and bounded retries prevent wake storms.
 - Reconciles every task from one complete bounded host inventory inside each
-  Governor cycle. The native result returns hash-only normalized task statuses;
-  routine cycles do not wake monitored tasks.
+  Governor cycle. If the host list omits its caller, schema v2 accounts for the
+  known Governor inside that same call. The native result returns hash-only
+  normalized task statuses; routine cycles do not wake monitored tasks.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
@@ -192,7 +194,8 @@ only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
-complete host inventory contains the verified Governor. Any failed or partial
+complete caller-aware host inventory accounts for the verified Governor exactly
+once. Any failed or partial
 setup pauses or removes every current-key recurrence, including one that existed
 before the attempt, and verifies zero current-key Chronos recurrences. A verified
 concurrent loser leaves the winner unchanged and stands down. Normal Codex
@@ -246,6 +249,9 @@ Use Chronos Governor to delegate this bounded low-complexity task.
 ```
 
 Governor validates the worker models advertised by the active runtime and
+preflights Multi-Agent V2 before reserving a plan. Without safe V2 support it
+completes and verifies the work in the coordinator task without spawning or
+canceling a worker plan. With V2 available, it
 selects deterministically from that inventory. It sends focused read-only
 assignments with `fork_turns=none`. It is a coordination aid, not a sandbox or
 security boundary; all edits, integration, publishing, and final acceptance

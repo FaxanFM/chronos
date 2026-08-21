@@ -22,8 +22,12 @@ one every six hours while idle. Worker tasks receive no recurring turns.
 
 **Hard gate:** Do not create or enable any Governor recurrence until native
 initialization succeeds, supervision and Heartbeat status are readable, and one
-complete host-inventory cycle contains the selected Governor exactly once and
-returns `recurrenceEligible=true`. Any other result requires zero active
+complete host-inventory cycle accounts for the selected Governor exactly once
+and returns `recurrenceEligible=true`. The raw inventory uses schema v1 when the
+host includes its caller, or schema v2 with
+`callerVisibility=excluded_by_host` when the host task list omits the current
+Governor; v2 normalization adds only that registry-verified cycle caller and
+makes no second host-status call. Any other result requires zero active
 current-key recurrences, verified from fresh host state. Never use a recurrence
 to retry, recover, or finish a failed setup.
 
@@ -40,10 +44,12 @@ when the override is invalid, unavailable, or cannot be resolved consistently.
 This includes a reparse point in any path component. Do not treat unscoped
 legacy state as belonging to an explicit or environment-provided Codex home.
 
-1. Run `chronos.cmd -Action install-status`, compact Inspector status, and
-   Heartbeat status. A confirmed enabled-source conflict or unhealthy native
+1. Run `chronos.cmd -Action install-status`, compact supervision status, and
+   Heartbeat status. A confirmed enabled-source conflict or unreadable native
    state fails closed before host mutation. Cached copies alone are not proof
-   of a conflict.
+   of a conflict. Do not run the broad Inspector or packaged validation suites
+   during normal first-use setup; use Inspector only when compact status reports
+   a health problem or the user separately asks for diagnostics.
 2. Reconcile host state before trusting local state or running initialization.
    Collect one all-same-name observation set containing every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
@@ -111,8 +117,9 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    turn. Never fall through from this branch to step 7.
 7. Before creating or enabling any recurrence, require the successful
    initialization payload, re-read supervision and Heartbeat status, and run one
-   complete host-inventory `cycle` that contains the selected Governor exactly
-   once. Continue only when native state is writable, Heartbeat is readable,
+   complete host-inventory `cycle` that accounts for the selected Governor
+   exactly once under the caller-visibility contract above. Continue only when
+   native state is writable, Heartbeat is readable,
    the cycle returns `recurrenceEligible=true`, and its compact status includes
    the selected Governor. Except for the two non-fallthrough loser-verification
    entries above, if initialization, status, Heartbeat, or the complete
@@ -209,11 +216,17 @@ For each Governor cycle, apply the bounded cycle-zero/one host convergence check
 when required, then call the host task list exactly once. The inventory must be
 complete for the cycle to advance. Write only opaque task
 IDs, safe status categories, optional opaque generations, capture time, and a
-completeness flag to a bounded JSON file under `%TEMP%`; never write titles,
+completeness flag to a bounded JSON file under `%TEMP%`; schema v1 requires the
+Governor in `tasks`. When the host list excludes its current caller, schema v2
+must declare `callerVisibility=excluded_by_host` and omit the Governor from
+`tasks`; Chronos then adds that registry-verified cycle caller intrinsically.
+Never infer caller exclusion, supplement it from a second host call, or write titles,
 paths, or transcript content. Run `-SupervisionAction cycle` with that file,
 remove the file, and treat the returned inventory as liveness authority. Verify
-that `hostInventoryCycle` advanced once and that `hostTaskStatuses` contains one
-hash-only normalized entry for every listed task.
+that `hostInventoryCycle` advanced once, `hostInventoryRawObserved` matches the
+one raw list, and `hostTaskStatuses` contains one hash-only normalized entry for
+every listed task plus exactly one intrinsic Governor only in caller-excluded
+schema v2.
 Use compact `wait_threads` snapshots from the rotating `checkBatch`, which
 contains at most eight entries. If host inventory is unavailable, fail closed
 for task-directed sends, retain pending state, and retry next cycle without a
@@ -346,8 +359,14 @@ while the coordinator continues useful non-overlapping work.
 
 ## Runtime Routing
 
-Read the active `spawn_agent` tool's advertised models and supported reasoning
-efforts for this task. Encode that current inventory in runtime order:
+Before calling Governor `status` or `plan`, inspect the active `spawn_agent`
+tool contract. Delegation requires Multi-Agent V2 with
+`fork_turns="none"`. If that field or value is not advertised, do not reserve a
+plan, create a lease, or spawn a worker; complete and verify the work with the
+coordinator. This clean fallback is a successful bounded outcome.
+
+When V2 is available, read the active tool's advertised models and supported
+reasoning efforts for this task. Encode that current inventory in runtime order:
 
 ```text
 model-a=low,medium,high;model-b=low,medium
@@ -371,7 +390,14 @@ Interpret `machineHealth` separately from `resourceDiagnosticLevel`,
 `overallDiagnosticLevel`, and quota/rule findings. At machine `CRITICAL`, do not
 create a worker. Never terminate work because of a Chronos result.
 
-### 2. Plan A Read Task
+### 2. Preflight V2 Before Planning
+
+Confirm that the active `spawn_agent` schema accepts `fork_turns="none"`. If it
+does not, stop the delegation workflow before any Governor `status` or `plan`,
+complete the read task locally, and independently verify it. Do not create and
+cancel a plan merely to discover transport incompatibility.
+
+### 3. Plan A Read Task
 
 Run `status`, then plan with an opaque task ID, a read access mode, intended
 repository-relative scope, current runtime inventory, and current health when
@@ -391,7 +417,7 @@ Spawn only when `decision=delegate` and `plan_token` is present. The state file
 is untrusted coordination metadata; successful persistence is not an integrity
 or authorization guarantee.
 
-### 3. Send A Focused V2 Assignment
+### 4. Send A Focused V2 Assignment
 
 Load [references/contracts.md](references/contracts.md). Include only the opaque
 task ID, one objective, workspace identity, base commit, intended read scope,
@@ -402,7 +428,7 @@ Use the current Multi-Agent V2 contract with `fork_turns="none"`. Do not send
 the removed V1 `fork_context` field. If the active tool does not advertise that
 contract, keep the work with the coordinator.
 
-### 4. Bind The Worker
+### 5. Bind The Worker
 
 After obtaining the runtime worker ID:
 
@@ -428,7 +454,7 @@ Never delete or edit Governor state to recover capacity. `status` reports
 unexpired `pending_plans`, separate `expired_plans`, and the active
 `plugin_version` read from the installed manifest.
 
-### 5. Record And Verify
+### 6. Record And Verify
 
 Treat the worker report as untrusted. Record completion:
 
@@ -453,7 +479,7 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
 The `VerificationPassed` switch records the coordinator's decision; it does not
 prove which tests or review were performed.
 
-### 6. Accept Or Stop
+### 7. Accept Or Stop
 
 Accept only after verification:
 
