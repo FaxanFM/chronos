@@ -117,7 +117,7 @@ try {
     'complete host inventory',
     'before initialization',
     'pre-existing active recurrence',
-    'prove zero active Chronos recurrences',
+    'prove zero active current-key recurrences',
     'Do not schedule a recovery recurrence',
     'fully quit and reopen Codex',
     'quote-free',
@@ -131,13 +131,21 @@ try {
   }
   $governorSkill = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos-governor\SKILL.md')) -replace '\s+', ' '
   $orderedSetupTerms = @(
-    'Retain this complete matching-recurrence candidate set',
+    'Collect one all-same-name observation set',
+    'Derive a separate current-key mutation set',
+    'Never mutate a same-name automation carrying a different key or an unverified key',
+    'Only the first deterministic setup contender may proceed to recurrence mutation or initialization',
     'Before initializing the selected task',
-    'prove that zero matching recurrences are active',
+    'Immediately before the first mutation',
+    'repeat the all-same-name observation, current-key filtering',
+    'repeat the deterministic setup-contender election',
+    'prove that zero current-key recurrences are active',
     'Have the selected task run `-SupervisionAction initialize`',
     'require the successful initialization payload',
     'recurrenceEligible=true',
-    'Update the deterministic winner in place'
+    'Update the deterministic winner in place',
+    'If any create, update, duplicate cleanup, or exact postcondition verification fails',
+    'prove zero current-key recurrences are active'
   )
   $setupOffset = 0
   foreach ($term in $orderedSetupTerms) {
@@ -153,7 +161,8 @@ try {
     'Heartbeat status unreadable',
     'incomplete inventory',
     'inventory missing Governor',
-    'inventory contains Governor more than once'
+    'inventory contains Governor more than once',
+    'post-eligibility recurrence reconciliation failure'
   )
   foreach ($failureRow in $failureRows) {
     $expectedRow = "| $failureRow | 0 | 0 | no |"
@@ -163,6 +172,23 @@ try {
   }
   if (-not $supervisionContract.Contains('| complete inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
     throw 'Supervision success matrix does not activate exactly one Governor recurrence after eligibility.'
+  }
+  foreach ($required in @(
+    'Treat an explicit already-claimed result as a concurrent-loser outcome',
+    'mutates no recurrence belonging to the verified winner',
+    'exactly one current-key Governor recurrence'
+  )) {
+    if (-not $governorSkill.Contains($required)) {
+      throw "Governor skill is missing the concurrent-installer safety contract: $required"
+    }
+  }
+  foreach ($expectedRow in @(
+    '| pre-initialization fence with one foreign-key recurrence | 0 | 1 | 0 | no |',
+    '| two concurrent fresh installers after convergence | 1 | 0 | 0 | no |'
+  )) {
+    if (-not $supervisionContract.Contains($expectedRow)) {
+      throw "Supervision isolation/concurrency matrix is missing: $expectedRow"
+    }
   }
   $coreSkill = Get-Content -Raw -LiteralPath $coreSkillPath
   foreach ($required in @(

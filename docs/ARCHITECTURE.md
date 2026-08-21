@@ -205,11 +205,13 @@ recurrence is bounded to 336 cycles or 14 days. See
 Recurrence creation is gated by native postconditions. Initialization must
 succeed, supervision and Heartbeat status must be readable, and one complete
 host-inventory cycle must contain the selected Governor exactly once before the
-registry returns `recurrenceEligible=true`. The host snapshots matching
-recurrences, pauses or removes them, and verifies zero active matches before
-initialization. Failed setup cannot schedule its own recovery turn. Every failure
-re-lists the complete set, including pre-existing matches, and proves zero active
-Chronos recurrences.
+registry returns `recurrenceEligible=true`. The host observes all same-name
+recurrences but mutates only those carrying the complete current installation
+key. It pauses or removes that set and verifies zero active current-key matches
+before initialization. A verified concurrent loser never mutates the winner.
+Failed setup cannot schedule its own recovery turn. Every pre-activation or
+post-eligibility reconciliation failure re-lists the current-key set, including
+pre-existing matches, and proves zero active current-key Chronos recurrences.
 
 ## Persistent Data
 

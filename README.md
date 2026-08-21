@@ -178,12 +178,14 @@ do not ask me to relay routine findings.
 Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, enables due Heartbeat evaluation there, and proves that
 worker tasks have no recurrence. Before initialization, it pauses or removes
-matching Governor recurrences and verifies zero active matches. It creates or
-reconciles the single Governor
+only Governor recurrences carrying this installation's verified key and proves
+zero active current-key matches; foreign or unverified keys are untouched. It
+creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
 complete host inventory contains the verified Governor. Any failed or partial
-setup pauses or removes every matching recurrence, including one that existed
-before the attempt, and verifies zero Chronos recurrences. Normal Codex
+setup pauses or removes every current-key recurrence, including one that existed
+before the attempt, and verifies zero current-key Chronos recurrences. A verified
+concurrent loser leaves the winner unchanged and stands down. Normal Codex
 hook trust is optional for autonomous discovery. If Codex presents a trust
 request, only the user can approve it; Chronos proceeds through one complete
 host inventory per Governor cycle whether the hooks are trusted or dispatched.

@@ -31,51 +31,74 @@ name alone is not an equivalence key. Never copy a key from another machine.
    state fails closed before host mutation. Cached copies alone are not proof
    of a conflict.
 2. Reconcile host state before trusting local state or running initialization.
-   Inspect every host
+   Collect one all-same-name observation set containing every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
    ID, creation time when available, target task, and equivalence key. Also run
-   `chronos.cmd -Action supervise -SupervisionAction status`. Retain this complete
-   matching-recurrence candidate set until setup reaches a verified postcondition.
-3. Build one host candidate set. Keep only live targets whose compact assignment
-   contains the complete current `hostEquivalenceKey` and confirms the dedicated role. Sort valid
+   `chronos.cmd -Action supervise -SupervisionAction status`. Observation does
+   not grant mutation authority.
+3. Derive a separate current-key mutation set. Include only automations whose
+   compact assignment contains the complete current `hostEquivalenceKey` and
+   confirms the dedicated role. Never mutate a same-name automation carrying a
+   different key or an unverified key. Build the host candidate set from live
+   targets in the current-key mutation set. Sort valid
    automation candidates by creation time ascending, then immutable automation
    ID and target task ID using ordinal comparison; a missing creation time sorts
    after a present time. Every installer must select the first candidate. If no
    valid automation exists, apply the same creation-time and immutable-ID order
    to role-verified claimed Governor tasks. A name alone or a local claim alone
    is not proof of role compatibility. If several candidates exist and stable
-   host IDs are unavailable, stop without creating another candidate. Preserve
-   the candidate state and retry on the next setup pulse.
+   host IDs are unavailable, stop without creating another candidate or recovery
+   turn.
 4. If no valid Governor exists and the host exposes `create_thread`, create one
    fresh task titled `Chronos Governor`. Do not fork the current task or copy its
    history. Request `gpt-5.6-terra` with Medium reasoning only when the host
    advertises that exact task-model choice. Field validation requires reliable
    tool use and recovery judgment in the coordinator role. Never silently
-   substitute another model.
+   substitute another model. After any creation, re-list all live, role-verified
+   current-key Governor tasks and apply the same stable creation-time and
+   immutable-ID ordering. Only the first deterministic setup contender may
+   proceed to recurrence mutation or initialization. Every other fresh-task
+   contender performs no local or host recurrence mutation, verifies that no
+   recurrence targets it, and stands down. If stable IDs are unavailable, no
+   contender proceeds.
 5. Before initializing the selected task, pause or delete every active
-   recurrence from the complete matching-recurrence candidate set, including
-   the deterministic winner from an earlier setup. Re-list host state and prove
-   that zero matching recurrences are active. Recompute the candidate set after
-   every mutation and use at most three bounded mutation and verification
-   attempts. If zero cannot be proven, stop before initialization and create no
+   recurrence from the current-key mutation set, including
+   the deterministic winner from an earlier setup. Immediately before the first
+   mutation, repeat the all-same-name observation, current-key filtering, and
+   role-verified task listing in steps 2 and 3, then repeat the deterministic
+   setup-contender election. If a new recurrence or task changes the winner, or
+   the selected task is no longer first, take the no-mutation loser path in step
+   6. Otherwise re-list host state and prove
+   that zero current-key recurrences are active. Recompute the mutation set after
+   every host read or mutation and use at most three bounded mutation and
+   verification attempts. Leave foreign-key and unverified-key observations
+   unchanged. If zero cannot be proven, stop before initialization and create no
    additional task, recurrence, or recovery turn.
 6. Have the selected task run `-SupervisionAction initialize`. The registry
-   mutex fences only one machine and state root. If another local task already
-   won, the loser must stop, create no automation, and may be archived after host
-   verification. Use `-Force` only after host task status proves the recorded
-   owner is not live.
+   mutex fences only one machine and state root. Treat an explicit already-claimed
+   result as a concurrent-loser outcome, not as generic initialization failure.
+   Re-read native status and host state. Only when they identify one live,
+   role-verified winner with the complete current key may the loser stand down.
+   The loser creates no automation, mutates no recurrence belonging to the
+   verified winner, verifies that no recurrence targets the losing task and no
+   worker recurrence exists, and may be archived. The winning setup alone owns
+   recurrence convergence; after at most three bounded reads, final converged
+   state is exactly one current-key Governor recurrence. Use `-Force` only after
+   host task status proves the recorded owner is not live.
 7. Before creating or enabling any recurrence, require the successful
    initialization payload, re-read supervision and Heartbeat status, and run one
    complete host-inventory `cycle` that contains the selected Governor exactly
    once. Continue only when native state is writable, Heartbeat is readable,
    the cycle returns `recurrenceEligible=true`, and its compact status includes
-   the selected Governor. If initialization, status, Heartbeat, or the complete
-   cycle fails, create no recurrence. Pause or delete every matching recurrence
-   from the pre-initialization candidate set, including a pre-existing active
-   recurrence, then re-list host state and prove that zero matching recurrences
-   are active. Use at most three bounded mutation and verification attempts.
-   Retain only bounded local recovery state. Do not schedule a recovery turn.
-8. Reconcile all matching automations after the claim and complete inventory
+   the selected Governor. Except for the verified concurrent-loser outcome in
+   step 6, if initialization, status, Heartbeat, or the complete
+   cycle fails, create no recurrence. Pause or delete every recurrence
+   in the current-key mutation set, including a pre-existing active recurrence,
+   then re-list host state and prove that zero current-key recurrences are
+   active. Leave foreign-key and unverified-key observations unchanged. Use at
+   most three bounded mutation and verification attempts. Retain only bounded
+   local recovery state. Do not schedule a recovery turn.
+8. Reconcile only current-key automations after the claim and complete inventory
    cycle succeed. Update the
    deterministic winner in place when possible, or create one when none exists.
    Attach it to the selected task, pause or delete every non-winner, then re-list
@@ -83,9 +106,13 @@ name alone is not an equivalence key. Never copy a key from another machine.
    reconciliation attempts in one setup turn. Success requires this exact
    postcondition: one live dedicated Governor, one active automation carrying
    the complete current equivalence key, and zero active duplicates. On the third
-   failure, stop all further setup retries in that pulse. Preserve the candidate
-   state and retry later; never turn routine convergence failure into a user
-   chore or rely on a create or allow result alone as proof.
+   failure, stop all further retries in that setup attempt. If any create, update,
+   duplicate cleanup, or exact postcondition verification fails, pause or delete
+   every recurrence in the recomputed current-key mutation set, re-list host
+   state, and prove zero current-key recurrences are active within three bounded
+   attempts. Schedule no recovery turn. Never mutate a foreign or unverified key,
+   turn routine convergence failure into a user chore, or rely on a create or
+   allow result alone as proof.
 9. Before `discover` on Governor cycles zero and one, repeat the host candidate
    scan and exact postcondition check. This catches a concurrently created
    recurrence that was not visible during setup. A non-winning Governor must
@@ -261,8 +288,9 @@ or user authority is required, call `-HeartbeatInterventionAction fail-closed`.
 Do not broadcast, choose an arbitrary target, or manufacture a user action.
 
 To disable supervision, first call `release` without confirmation and follow
-its host cleanup instruction. Pause or delete every matching recurrence, verify
-that none remains active, then call `release` again with
+its host cleanup instruction. Pause or delete every verified current-key
+recurrence, leave foreign and unverified keys unchanged, verify that no
+current-key recurrence remains active, then call `release` again with
 `-SupervisionConfirmRecurrenceStopped`. Never clear the claim first.
 
 ## Boundary

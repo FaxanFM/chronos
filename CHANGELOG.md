@@ -48,6 +48,10 @@
   zero active matches before initialization. Any failed setup rechecks both
   pre-existing and newly created matches and never schedules its own recovery
   turn.
+- Separate all same-name host observations from the verified current-installation
+  mutation set. Foreign and unverified keys are never changed, a concurrent
+  installer loser cannot delete the winner, and post-eligibility reconciliation
+  failure returns the current-key recurrence count to zero.
 
 ## v0.9.1
 

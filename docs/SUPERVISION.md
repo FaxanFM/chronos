@@ -73,36 +73,54 @@ registry mutex.
 
 The host uses this reconciliation order:
 
-1. Inspect every host automation named exactly `Chronos Governor pulse`, its
+1. Build an all-same-name observation set from every host automation named
+   exactly `Chronos Governor pulse`, its
    immutable ID, creation time when available, target task, equivalence key,
-   and compact local supervision status. Do this before initialization and
-   retain the complete matching-recurrence candidate set through setup.
-2. Read `hostEquivalenceKey` from status. Accept only candidates whose task
-   assignment carries that complete value and verifies the dedicated role. Sort existing
+   and compact local supervision status. Observation does not authorize mutation.
+2. Read `hostEquivalenceKey` from status. Derive a separate current-key mutation
+   set containing only automations whose task assignment carries that complete
+   value and verifies the dedicated role. A different or unverified key is never
+   mutated or counted in this installation's postcondition. Sort existing
    automation candidates by creation time ascending, then immutable automation
    ID and target task ID using ordinal comparison. Missing creation times sort
    after present times. Every installer selects the first candidate. With no
    valid automation, apply the same order to role-verified claimed tasks.
 3. Otherwise create one fresh `Chronos Governor` task with no inherited chat
-   history and include the complete returned equivalence key in its compact assignment.
-4. Let that task claim the mutex-protected registry. This mutex fences one
-   machine and state root only. Any concurrent local loser must stop and must
-   not create a recurrence.
-5. Before initialization, pause or remove every active recurrence in the
-   complete matching candidate set, including a winner retained from an earlier
-   setup. Re-list host state and prove zero active matching recurrences. Recompute
-   the candidate set after each mutation for at most three attempts. If zero
-   cannot be proven, stop before initialization and schedule no recovery turn.
-6. Initialize the selected Governor, require readable supervision and Heartbeat
+   history and include the complete returned equivalence key in its compact
+   assignment. Re-list all live, role-verified current-key Governor tasks after
+   any creation and apply the same stable ordering. Only the first deterministic
+   setup contender can proceed to recurrence mutation or initialization. Other
+   fresh contenders perform no local or recurrence mutation, prove no recurrence
+   targets them, and stand down. Without stable IDs, no contender proceeds.
+4. Before initialization, pause or remove every active recurrence in the
+   current-key mutation set, including a winner retained from an earlier setup.
+   Immediately before the first mutation, rebuild the all-same-name observation,
+   current-key mutation set, and role-verified task list, then repeat the
+   deterministic contender election. A new recurrence or task can therefore
+   change the winner; a newly identified loser performs no mutation. Otherwise
+   re-list host state and prove zero active current-key recurrences. Recompute
+   the mutation set after each host read or mutation for at most three attempts.
+   Leave foreign and unverified keys unchanged. If zero cannot be proven, stop
+   before initialization and schedule no recovery turn.
+5. Let the selected task claim the mutex-protected registry. This mutex fences
+   one machine and state root only. An explicit already-claimed result starts the
+   concurrent-loser path. The loser re-reads native and host state, creates no
+   recurrence, does not mutate the role-verified current-key winner, proves no
+   recurrence targets the losing task, and stands down. The winning setup owns
+   convergence to exactly one current-key Governor recurrence and zero worker
+   recurrences.
+6. Require readable supervision and Heartbeat
    status, then run one complete host inventory containing that Governor exactly
    once. Continue only when the cycle returns `recurrenceEligible=true`.
 7. Only after that gate succeeds, update or create the deterministic winning
    automation, pause or remove every non-winner, and re-list host state. Setup is
    complete only when exactly one active recurrence carrying the complete
    equivalence key targets exactly one claimed, live Governor and zero active
-   duplicates remain. After three failed attempts, stop for that pulse and leave
-   zero active matching recurrences. Routine convergence failure must not become
-   a user chore.
+   duplicates remain. If create, update, duplicate cleanup, or postcondition
+   verification fails after three attempts, pause or remove the recomputed
+   current-key mutation set, re-list it, and prove zero active current-key
+   recurrences. Schedule no recovery turn and never mutate a foreign or
+   unverified key. Routine convergence failure must not become a user chore.
 8. Repeat the same host-global winner and postcondition check before discovery
    on Governor cycles zero and one. This catches concurrently created state that
    was not yet visible during setup. A loser stops its own recurrence and stands
@@ -207,8 +225,9 @@ The registry reports `rotationRequired=true` after 336 cycles or 14 days. The
 host must then perform a verified fresh-task handoff, preserving one recurrence,
 or pause the recurrence and retain the reason locally. It must not continue adding
 unbounded history to the same Governor task. Release is two phase: stop and
-verify every matching recurrence first, then confirm local release. A failure
-before confirmation preserves the claim so the next setup can reconcile it.
+verify every current-key recurrence first, leave foreign and unverified keys
+unchanged, then confirm local release. A failure before confirmation preserves
+the claim so the next setup can reconcile it.
 
 The PowerShell module does not create that automation or contact a task. It
 returns local routing metadata for the Codex host to use.
@@ -268,12 +287,13 @@ returning a path.
 
 Initialization alone never authorizes a recurrence. The first complete host
 inventory cycle must contain the selected Governor exactly once and return
-`recurrenceEligible=true`. A failed initialization, unreadable status, missing
-Governor, or failed inventory cycle requires pausing or removing every matching
-recurrence in the pre-initialization candidate set, including a pre-existing
-active recurrence. Re-list host state and prove zero active Chronos recurrences
-within three bounded mutation and verification attempts. Do not schedule a
-recovery recurrence.
+`recurrenceEligible=true`. Except for a verified concurrent loser that must not
+mutate the winner, a failed initialization, unreadable status, missing Governor,
+or failed inventory cycle requires pausing or removing every current-key
+recurrence, including a pre-existing active recurrence. Re-list host state and
+prove zero active current-key recurrences within three bounded mutation and
+verification attempts. Do not schedule a recovery recurrence. A different or
+unverified installation key is observation only and remains unchanged.
 
 The deterministic setup regression matrix is:
 
@@ -285,7 +305,15 @@ The deterministic setup regression matrix is:
 | incomplete inventory | 0 | 0 | no |
 | inventory missing Governor | 0 | 0 | no |
 | inventory contains Governor more than once | 0 | 0 | no |
+| post-eligibility recurrence reconciliation failure | 0 | 0 | no |
 | complete inventory and `recurrenceEligible=true` | 1 | 0 | no |
+
+The isolation and concurrency regression matrix is:
+
+| Scenario | Current-key Governor recurrences | Foreign-key Governor recurrences | Worker recurrences | Losing installer mutates winner |
+| --- | ---: | ---: | ---: | --- |
+| pre-initialization fence with one foreign-key recurrence | 0 | 1 | 0 | no |
+| two concurrent fresh installers after convergence | 1 | 0 | 0 | no |
 
 The registry is capped at 256 KiB and 256 retained records. Task and agent identifiers are
 encrypted with Windows DPAPI for the current Windows user and indexed by

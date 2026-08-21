@@ -218,16 +218,20 @@ refused a new hint; use host task tools as authority.
 Never create or enable a Governor recurrence after initialization alone. First
 require readable supervision and Heartbeat status and one successful complete
 host-inventory cycle that contains the Governor exactly once and returns
-`recurrenceEligible=true`. Before initialization, retain the complete set of
-matching host recurrences. Any failure pauses or removes all of them, including
-a pre-existing recurrence, and re-lists host state to verify zero active Chronos
-recurrences. This zero-recurrence fence is verified before initialization begins.
-Never use a recurrence to recover from failed setup.
+`recurrenceEligible=true`. Before initialization, observe all same-name host
+recurrences but derive mutation authority only for the complete current
+installation key. Pause or remove that current-key set, including a pre-existing
+recurrence, and re-list host state to verify zero active current-key recurrences.
+Foreign and unverified keys remain untouched. This zero-recurrence fence is
+verified before initialization begins. A verified concurrent loser leaves the
+winner unchanged and stands down. Any post-eligibility reconciliation failure
+also returns the current-key set to zero. Never use a recurrence to recover from
+failed setup.
 
 Delayed start events cannot revive terminal records. After host task
 status proves that an ended task is active again, the Governor can use
 `-SupervisionAction confirm-active -SupervisionSubjectId <id>`. To disable
-supervision, call `release`, stop and verify all matching host recurrences, then
+supervision, call `release`, stop and verify all current-key host recurrences, then
 call `release -SupervisionConfirmRecurrenceStopped`. Clearing local ownership
 first can orphan a recurrence and is prohibited. See [Supervision](SUPERVISION.md).
 
