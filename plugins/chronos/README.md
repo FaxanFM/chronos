@@ -127,8 +127,8 @@ approval, rule, SQLite, and supervision issues.
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
 need no Chronos prompt and can use any runtime model. Setup explicitly enables
 at most one Governor turn per hour while work is active and one every six hours
-while idle. A stable random installation-scoped equivalence key, deterministic
-winner order, and three-attempt reconciliation budget keep concurrent setups on
+while idle. A stable pseudonymous installation-scoped equivalence key,
+deterministic winner order, and three-attempt reconciliation budget keep concurrent setups on
 one PC on one Governor and one recurrence. Different PCs retain separate
 Governors. Only its first two pulses repeat that scoped
 check; normal cycles add no automation scan. Each cycle reconciles one compact

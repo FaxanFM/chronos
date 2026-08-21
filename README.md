@@ -201,7 +201,7 @@ Optionally review and trust the packaged lifecycle hooks through Codex `/hooks`.
 Worker tasks need no script or prompt and can use Luna, Terra, Sol, or another
 runtime model. Setup explicitly enables at most one Governor turn per hour
 while work is active and one every six hours while idle. The Governor rotates
-or pauses after 336 cycles or 14 days. A stable random installation-scoped
+or pauses after 336 cycles or 14 days. A stable pseudonymous installation-scoped
 equivalence key, deterministic winner order, and three-attempt reconciliation
 budget keep simultaneous setup attempts on that PC converged on one task and one recurrence.
 Different PCs retain separate Governors for their separate local registries.

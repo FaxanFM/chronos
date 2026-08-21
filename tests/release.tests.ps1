@@ -62,7 +62,7 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('set up chronos fully', 'install', 'supervision', 'heartbeats', 'governor', 'worker recurrence') },
+    @{ Index = 0; Terms = @('fully set up chronos', 'restart', 'governor recurrence only if', 'supervision', 'heartbeat', 'inventory pass', 'no worker recurrence') },
     @{ Index = 1; Terms = @('complete chronos status', 'machine health', 'workflow', 'quota', 'approval', 'rule', 'sqlite', 'supervision') },
     @{ Index = 2; Terms = @('chronos governor', 'delegate', 'read-only', 'bounded workers', 'verify') }
   )
@@ -106,7 +106,9 @@ try {
     '60 minutes while monitored work is active and 360 minutes while idle',
     '336 cycles or 14 days',
     '-SupervisionConfirmRecurrenceStopped',
-    '%TEMP%\Chronos\Supervision-v2\<scope-sha256>\session-registry.json',
+    '%TEMP%\Chronos-Supervision-v3-<scope-prefix>-<slot>\session-registry.json',
+    'four bounded direct TEMP child slots',
+    'deterministic host-and-Codex-home hash',
     'recurrenceEligible=true',
     'one compact complete host task-list call',
     'gpt-5.6-terra',
@@ -130,6 +132,18 @@ try {
     }
   }
   $governorSkill = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos-governor\SKILL.md')) -replace '\s+', ' '
+  foreach ($hardGateTerm in @(
+    '**Hard gate:**',
+    'Do not create or enable any Governor recurrence until native initialization succeeds',
+    'Any other result requires zero active current-key recurrences',
+    'Never use a recurrence to retry, recover, or finish a failed setup'
+  )) {
+    $hardGateOffset = $governorSkill.IndexOf($hardGateTerm, [StringComparison]::Ordinal)
+    $stepOneOffset = $governorSkill.IndexOf('1. Run `chronos.cmd -Action install-status`', [StringComparison]::Ordinal)
+    if ($hardGateOffset -lt 0 -or $stepOneOffset -lt 0 -or $hardGateOffset -gt $stepOneOffset) {
+      throw "Governor skill does not put the fail-closed recurrence gate before setup actions: $hardGateTerm"
+    }
+  }
   $orderedSetupTerms = @(
     'Collect one all-same-name observation set',
     'Derive a separate current-key mutation set',
@@ -480,6 +494,7 @@ try {
   if ($installedSupervisionData.hostEquivalenceKey -notmatch '^chronos-supervision-v1:[a-f0-9]{32}$' -or
       $installedSupervisionData.equivalenceScope -ne 'installation' -or
       $installedSupervisionData.installationScopePersistence -ne 'state_root_anchor' -or
+      $installedSupervisionData.installationScopeSource -ne 'state_root_anchor' -or
       $installedSupervisionData.hostReconcileAttemptLimit -ne 3 -or
       $installedSupervisionData.hostRecheckThroughCycle -ne 2 -or
       $installedSupervisionData.hostPostcondition -ne 'one_live_governor_one_active_recurrence_zero_duplicates') {
@@ -535,7 +550,7 @@ try {
     throw 'Packaged configured lifecycle hook did not execute silently through the Codex cmd.exe boundary.'
   }
   $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
-  $configuredRegistryPath = Join-Path $configuredHookTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $configuredScopeHash 'session-registry.json'))
+  $configuredRegistryPath = Join-Path $configuredHookTemp (Join-Path ('Chronos-Supervision-v3-{0}-0' -f $configuredScopeHash.Substring(0, 24)) 'session-registry.json')
   if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf)) {
     throw 'Packaged configured lifecycle hook reported success without reaching the registry script.'
   }

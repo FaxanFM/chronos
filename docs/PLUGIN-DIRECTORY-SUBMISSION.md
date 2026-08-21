@@ -25,7 +25,7 @@ and makes overlapping Heartbeat cycles explicitly retryable. It retains the
 improved first-use prompts, listing copy, full-setup contract, and deterministic
 prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`8d5cc7a7e7e31b5b6a7dd8ccecffe508f8db62a0db9efe1579833d0d32d14e02`.
+`ee490f03fe0b002b57ac9e2256db3d2567ad9b872a679564befcc387af378628`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -115,7 +115,7 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.`
+1. `Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.`
 2. `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
 3. `Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task.`
 
@@ -126,10 +126,14 @@ mention.
 
 ### 1. Complete first-use setup
 
-- Prompt: `After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.`
+- Prompt: `Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.`
 - Expected behavior: verify the installed source and native status, perform
   optional hook trust review when the host presents it, reuse or create one history-free Governor, and
   reconcile the installation-scoped recurrence without prompting worker tasks.
+  Recurrence creation is a hard gate: failed initialization, unreadable native
+  status, unreadable Heartbeat status, or an incomplete Governor-bearing
+  inventory must leave zero current-key recurrences and schedule no recovery
+  recurrence.
 - Expected result: a compact summary showing the active source, native status,
   one live Governor, one active Governor recurrence, readable Heartbeat status,
   and zero worker recurrences. If hook trust remains pending, host inventory is

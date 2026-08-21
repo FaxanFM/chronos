@@ -148,17 +148,18 @@ clearing local state cannot justify creating a duplicate. A title alone is not
 role verification. The equivalence key and deterministic host ordering are the
 same-installation ownership fence. If competing candidates lack stable host IDs,
 Chronos does not create another candidate automatically. Each installation gets
-a random 128-bit opaque ID stored separately from the session registry. Deleting
-only `session-registry.json` therefore preserves recovery identity. Different
-PCs have different keys and separate Governors because one Governor cannot read
-another PC's local registry.
+a 128-bit opaque ID stored separately from the session registry. New v3 state
+derives it from a hash of the machine and Codex home; a readable earlier random
+anchor is imported unchanged. Deleting only `session-registry.json` therefore
+preserves recovery identity. Different PCs have different keys and separate
+Governors because one Governor cannot read another PC's local registry.
 
 The two initial convergence rechecks are bounded host reads inside the existing
 Governor turns. They create no worker turn and no permanent per-cycle scan.
 
 The status key has format `chronos-supervision-v1:<32 lowercase hexadecimal
-characters>`. It contains no hostname, username, path, machine GUID, task ID, or
-workspace data. It is a persistent random pseudonymous installation identifier,
+characters>`. It contains no raw hostname, username, path, machine GUID, task ID,
+or workspace data. It is a persistent pseudonymous installation identifier,
 not a secret or authentication credential.
 
 The host requests `gpt-5.6-terra` with Medium reasoning when that exact choice is
@@ -276,20 +277,25 @@ surfaced to the user.
 The default registry is:
 
 ```text
-%TEMP%\Chronos\Supervision-v2\<scope-sha256>\session-registry.json
+%TEMP%\Chronos-Supervision-v3-<scope-prefix>-<slot>\session-registry.json
 ```
 
-The directory retains the current user's inherited TEMP permissions. Chronos
-does not replace them with a transient sandbox identity. Task and agent
-identifiers remain protected by Windows DPAPI. The scope hash binds the machine
-and Codex home without exposing either value. On first use after an upgrade,
-Chronos reads a valid prior fixed-TEMP or LocalAppData registry and its separate
-installation-scope anchor into the v2 state root. An inaccessible prior root is
-left unchanged and reported as `prior_state_unavailable_new_root` with
+Chronos selects the first writable non-reparse location from four bounded direct
+TEMP child slots. This avoids inheriting an inaccessible shared `Chronos`
+ancestor left by an earlier sandbox identity. The directory retains the current
+user's inherited TEMP permissions. Task and agent identifiers remain protected
+by Windows DPAPI. A fresh v3 installation uses a deterministic host-and-Codex-home
+hash for its opaque identity, so selecting a recovery slot cannot create a
+second Governor identity. No raw machine name or Codex-home path is stored. On first
+use after an upgrade, Chronos imports a readable prior installation anchor and
+state without changing the v2, fixed-TEMP, or LocalAppData source. This preserves
+the existing Governor equivalence key. An inaccessible prior root is left unchanged
+and reported as `prior_state_unavailable_new_root` with
 `priorStateWriteAttempted=false`; authoritative host inventory rebuilds the
-advisory registry. Chronos reports the state-store mode, write preflight,
-protection mode, migration result, and prior-state disposition without
-returning a path.
+advisory registry. Chronos reports only the selected slot number, a short state
+identity hash, anchor persistence and provenance category, write preflight,
+protection mode, migration result, and prior-state disposition. It does not
+return a path.
 
 Initialization alone never authorizes a recurrence. The first complete host
 inventory cycle must contain the selected Governor exactly once and return

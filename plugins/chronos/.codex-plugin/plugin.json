@@ -22,7 +22,7 @@
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "After restarting Codex, set up Chronos fully: verify install, supervision, Heartbeats, one Governor, and zero worker recurrence.",
+      "Fully set up Chronos after restart. Governor recurrence only if supervision, Heartbeat and inventory pass; no worker recurrence.",
       "Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.",
       "Use Chronos Governor to delegate suitable read-only work with bounded workers and verify the results in this task."
     ],

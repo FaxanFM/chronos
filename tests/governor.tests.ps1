@@ -202,6 +202,23 @@ try {
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
   Assert-Equal $versionStatus.plugin_version '0.9.2' 'Governor must report the active packaged plugin version.'
+
+  $spacedRepository = Join-Path $testRoot 'repository with spaces'
+  New-FixtureRepository $spacedRepository
+  $spacedStatus = Invoke-Governor @('-Action', 'status') $spacedRepository
+  Assert-Success $spacedStatus 'Sanitized repository identity failed for a normal repository path containing spaces.'
+  Assert-Equal (Get-GovernorData $spacedStatus).plugin_version '0.9.2' 'Spaced-path identity resolved the wrong Governor package.'
+  [void](Get-StatePath $spacedRepository)
+  Register-SafetyControl 'repository-identity-spaced-path'
+
+  $incompleteRepository = Join-Path $testRoot 'incomplete git metadata'
+  New-Item -ItemType Directory -Path (Join-Path $incompleteRepository '.git') -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $incompleteRepository 'README.md'), '# Incomplete repository', [Text.UTF8Encoding]::new($false))
+  $incompleteStatus = Invoke-Governor @('-Action', 'status') $incompleteRepository
+  Assert-Failure $incompleteStatus 'git_repository_required' 'Incomplete Git metadata did not fail with an actionable repository-identity result.'
+  if ($incompleteStatus.Text -match '"error":"internal_error"') { throw 'Expected repository-identity failure collapsed into internal_error.' }
+  Register-SafetyControl 'repository-identity-explicit-failure'
+
   $gitCommonDirectory = [System.IO.Path]::GetFullPath((& git -C $fixtureRepo rev-parse --path-format=absolute --git-common-dir).Trim())
   if ($fixtureStatePath.StartsWith($gitCommonDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Governor runtime state must not be stored beneath Git metadata.'

@@ -47,8 +47,16 @@ $script:LegacyDefaultStatePath = $null
 $script:LegacyInstallationScopePath = $null
 $script:PriorDefaultStatePath = $null
 $script:PriorInstallationScopePath = $null
+$script:PriorV2DefaultStatePath = $null
+$script:PriorV2InstallationScopePath = $null
 $script:PriorStateDisposition = 'not_checked'
 $script:PriorStateWriteAttempted = $false
+$script:DefaultStateCandidates = @()
+$script:DefaultInstallationScopeId = $null
+$script:InstallationScopeSource = 'unresolved'
+$script:StateStoreSlot = -1
+$script:StateStoreRecovery = 'not_applicable'
+$script:StateStoreIdentity = 'unresolved'
 
 function Get-Value {
   param($Object, [string]$Name, $Default = $null)
@@ -230,19 +238,30 @@ function Resolve-StatePath {
   $privateTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision-v2'))
   $codexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex'))
   $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
+  $script:DefaultInstallationScopeId = (Get-TextHash ('Chronos.Supervision.Installation.v3|{0}|{1}' -f $env:COMPUTERNAME, $codexHome)).Substring(0, 32)
+  $script:DefaultStateCandidates = @(0..3 | ForEach-Object {
+    $slotRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $_)))
+    Join-Path $slotRoot 'session-registry.json'
+  })
   $script:LegacyDefaultStatePath = Join-Path $localRoot 'session-registry.json'
   $script:LegacyInstallationScopePath = Join-Path $localRoot 'installation-scope.json'
   $script:PriorDefaultStatePath = Join-Path $priorTempRoot 'session-registry.json'
   $script:PriorInstallationScopePath = Join-Path $priorTempRoot 'installation-scope.json'
+  $script:PriorV2DefaultStatePath = Join-Path $privateTempRoot (Join-Path $scopeHash 'session-registry.json')
+  $script:PriorV2InstallationScopePath = Join-Path $privateTempRoot (Join-Path $scopeHash 'installation-scope.json')
   $candidate = if ([string]::IsNullOrWhiteSpace($Requested)) {
     $script:StateStoreMode = 'temp_private'
-    $script:StateStoreMigration = 'namespace_v2_new_root'
-    Join-Path $privateTempRoot (Join-Path $scopeHash 'session-registry.json')
+    $script:StateStoreMigration = 'namespace_v3_new_root'
+    $script:StateStoreRecovery = 'bounded_default_slot_selection'
+    $script:DefaultStateCandidates[0]
   } else {
     $script:StateStoreMode = 'explicit'
     try { [IO.Path]::GetFullPath($Requested) } catch { throw 'supervision_state_path_invalid' }
   }
-  $contained = (Test-ContainedPath $candidate $localRoot) -or
+  $defaultContained = @($script:DefaultStateCandidates | Where-Object {
+    [IO.Path]::GetFullPath($_).Equals([IO.Path]::GetFullPath($candidate), [StringComparison]::OrdinalIgnoreCase)
+  }).Count -eq 1
+  $contained = $defaultContained -or (Test-ContainedPath $candidate $localRoot) -or
     (Test-ContainedPath $candidate $priorTempRoot) -or
     (Test-ContainedPath $candidate $privateTempRoot)
   if ([IO.Path]::GetExtension($candidate) -ne '.json' -or -not $contained) {
@@ -254,33 +273,43 @@ function Resolve-StatePath {
 
 function Initialize-StateStore {
   param([string]$ResolvedStatePath)
-  $directory = Split-Path -Parent $ResolvedStatePath
-  try {
-    $createdDirectory = -not (Test-Path -LiteralPath $directory)
-    if ($createdDirectory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
-    $item = Get-Item -LiteralPath $directory -Force
-    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
-      throw 'supervision_state_store_unwritable'
-    }
-    if ($script:StateStoreMode -eq 'temp_private') {
-      # Keep the user TEMP inheritance so a later Codex sandbox identity can
-      # reopen the registry. Persisted task IDs remain DPAPI protected.
-      $script:StateStoreProtection = 'user_temp_inherited_dpapi_ids'
-    }
-    if (-not (Test-Path -LiteralPath $ResolvedStatePath -PathType Leaf)) {
-      $probe = Join-Path $directory ('.supervision-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
-      try {
-        $stream = New-Object IO.FileStream($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        $stream.Dispose()
-      } finally {
-        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+  [string[]]$candidates = if ($script:StateStoreMode -eq 'temp_private') { @($script:DefaultStateCandidates) } else { @([string]$ResolvedStatePath) }
+  for ($slot = 0; $slot -lt $candidates.Count; $slot++) {
+    $candidate = [IO.Path]::GetFullPath([string]$candidates[$slot])
+    $directory = Split-Path -Parent $candidate
+    $probe = $null
+    try {
+      if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        New-Item -ItemType Directory -Path $directory -Force -ErrorAction Stop | Out-Null
       }
+      $item = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+      if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) {
+        throw 'supervision_state_store_unwritable'
+      }
+      $probe = Join-Path $directory ('.supervision-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
+      $stream = New-Object IO.FileStream($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      try { $stream.Flush($true) } finally { $stream.Dispose() }
+      foreach ($existingPath in @($candidate, (Join-Path $directory 'installation-scope.json'))) {
+        if (-not (Test-Path -LiteralPath $existingPath -PathType Leaf)) { continue }
+        $existingItem = Get-Item -LiteralPath $existingPath -Force -ErrorAction Stop
+        if ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'supervision_state_store_unwritable' }
+        $readProbe = New-Object IO.FileStream($existingPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        $readProbe.Dispose()
+      }
+      $script:StateStoreWriteReady = $true
+      $script:StateStoreSlot = $slot
+      if ($script:StateStoreMode -eq 'temp_private') {
+        $script:StateStoreProtection = 'bounded_temp_slots_dpapi_ids'
+        if ($slot -gt 0) { $script:StateStoreMigration = 'default_state_slot_recovered' }
+      }
+      return $candidate
+    } catch {
+      if ($script:StateStoreMode -ne 'temp_private') { throw 'supervision_state_store_unwritable' }
+    } finally {
+      if ($probe) { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
     }
-    $script:StateStoreWriteReady = $true
-  } catch {
-    if ([string]$_.Exception.Message -eq 'supervision_state_store_unwritable') { throw }
-    throw 'supervision_state_store_unwritable'
   }
+  throw 'supervision_state_store_unwritable'
 }
 
 function Resolve-InstallationScopePath {
@@ -347,9 +376,12 @@ function Write-InstallationScopeId {
 function Get-OrCreateInstallationScopeId {
   param([string]$ResolvedStatePath)
   $path = Resolve-InstallationScopePath $ResolvedStatePath
-  if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
+  if (Test-Path -LiteralPath $path -PathType Leaf) {
+    $script:InstallationScopeSource = if ($script:StateStoreMode -eq 'temp_private') { 'v3_anchor' } else { 'state_root_anchor' }
+    return Read-InstallationScopeId $path
+  }
   if ($script:StateStoreMode -eq 'temp_private') {
-    foreach ($priorPath in @($script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)) {
+    foreach ($priorPath in @($script:PriorV2InstallationScopePath, $script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)) {
       if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
       try {
         $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
@@ -358,8 +390,11 @@ function Get-OrCreateInstallationScopeId {
           continue
         }
         $priorId = Read-InstallationScopeId $priorPath
-        if ($script:StateStoreMigration -eq 'namespace_v2_new_root') { $script:StateStoreMigration = 'prior_scope_imported' }
+        if ($script:StateStoreMigration -in @('namespace_v3_new_root', 'default_state_slot_recovered')) {
+          $script:StateStoreMigration = 'prior_scope_imported'
+        }
         $script:PriorStateDisposition = 'read_only_imported'
+        $script:InstallationScopeSource = 'prior_anchor_imported'
         return Write-InstallationScopeId $path $priorId
       } catch {
         $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
@@ -375,6 +410,9 @@ function Get-OrCreateInstallationScopeId {
         }
       }
     }
+    if ([string]::IsNullOrWhiteSpace($script:DefaultInstallationScopeId)) { throw 'supervision_install_scope_unavailable' }
+    $script:InstallationScopeSource = 'deterministic_host_codex_home_hash'
+    return Write-InstallationScopeId $path $script:DefaultInstallationScopeId
   }
   $directory = Split-Path -Parent $path
   if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
@@ -383,6 +421,7 @@ function Get-OrCreateInstallationScopeId {
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
   try { $rng.GetBytes($random) } finally { $rng.Dispose() }
   $id = ([BitConverter]::ToString($random)).Replace('-', '').ToLowerInvariant()
+  $script:InstallationScopeSource = 'state_root_anchor'
   return Write-InstallationScopeId $path $id
 }
 
@@ -631,7 +670,7 @@ function Write-State {
 function Import-LegacyStateIfPresent {
   param([string]$ResolvedStatePath)
   if ($script:StateStoreMode -ne 'temp_private' -or (Test-Path -LiteralPath $ResolvedStatePath)) { return }
-  foreach ($priorPath in @($script:PriorDefaultStatePath, $script:LegacyDefaultStatePath)) {
+  foreach ($priorPath in @($script:PriorV2DefaultStatePath, $script:PriorDefaultStatePath, $script:LegacyDefaultStatePath)) {
     if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
     try {
       $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
@@ -1226,11 +1265,15 @@ function Get-DiscoveryPayload {
     routineUserAction = 'none'
     hostEquivalenceKey = $script:HostEquivalenceKey
     equivalenceScope = 'installation'
-    installationScopePersistence = 'state_root_anchor'
+    installationScopePersistence = if ($script:StateStoreMode -eq 'temp_private') { 'bounded_v3_state_root_anchor' } else { 'state_root_anchor' }
+    installationScopeSource = $script:InstallationScopeSource
     stateStoreMode = $script:StateStoreMode
     stateStoreWriteReady = $script:StateStoreWriteReady
     stateStoreProtection = $script:StateStoreProtection
     stateStoreMigration = $script:StateStoreMigration
+    stateStoreSlot = $script:StateStoreSlot
+    stateStoreRecovery = $script:StateStoreRecovery
+    stateStoreIdentity = $script:StateStoreIdentity
     hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
     hostRecheckThroughCycle = $script:HostRecheckThroughCycle
     hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
@@ -1300,7 +1343,8 @@ try {
     $preparedProtectedId = if ([string]$preparedHookEvent.event -eq 'SessionStart') { [string]$preparedHookEvent.protectedSessionId } elseif ([string]$preparedHookEvent.event -eq 'SubagentStart') { [string]$preparedHookEvent.protectedAgentId } else { $null }
   }
   $resolved = Resolve-StatePath $StatePath
-  Initialize-StateStore $resolved
+  $resolved = Initialize-StateStore $resolved
+  $script:StateStoreIdentity = (Get-TextHash ([IO.Path]::GetFullPath($resolved).ToUpperInvariant())).Substring(0, 16)
   $mutex = New-RegistryMutex $resolved
   $mutexWaitMilliseconds = if ($Action -eq 'hook' -and [string](Get-Value $hookData 'hook_event_name' '') -eq 'SessionEnd') {
     $script:SynchronousHookMutexWaitMilliseconds
@@ -1377,11 +1421,15 @@ try {
       routineUserAction = 'none'
       hostEquivalenceKey = $script:HostEquivalenceKey
       equivalenceScope = 'installation'
-      installationScopePersistence = 'state_root_anchor'
+      installationScopePersistence = if ($script:StateStoreMode -eq 'temp_private') { 'bounded_v3_state_root_anchor' } else { 'state_root_anchor' }
+      installationScopeSource = $script:InstallationScopeSource
       stateStoreMode = $script:StateStoreMode
       stateStoreWriteReady = $script:StateStoreWriteReady
       stateStoreProtection = $script:StateStoreProtection
       stateStoreMigration = $script:StateStoreMigration
+      stateStoreSlot = $script:StateStoreSlot
+      stateStoreRecovery = $script:StateStoreRecovery
+      stateStoreIdentity = $script:StateStoreIdentity
       priorStateDisposition = $script:PriorStateDisposition
       priorStateWriteAttempted = $script:PriorStateWriteAttempted
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit

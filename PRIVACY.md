@@ -81,13 +81,16 @@ decrypt an identifier for host task routing, so that ID can enter the Governor
 task or host-tool context; Chronos does not transmit it to its publisher.
 
 Supervision also stores `installation-scope.json`, containing only schema
-version `1` and one random 128-bit lowercase hexadecimal ID. The ID scopes one
-Governor to one local installation and survives deletion of the session
-registry. It is a persistent pseudonymous identifier, not a secret. It contains
-no hostname, username, Windows SID, machine GUID, path, task ID, or workspace
-data. The complete scoped key can enter the Governor assignment and host
-automation metadata so simultaneous setup attempts on that installation agree.
-Different installations generate different IDs.
+version `1` and one 128-bit lowercase hexadecimal ID. A new v3 installation
+derives the ID from a SHA-256 hash of the local machine name and canonical Codex
+home. A readable earlier random anchor is imported unchanged so an upgrade does
+not orphan its Governor. The raw machine name and Codex-home path are not stored.
+The pseudonymous ID scopes one Governor to one local installation and remains
+stable when Chronos selects another bounded writable state slot after a sandbox
+restart. It is not a secret. It contains no raw hostname, username, Windows SID,
+machine GUID, path, task ID, or workspace data. The complete scoped key can enter
+the Governor assignment and host automation metadata so simultaneous setup
+attempts on that installation agree.
 
 Chronos does not install prompt, permission, or tool hooks. One asynchronous
 `Stop` handler records only a SHA-256 turn hash and bounded activity counters

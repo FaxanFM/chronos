@@ -22,6 +22,13 @@ function Get-TestHash {
   finally { $sha.Dispose() }
 }
 
+function Get-DefaultSupervisionStatePath {
+  param([string]$TempRoot, [int]$Slot = 0)
+  $codexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex'))
+  $scopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
+  Join-Path $TempRoot (Join-Path ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $Slot) 'session-registry.json')
+}
+
 function Get-Payload {
   param($Result)
   $line = @($Result.Output | Where-Object { $_ -like 'CHRONOS SUPERVISION *' } | Select-Object -Last 1)
@@ -154,11 +161,12 @@ function Invoke-ConfiguredWindowsHook {
 }
 
 function Invoke-SupervisionInTempRoot {
-  param([string]$TempRoot, [string]$State = '')
+  param([string]$TempRoot, [string]$State = '', [string]$Action = 'status', [string]$Session = '')
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
-  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction status' -f $wrapper
+  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
   if ($State) { $info.Arguments += ' -SupervisionStatePath "{0}"' -f $State }
+  if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -179,6 +187,38 @@ function Invoke-SupervisionInTempRoot {
     Text = (($output + $errorOutput).Trim())
   }
   $process.Dispose()
+  $result
+}
+
+function Start-SupervisionInTempRoot {
+  param([string]$TempRoot)
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = 'powershell.exe'
+  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction status' -f $wrapper
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.EnvironmentVariables['TEMP'] = $TempRoot
+  $info.EnvironmentVariables['TMP'] = $TempRoot
+  [Diagnostics.Process]::Start($info)
+}
+
+function Complete-SupervisionInTempRoot {
+  param([Diagnostics.Process]$Process)
+  if (-not $Process.WaitForExit(10000)) {
+    try { $Process.Kill() } catch {}
+    throw 'Concurrent TEMP-scoped supervision status exceeded its bounded test timeout.'
+  }
+  $output = $Process.StandardOutput.ReadToEnd()
+  $errorOutput = $Process.StandardError.ReadToEnd()
+  $result = [pscustomobject]@{
+    ExitCode = $Process.ExitCode
+    Output = @($output -split "`r?`n" | Where-Object { $_ })
+    Text = (($output + $errorOutput).Trim())
+  }
+  $Process.Dispose()
   $result
 }
 
@@ -225,8 +265,7 @@ try {
   } | ConvertTo-Json -Compress
   $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
   Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
-  $configuredScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
-  $configuredStatePath = Join-Path $configuredHookTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $configuredScopeHash 'session-registry.json'))
+  $configuredStatePath = Get-DefaultSupervisionStatePath $configuredHookTemp
   Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Configured Windows hook reported success without reaching the registry script.'
   $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
@@ -239,7 +278,7 @@ try {
   New-Item -ItemType Directory -Path $priorUpgradeDirectory -Force | Out-Null
   $priorSeed = Invoke-Supervision $priorUpgradeState 'initialize' 'prior-upgrade-seed'
   Assert-True ($priorSeed.ExitCode -eq 0 -and (Test-Path -LiteralPath $priorUpgradeState -PathType Leaf)) 'Could not seed the prior fixed TEMP supervision registry.'
-  Remove-Item -LiteralPath (Join-Path $upgradeTemp 'Chronos\Supervision-v2') -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Split-Path -Parent (Get-DefaultSupervisionStatePath $upgradeTemp)) -Recurse -Force -ErrorAction SilentlyContinue
   $priorWriteTime = (Get-Item -LiteralPath $priorUpgradeState -Force).LastWriteTimeUtc
   $priorAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -267,6 +306,93 @@ try {
     Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $priorAcl -ErrorAction SilentlyContinue
     Assert-True ((Get-Item -LiteralPath $priorUpgradeState -Force).LastWriteTimeUtc -eq $priorWriteTime) 'Prior supervision state changed during read-only migration.'
     Remove-Item -LiteralPath $upgradeTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  $readableV2Temp = Join-Path $root 'readable v2 temp'
+  $readableV2ScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $readableV2State = Join-Path $readableV2Temp (Join-Path 'Chronos\Supervision-v2' (Join-Path $readableV2ScopeHash 'session-registry.json'))
+  $readableV2Seed = Invoke-Supervision $readableV2State 'initialize' 'readable-v2-governor'
+  Assert-True ($readableV2Seed.ExitCode -eq 0) 'Could not seed a readable v2 supervision namespace.'
+  $readableV2Key = (Get-Payload $readableV2Seed).hostEquivalenceKey
+  $readableV2WriteTime = (Get-Item -LiteralPath $readableV2State -Force).LastWriteTimeUtc
+  try {
+    $readableV3Status = Invoke-SupervisionInTempRoot $readableV2Temp
+    Assert-True ($readableV3Status.ExitCode -eq 0) 'Readable v2 supervision state did not migrate to the v3 default.'
+    $readableV3Payload = Get-Payload $readableV3Status
+    Assert-True ($readableV3Payload.hostEquivalenceKey -eq $readableV2Key) 'Readable v2 migration changed the installation equivalence key and could orphan its Governor recurrence.'
+    Assert-True ($readableV3Payload.installationScopePersistence -eq 'bounded_v3_state_root_anchor' -and $readableV3Payload.installationScopeSource -eq 'prior_anchor_imported') 'Readable v2 migration did not report the preserved anchor provenance.'
+    Assert-True ($readableV3Payload.priorStateDisposition -eq 'read_only_imported' -and -not $readableV3Payload.priorStateWriteAttempted) 'Readable v2 migration was not read-only.'
+  } finally {
+    Assert-True ((Get-Item -LiteralPath $readableV2State -Force).LastWriteTimeUtc -eq $readableV2WriteTime) 'Readable v2 state changed during v3 migration.'
+    Remove-Item -LiteralPath $readableV2Temp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # An inaccessible active v2 namespace from a previous sandbox identity must
+  # be preserved while the v3 default initializes under a writable direct TEMP
+  # child with a deterministic installation identity.
+  $restartTemp = Join-Path $root 'restarted sandbox temp'
+  $restartScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $restartV2Directory = Join-Path $restartTemp (Join-Path 'Chronos\Supervision-v2' $restartScopeHash)
+  $restartV2State = Join-Path $restartV2Directory 'session-registry.json'
+  New-Item -ItemType Directory -Path $restartV2Directory -Force | Out-Null
+  $restartSeed = Invoke-Supervision $restartV2State 'initialize' 'prior-v2-governor'
+  Assert-True ($restartSeed.ExitCode -eq 0) 'Could not seed the prior v2 supervision namespace.'
+  $restartV2WriteTime = (Get-Item -LiteralPath $restartV2State -Force).LastWriteTimeUtc
+  $restartV2Acl = Get-Acl -LiteralPath $restartV2Directory
+  $restartRestrictedAcl = Get-Acl -LiteralPath $restartV2Directory
+  [void]$restartRestrictedAcl.AddAccessRule($denyRule)
+  Set-Acl -LiteralPath $restartV2Directory -AclObject $restartRestrictedAcl
+  try {
+    $restartStatus = Invoke-SupervisionInTempRoot $restartTemp
+    Assert-True ($restartStatus.ExitCode -eq 0) 'An inaccessible active v2 namespace blocked restarted-host supervision recovery.'
+    $restartPayload = Get-Payload $restartStatus
+    Assert-True ($restartPayload.ok -and $restartPayload.stateStoreMode -eq 'temp_private' -and $restartPayload.stateStoreRecovery -eq 'bounded_default_slot_selection') 'Restarted-host recovery did not use the bounded v3 state store.'
+    Assert-True ($restartPayload.installationScopePersistence -eq 'bounded_v3_state_root_anchor' -and $restartPayload.installationScopeSource -eq 'deterministic_host_codex_home_hash' -and $restartPayload.hostEquivalenceKey -match '^chronos-supervision-v1:[a-f0-9]{32}$') 'Restarted-host recovery did not preserve deterministic installation identity.'
+    Assert-True ($restartPayload.stateStoreMigration -eq 'prior_state_unavailable_new_root' -and $restartPayload.priorStateDisposition -eq 'unavailable_preserved' -and -not $restartPayload.priorStateWriteAttempted) 'Inaccessible v2 state was not preserved as read-only migration evidence.'
+    $restartState = Get-DefaultSupervisionStatePath $restartTemp
+    $restartInitialize = Invoke-SupervisionInTempRoot $restartTemp '' 'initialize' 'restarted-v3-governor'
+    Assert-True ($restartInitialize.ExitCode -eq 0 -and (Test-Path -LiteralPath $restartState -PathType Leaf)) 'Restarted-host recovery did not initialize the v3 registry.'
+    $restartRepeat = Get-Payload (Invoke-SupervisionInTempRoot $restartTemp)
+    Assert-True ($restartRepeat.hostEquivalenceKey -eq $restartPayload.hostEquivalenceKey) 'Recovered installation identity changed across restarted-host status calls.'
+  } finally {
+    Set-Acl -LiteralPath $restartV2Directory -AclObject $restartV2Acl -ErrorAction SilentlyContinue
+    Assert-True ((Get-Item -LiteralPath $restartV2State -Force).LastWriteTimeUtc -eq $restartV2WriteTime) 'Inaccessible v2 state changed during restarted-host recovery.'
+    Remove-Item -LiteralPath $restartTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  $slotTemp = Join-Path $root 'bounded slot temp'
+  New-Item -ItemType Directory -Path $slotTemp -Force | Out-Null
+  $slotZeroState = Get-DefaultSupervisionStatePath $slotTemp 0
+  $slotZeroRoot = Split-Path -Parent $slotZeroState
+  [IO.File]::WriteAllText($slotZeroRoot, 'occupied-without-state', [Text.UTF8Encoding]::new($false))
+  try {
+    $slotRecovery = Invoke-SupervisionInTempRoot $slotTemp
+    Assert-True ($slotRecovery.ExitCode -eq 0) 'A blocked primary v3 slot prevented bounded state-store recovery.'
+    $slotPayload = Get-Payload $slotRecovery
+    Assert-True ($slotPayload.stateStoreSlot -eq 1 -and $slotPayload.stateStoreMigration -eq 'default_state_slot_recovered') 'Default state-store recovery did not select the next bounded slot.'
+    $slotInitialize = Invoke-SupervisionInTempRoot $slotTemp '' 'initialize' 'slot-recovery-governor'
+    Assert-True ($slotInitialize.ExitCode -eq 0) 'Recovered state slot could not initialize supervision.'
+    Assert-True ((Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $slotTemp 1) -PathType Leaf) -and (Get-Content -Raw -LiteralPath $slotZeroRoot) -eq 'occupied-without-state') 'Slot recovery modified the blocked path or omitted the recovered registry.'
+  } finally {
+    Remove-Item -LiteralPath $slotZeroRoot -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $slotTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  $concurrentDefaultTemp = Join-Path $root 'concurrent default temp'
+  New-Item -ItemType Directory -Path $concurrentDefaultTemp -Force | Out-Null
+  try {
+    $defaultProcessA = Start-SupervisionInTempRoot $concurrentDefaultTemp
+    $defaultProcessB = Start-SupervisionInTempRoot $concurrentDefaultTemp
+    $defaultResultA = Complete-SupervisionInTempRoot $defaultProcessA
+    $defaultResultB = Complete-SupervisionInTempRoot $defaultProcessB
+    Assert-True ($defaultResultA.ExitCode -eq 0 -and $defaultResultB.ExitCode -eq 0) 'Concurrent default-state initialization did not converge successfully.'
+    $defaultPayloadA = Get-Payload $defaultResultA
+    $defaultPayloadB = Get-Payload $defaultResultB
+    Assert-True ($defaultPayloadA.stateStoreSlot -eq 0 -and $defaultPayloadB.stateStoreSlot -eq 0) 'Concurrent default-state initialization split across recovery slots.'
+    Assert-True ($defaultPayloadA.stateStoreIdentity -eq $defaultPayloadB.stateStoreIdentity -and $defaultPayloadA.hostEquivalenceKey -eq $defaultPayloadB.hostEquivalenceKey) 'Concurrent default-state initialization split the registry or installation identity.'
+    Assert-True (@(Get-ChildItem -LiteralPath $concurrentDefaultTemp -Directory -Force).Count -eq 1) 'Concurrent default-state initialization created more than one state directory.'
+  } finally {
+    Remove-Item -LiteralPath $concurrentDefaultTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
   $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath
   foreach ($requiredConvergenceControl in @(
@@ -855,7 +981,8 @@ try {
   Assert-True (@(Get-ChildItem -LiteralPath $pendingDirectory -File -Force).Count -eq 0) 'Merged fallback queue entries were not removed.'
 
   $sourceText = Get-Content -Raw -LiteralPath $module
-  Assert-True ($sourceText.Contains("Join-Path `$tempRoot 'Chronos\Supervision'")) 'Default supervision state must use the private TEMP Chronos namespace.'
+  Assert-True ($sourceText.Contains("'Chronos-Supervision-v3-{0}-{1}'") -and $sourceText.Contains('$script:DefaultStateCandidates') -and $sourceText.Contains('bounded_default_slot_selection')) 'Default supervision state must use bounded direct TEMP slots that recover from an inaccessible prior sandbox namespace.'
+  Assert-True ($sourceText.Contains('Chronos.Supervision.Installation.v3') -and $sourceText.Contains('bounded_v3_state_root_anchor') -and $sourceText.Contains('deterministic_host_codex_home_hash')) 'Default installation identity must survive a recovered state slot and report its provenance.'
   Assert-True ($sourceText.Contains("Join-Path `$localRoot 'session-registry.json'")) 'LocalAppData must remain available only as the legacy supervision migration source.'
   Assert-True ($sourceText.Contains('$script:SynchronousHookMutexWaitMilliseconds = 250')) 'Synchronous hook mutex deadline is not fixed at 250 ms.'
   Assert-True ($sourceText.Contains('$script:AsynchronousHookMutexWaitMilliseconds = 100')) 'Asynchronous hook mutex deadline is not fixed at 100 ms.'

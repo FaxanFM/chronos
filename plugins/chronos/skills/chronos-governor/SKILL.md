@@ -20,6 +20,13 @@ worker loop, or unbounded model use. Tell the user before creation that the
 default cadence is at most one Governor turn per hour while work is active and
 one every six hours while idle. Worker tasks receive no recurring turns.
 
+**Hard gate:** Do not create or enable any Governor recurrence until native
+initialization succeeds, supervision and Heartbeat status are readable, and one
+complete host-inventory cycle contains the selected Governor exactly once and
+returns `recurrenceEligible=true`. Any other result requires zero active
+current-key recurrences, verified from fresh host state. Never use a recurrence
+to retry, recover, or finish a failed setup.
+
 Read `hostEquivalenceKey` from supervision status. It is
 `chronos-supervision-v1:<opaque-installation-id>` and scopes the dedicated task,
 its compact assignment, and the matching automation to one local Chronos

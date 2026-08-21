@@ -252,7 +252,60 @@ function Invoke-Git {
 
 function Try-Invoke-Git {
   param([string[]]$Arguments)
-  Invoke-SanitizedGit $Arguments $true
+  try { Invoke-SanitizedGit $Arguments $true } catch { @{ ok = $false; output = '' } }
+}
+
+function Invoke-GitIdentityCommand {
+  param([ValidateSet('root', 'common')] [string]$Mode)
+  $startInfo = [Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = 'git.exe'
+  $startInfo.WorkingDirectory = $script:RepositoryRoot
+  $startInfo.Arguments = if ($Mode -eq 'root') {
+    '-c core.fsmonitor=false -c core.hooksPath=NUL rev-parse --show-toplevel'
+  } else {
+    '-c core.fsmonitor=false -c core.hooksPath=NUL rev-parse --path-format=absolute --git-common-dir'
+  }
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  foreach ($name in @(
+    'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+    'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM',
+    'GIT_ATTR_NOSYSTEM', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_EXTERNAL_DIFF', 'GIT_DIFF_OPTS', 'GIT_PAGER', 'GIT_TRACE',
+    'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_OPTIONAL_LOCKS'
+  )) { [void]$startInfo.EnvironmentVariables.Remove($name) }
+  $startInfo.EnvironmentVariables['GIT_CONFIG_COUNT'] = '1'
+  $startInfo.EnvironmentVariables['GIT_CONFIG_KEY_0'] = 'safe.directory'
+  $startInfo.EnvironmentVariables['GIT_CONFIG_VALUE_0'] = $script:RepositoryRoot
+  $startInfo.EnvironmentVariables['GIT_CONFIG_GLOBAL'] = 'NUL'
+  $startInfo.EnvironmentVariables['GIT_CONFIG_SYSTEM'] = 'NUL'
+  $startInfo.EnvironmentVariables['GIT_CONFIG_NOSYSTEM'] = '1'
+  $startInfo.EnvironmentVariables['GIT_ATTR_NOSYSTEM'] = '1'
+  $startInfo.EnvironmentVariables['GIT_OPTIONAL_LOCKS'] = '0'
+  $process = [Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  try {
+    if (-not $process.Start()) { return @{ ok = $false; output = ''; failure = 'start_failed' } }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(5000)) {
+      try { $process.Kill() } catch {}
+      return @{ ok = $false; output = ''; failure = 'timeout' }
+    }
+    [void]$stderr.Result
+    $text = ([string]$stdout.Result).Trim()
+    if ($process.ExitCode -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($text) -gt 32768) {
+      return @{ ok = $false; output = ''; failure = 'command_failed' }
+    }
+    return @{ ok = $true; output = $text; failure = 'none' }
+  } catch {
+    return @{ ok = $false; output = ''; failure = 'invocation_unavailable' }
+  } finally {
+    $process.Dispose()
+  }
 }
 
 function Invoke-SanitizedGit {
@@ -1253,11 +1306,11 @@ try {
   }
   $script:RepositoryRoot = Resolve-CanonicalPath $resolvedRepository
   $script:FailureStage = 'repository_identity'
-  $rootResult = Try-Invoke-Git @('rev-parse', '--show-toplevel')
+  $rootResult = Invoke-GitIdentityCommand 'root'
   $rawRoot = $rootResult.output
   if (-not $rootResult.ok -or -not $rawRoot) { Throw-GovernorError "git_repository_required" }
   $script:RepositoryRoot = Resolve-CanonicalPath $rawRoot
-  $commonResult = Try-Invoke-Git @('rev-parse', '--path-format=absolute', '--git-common-dir')
+  $commonResult = Invoke-GitIdentityCommand 'common'
   $rawCommonDir = $commonResult.output
   if (-not $commonResult.ok -or -not $rawCommonDir) { Throw-GovernorError "git_common_dir_unavailable" }
   $script:GitCommonDir = Resolve-CanonicalPath $rawCommonDir

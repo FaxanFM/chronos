@@ -178,11 +178,14 @@ or transcript. The next hook or Governor status merges and removes it under the
 mutex. Chronos retains the empty fallback directory to prevent a parent-delete
 race with lifecycle writers that intentionally do not wait on the registry mutex.
 
-A separate minimal `installation-scope.json` anchor stores a random 128-bit
-opaque ID. It contains no machine-derived value and is not a credential. The
-host uses the resulting scoped equivalence key to reconcile one Governor per
-installation. This is necessary because a Governor on one PC cannot consume
-another PC's local registry. The anchor survives session-registry recovery.
+A separate minimal `installation-scope.json` anchor stores a 128-bit opaque ID.
+New v3 state derives it from a SHA-256 hash of the local machine name and
+canonical Codex home; readable earlier random anchors are imported to preserve
+Governor identity. It stores no raw input value and is not a credential. The host uses the resulting
+scoped equivalence key to reconcile one Governor per installation. This is
+necessary because a Governor on one PC cannot consume another PC's local
+registry. The identity survives session-registry recovery and bounded default
+state-slot selection.
 
 `chronos.cmd -Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
@@ -224,8 +227,8 @@ user's Windows temporary Chronos directory. Intervention state contains
 hashes, enums, counters, and timestamps. It does not persist the raw collector
 snapshot or raw route, subject, owner, or task IDs.
 
-Passive supervision persists one bounded registry beneath the current user's
-Windows temporary Chronos directory. Raw task and agent IDs are DPAPI protected
+Passive supervision persists one bounded registry in the first writable of four
+direct, hashed Windows TEMP child slots. Raw task and agent IDs are DPAPI protected
 for that user; workspace identity is hashed. DPAPI does not defend against a
 different process already running as the same user. Decrypted IDs are returned
 only by local supervision status or Governor discovery for host routing and can enter that

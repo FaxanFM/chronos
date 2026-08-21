@@ -55,6 +55,11 @@ request to verify the installed source, run compact native status, and apply the
 `chronos-governor` skill's Automatic Supervision Bootstrap. That bootstrap must
 reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
+This is a hard gate, not a best-effort sequence: the host must create or enable
+no recurrence until initialization succeeds, supervision and Heartbeat status
+are readable, one complete inventory contains the selected Governor exactly
+once, and the cycle returns `recurrenceEligible=true`. Any earlier failure must
+end with zero active current-key recurrences and no recovery recurrence.
 Do not stop after an inspection or return setup instructions for the user to
 relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
 complete setup through authoritative host inventory without asking the user to
@@ -68,12 +73,6 @@ whether hooks execute or not. Hooks are an optional accelerator only.
 `hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
 must not make setup fail after complete inventory and topology postconditions
 pass.
-Do not create or enable the Governor recurrence until initialization succeeds,
-supervision and Heartbeat status are readable, and one complete host-inventory
-cycle contains the selected Governor exactly once and returns
-`recurrenceEligible=true`. Any earlier failure must leave zero Chronos
-recurrences; a recurrence is never a recovery mechanism for failed setup.
-
 ## Complete status request
 
 When the user asks for a complete Chronos status, run the Inspector, supervision

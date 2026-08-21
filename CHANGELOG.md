@@ -29,19 +29,27 @@
 - Add a complete-status skill contract that runs Inspector, supervision, and
   Heartbeat status without creating a Governor, recurrence, worker, event, or
   task wake.
-- Retain v0.9.1's full-setup, diagnostic-status, and bounded-delegation starter
-  prompts and their deterministic listing-quality gates.
-- Move supervision state to a machine-and-Codex-home-scoped private v2 TEMP
-  namespace. Treat inaccessible prior state as preserved read-only evidence
-  instead of failing the new registry, and never attempt to modify it.
+- Tighten the full-setup starter prompt and put its hard recurrence gate before
+  every setup action: initialization, readable supervision and Heartbeat status,
+  and a complete Governor-bearing inventory must pass before a recurrence can
+  exist. Every earlier failure verifies zero current-key recurrences and creates
+  no recovery recurrence.
+- Move supervision state to four bounded direct v3 TEMP child slots. Select the
+  first writable non-reparse slot so a shared ancestor left inaccessible by an
+  earlier sandbox identity cannot block a restarted host. Keep one stable
+  installation identity across slot recovery, with a deterministic
+  host-and-Codex-home fallback when no prior anchor is readable. Treat
+  inaccessible prior state as preserved read-only evidence and never attempt to
+  modify it.
 - Make recurrence eligibility an explicit postcondition of a successful
   initialization, readable supervision and Heartbeat state, verified Governor
   identity, and one complete host inventory that contains that Governor. A
   failed or partial setup creates no recurrence.
-- Run Governor Git probes with the canonical repository explicitly marked safe
-  for the subprocess. This preserves repository identity after a Codex restart
-  changes the sandbox execution identity while ignoring global and system Git
-  config files and without changing user Git config.
+- Run Governor identity probes in a bounded, sanitized Git subprocess with the
+  canonical repository explicitly marked safe. This preserves repository
+  identity after a Codex restart changes the sandbox execution identity while
+  ignoring global and system Git config files, bounding output and runtime, and
+  returning explicit Git errors instead of `internal_error`.
 - Return an explicit retry contract for a unique Heartbeat cycle that overlaps
   the bounded state mutex wait. Do not silently discard the cycle.
 - Make the Heartbeat contention regression hold its mutex until the assertion
