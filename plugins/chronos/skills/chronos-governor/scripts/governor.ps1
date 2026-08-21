@@ -340,7 +340,9 @@ function Invoke-SanitizedGitBytes {
     )
   $saved = @{}
   foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
-  $env:GIT_CONFIG_COUNT = '0'
+  $env:GIT_CONFIG_COUNT = '1'
+  $env:GIT_CONFIG_KEY_0 = 'safe.directory'
+  $env:GIT_CONFIG_VALUE_0 = $script:RepositoryRoot
   $env:GIT_CONFIG_GLOBAL = $null
   $env:GIT_CONFIG_SYSTEM = $null
   $env:GIT_CONFIG_NOSYSTEM = $null

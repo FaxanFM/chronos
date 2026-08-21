@@ -820,6 +820,10 @@ $input | ForEach-Object { $_ }
   if (-not $scriptText.Contains("'-c', ('safe.directory=' + `$script:RepositoryRoot)")) {
     throw 'Governor Git discovery must trust only the already-canonicalized requested repository for a restarted sandbox identity.'
   }
+  if (-not $scriptText.Contains("`$env:GIT_CONFIG_KEY_0 = 'safe.directory'") -or
+      -not $scriptText.Contains("`$env:GIT_CONFIG_VALUE_0 = `$script:RepositoryRoot")) {
+    throw 'Governor bounded Git fingerprinting must inherit the same canonical repository trust without changing user Git config.'
+  }
 
   Write-Output ("Chronos Governor deterministic validations passed. Scenarios: {0}. This checklist is not a security-coverage percentage." -f `
     $validatedScenarios)

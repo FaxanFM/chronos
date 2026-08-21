@@ -63,8 +63,9 @@ usernames, or absolute paths. It is not transmitted by Chronos.
 Governor verification may return repository-relative changed paths when its
 advisory read-mutation check fails. Shared-folder write delegation is disabled.
 
-When the user trusts the packaged Chronos hooks, they run when a Codex task or
-subagent starts or ends and once after a main-task turn completes. The hook
+When the user trusts the packaged Chronos hooks and Codex dispatches them, they
+run when a task or subagent starts or ends and once after a main-task turn
+completes. The hook
 receives the host event object but does not read or retain its transcript path,
 assistant message, prompt, or tool data. It stores task and agent
 identifiers protected with Windows DPAPI for the current user, SHA-256 indexes,
