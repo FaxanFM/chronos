@@ -206,7 +206,9 @@ Recurrence creation is gated by native postconditions. Initialization must
 succeed, supervision and Heartbeat status must be readable, and one complete
 host-inventory cycle must contain the selected Governor exactly once before the
 registry returns `recurrenceEligible=true`. Failed setup cannot schedule its
-own recovery turn.
+own recovery turn. The host snapshots matching recurrences before initialization;
+any setup failure removes or pauses that complete set, including pre-existing
+matches, and verifies zero active Chronos recurrences.
 
 ## Persistent Data
 

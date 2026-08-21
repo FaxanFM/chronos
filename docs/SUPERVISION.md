@@ -75,7 +75,8 @@ The host uses this reconciliation order:
 
 1. Inspect every host automation named exactly `Chronos Governor pulse`, its
    immutable ID, creation time when available, target task, equivalence key,
-   and compact local supervision status.
+   and compact local supervision status. Do this before initialization and
+   retain the complete matching-recurrence candidate set through setup.
 2. Read `hostEquivalenceKey` from status. Accept only candidates whose task
    assignment carries that complete value and verifies the dedicated role. Sort existing
    automation candidates by creation time ascending, then immutable automation
@@ -260,7 +261,11 @@ returning a path.
 Initialization alone never authorizes a recurrence. The first complete host
 inventory cycle must contain the selected Governor exactly once and return
 `recurrenceEligible=true`. A failed initialization, unreadable status, missing
-Governor, or failed inventory cycle requires zero Chronos recurrences.
+Governor, or failed inventory cycle requires pausing or removing every matching
+recurrence in the pre-initialization candidate set, including a pre-existing
+active recurrence. Re-list host state and prove zero active Chronos recurrences
+within three bounded mutation and verification attempts. Do not schedule a
+recovery recurrence.
 
 The registry is capped at 256 KiB and 256 retained records. Task and agent identifiers are
 encrypted with Windows DPAPI for the current Windows user and indexed by

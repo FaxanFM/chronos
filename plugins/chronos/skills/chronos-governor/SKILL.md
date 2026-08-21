@@ -30,10 +30,12 @@ name alone is not an equivalence key. Never copy a key from another machine.
    Heartbeat status. A confirmed enabled-source conflict or unhealthy native
    state fails closed before host mutation. Cached copies alone are not proof
    of a conflict.
-2. Reconcile host state before trusting local state. Inspect every host
+2. Reconcile host state before trusting local state or running initialization.
+   Inspect every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
    ID, creation time when available, target task, and equivalence key. Also run
-   `chronos.cmd -Action supervise -SupervisionAction status`.
+   `chronos.cmd -Action supervise -SupervisionAction status`. Retain this complete
+   matching-recurrence candidate set until setup reaches a verified postcondition.
 3. Build one host candidate set. Keep only live targets whose compact assignment
    contains the complete current `hostEquivalenceKey` and confirms the dedicated role. Sort valid
    automation candidates by creation time ascending, then immutable automation
@@ -61,8 +63,11 @@ name alone is not an equivalence key. Never copy a key from another machine.
    once. Continue only when native state is writable, Heartbeat is readable,
    the cycle returns `recurrenceEligible=true`, and its compact status includes
    the selected Governor. If initialization, status, Heartbeat, or the complete
-   cycle fails, create no recurrence. Remove any recurrence created during the
-   failed attempt and retain only bounded local recovery state.
+   cycle fails, create no recurrence. Pause or delete every matching recurrence
+   from the pre-initialization candidate set, including a pre-existing active
+   recurrence, then re-list host state and prove that zero matching recurrences
+   are active. Use at most three bounded mutation and verification attempts.
+   Retain only bounded local recovery state. Do not schedule a recovery turn.
 7. Reconcile all matching automations after the claim and complete inventory
    cycle succeed. Update the
    deterministic winner in place when possible, or create one when none exists.
@@ -125,8 +130,10 @@ degraded, exactly one live dedicated Governor owns exactly one active matching
 recurrence, Heartbeat status is readable from that Governor, and no worker task
 has a recurrence. Return a compact setup summary with those fields. Do not make
 the user infer success from `governorClaimed` or another internal state name.
-Initialization or status failure is a hard no-recurrence postcondition, not a
-reason to schedule a retrying Governor.
+Initialization, status, Heartbeat, or inventory failure is a hard zero-recurrence
+postcondition. It applies to matching recurrences that predate the setup attempt
+as well as any created during it; it is not a reason to schedule a retrying
+Governor.
 
 Plugin monitoring hooks register `SessionStart`, `SessionEnd`,
 `SubagentStart`, `SubagentStop`, and one `Stop` signal after each completed main

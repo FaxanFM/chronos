@@ -218,7 +218,10 @@ refused a new hint; use host task tools as authority.
 Never create or enable a Governor recurrence after initialization alone. First
 require readable supervision and Heartbeat status and one successful complete
 host-inventory cycle that contains the Governor exactly once and returns
-`recurrenceEligible=true`. Any failure leaves zero Chronos recurrences.
+`recurrenceEligible=true`. Before initialization, retain the complete set of
+matching host recurrences. Any failure pauses or removes all of them, including
+a pre-existing recurrence, and re-lists host state to verify zero active Chronos
+recurrences. Never use a recurrence to recover from failed setup.
 
 Delayed start events cannot revive terminal records. After host task
 status proves that an ended task is active again, the Governor can use

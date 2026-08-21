@@ -96,7 +96,7 @@ try {
       throw "Public upgrade guidance is missing the stale task-locator boundary: $required"
     }
   }
-  $supervisionContract = Get-Content -Raw -LiteralPath $supervisionPath
+  $supervisionContract = (Get-Content -Raw -LiteralPath $supervisionPath) -replace '\s+', ' '
   foreach ($required in @(
     'exactly one active',
     'chronos-supervision-v1',
@@ -115,6 +115,10 @@ try {
     'optional accelerator',
     'hookRequiredForAutonomy=false',
     'complete host inventory',
+    'before initialization',
+    'pre-existing active recurrence',
+    'prove zero active Chronos recurrences',
+    'Do not schedule a recovery recurrence',
     'fully quit and reopen Codex',
     'quote-free',
     'cmd.exe',
@@ -156,10 +160,12 @@ try {
     Get-Content -Raw -LiteralPath $readmePath
     Get-Content -Raw -LiteralPath $pluginReadmePath
   ) -join "`n"
+  $publicReadmes = $publicReadmes -replace '\s+', ' '
   foreach ($required in @(
     'Set up Chronos fully on this PC',
     'one dedicated Governor',
     'zero worker recurrences',
+    'including one that existed before the attempt',
     'do not ask me to relay routine findings'
   )) {
     if (-not $publicReadmes.Contains($required)) {
