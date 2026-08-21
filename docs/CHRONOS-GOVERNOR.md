@@ -80,7 +80,8 @@ prohibited by assignment policy, but Governor cannot remove that runtime tool.
 
 Governor records a bounded Git-visible fingerprint before a read lease and at
 result. Git runs with fsmonitor, text conversion, external diffs, hooks, pagers,
-and relevant environment overrides disabled. Repository discovery and bounded
+global and system config files, and relevant environment overrides disabled.
+Repository discovery and bounded
 fingerprinting trust only the already-canonicalized requested repository for
 their subprocess and do not change user Git configuration. Fingerprint input
 is capped.

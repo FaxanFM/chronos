@@ -6,7 +6,7 @@ security-coverage percentage, and the project does not describe it as one.
 
 ## Governor
 
-`tests/governor.tests.ps1` currently runs 46 deterministic validations. They
+`tests/governor.tests.ps1` currently runs 47 deterministic validations. They
 cover runtime inventory selection, model binding, canonical worker IDs,
 single-use plan tokens, V2 `fork_turns=none`, categorical write containment,
 one active lease per worker, fencing, renewal, read-mutation detection,
@@ -15,6 +15,9 @@ equivalent paths, stale and live locks, malformed and interrupted state,
 unwritable state, privacy, legacy migration and write-lease quarantine,
 clean-filter non-execution, pending-plan capacity, plan-to-lease workspace
 mutation rejection, expired verified release, and custom-state rejection.
+They also execute repository discovery and bounded fingerprinting while the
+parent process points global and system Git config at a malformed file; both
+operations must ignore it and restore the parent environment.
 
 These tests validate modeled behavior. They do not turn Governor into a
 security boundary. Write delegation remains disabled.

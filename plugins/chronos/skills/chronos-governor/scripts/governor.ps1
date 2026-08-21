@@ -269,9 +269,9 @@ function Invoke-SanitizedGit {
   foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
   try {
     $env:GIT_CONFIG_COUNT = '0'
-    $env:GIT_CONFIG_GLOBAL = $null
-    $env:GIT_CONFIG_SYSTEM = $null
-    $env:GIT_CONFIG_NOSYSTEM = $null
+    $env:GIT_CONFIG_GLOBAL = 'NUL'
+    $env:GIT_CONFIG_SYSTEM = 'NUL'
+    $env:GIT_CONFIG_NOSYSTEM = '1'
     $env:GIT_ATTR_NOSYSTEM = '1'
     $env:GIT_DIR = $null
     $env:GIT_WORK_TREE = $null
@@ -343,9 +343,9 @@ function Invoke-SanitizedGitBytes {
   $env:GIT_CONFIG_COUNT = '1'
   $env:GIT_CONFIG_KEY_0 = 'safe.directory'
   $env:GIT_CONFIG_VALUE_0 = $script:RepositoryRoot
-  $env:GIT_CONFIG_GLOBAL = $null
-  $env:GIT_CONFIG_SYSTEM = $null
-  $env:GIT_CONFIG_NOSYSTEM = $null
+  $env:GIT_CONFIG_GLOBAL = 'NUL'
+  $env:GIT_CONFIG_SYSTEM = 'NUL'
+  $env:GIT_CONFIG_NOSYSTEM = '1'
   $env:GIT_ATTR_NOSYSTEM = '1'
   $env:GIT_DIR = $null
   $env:GIT_WORK_TREE = $null

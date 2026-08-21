@@ -144,8 +144,9 @@ Governor temp state is worker-reachable and unauthenticated. Atomic replacement
 and owner locks coordinate concurrent processes but do not establish state
 integrity. Workspace fingerprints use bounded raw file reads and Git metadata
 primitives; they never invoke working-tree conversion, `git diff`, textconv,
-clean filters, external diffs, hooks, or pagers. Relevant Git override
-environment variables are cleared around each invocation. Repository discovery
+clean filters, external diffs, hooks, or pagers. Global and system Git config
+files are ignored, and relevant override environment variables are isolated
+and restored around each invocation. Repository discovery
 and bounded fingerprint subprocesses trust only the already-canonicalized
 requested repository and do not change user Git configuration.
 

@@ -179,6 +179,25 @@ function New-FixtureRepository {
 try {
   New-FixtureRepository $fixtureRepo
   $mainBranch = (& git -C $fixtureRepo branch --show-current).Trim()
+
+  $hostileGitConfig = Join-Path $testRoot 'malformed-global-system.gitconfig'
+  [IO.File]::WriteAllText($hostileGitConfig, "[invalid`n", [Text.UTF8Encoding]::new($false))
+  $savedGlobalConfig = $env:GIT_CONFIG_GLOBAL
+  $savedSystemConfig = $env:GIT_CONFIG_SYSTEM
+  $savedNoSystem = $env:GIT_CONFIG_NOSYSTEM
+  try {
+    $env:GIT_CONFIG_GLOBAL = $hostileGitConfig
+    $env:GIT_CONFIG_SYSTEM = $hostileGitConfig
+    $env:GIT_CONFIG_NOSYSTEM = $null
+    $isolatedConfigPlan = New-TestPlan 'isolated-git-config' 'read' @('README.md') 'review'
+    Assert-Success $isolatedConfigPlan 'Governor read user global or system Git configuration.'
+    Close-TestReadPlan 'isolated-git-config' $isolatedConfigPlan
+  } finally {
+    $env:GIT_CONFIG_GLOBAL = $savedGlobalConfig
+    $env:GIT_CONFIG_SYSTEM = $savedSystemConfig
+    $env:GIT_CONFIG_NOSYSTEM = $savedNoSystem
+  }
+  Register-SafetyControl 'global-system-git-config-isolation'
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
@@ -823,6 +842,15 @@ $input | ForEach-Object { $_ }
   if (-not $scriptText.Contains("`$env:GIT_CONFIG_KEY_0 = 'safe.directory'") -or
       -not $scriptText.Contains("`$env:GIT_CONFIG_VALUE_0 = `$script:RepositoryRoot")) {
     throw 'Governor bounded Git fingerprinting must inherit the same canonical repository trust without changing user Git config.'
+  }
+  foreach ($isolatedConfig in @(
+    "`$env:GIT_CONFIG_GLOBAL = 'NUL'",
+    "`$env:GIT_CONFIG_SYSTEM = 'NUL'",
+    "`$env:GIT_CONFIG_NOSYSTEM = '1'"
+  )) {
+    if (([regex]::Matches($scriptText, [regex]::Escape($isolatedConfig))).Count -ne 2) {
+      throw "Governor Git isolation must apply to discovery and fingerprinting: $isolatedConfig"
+    }
   }
 
   Write-Output ("Chronos Governor deterministic validations passed. Scenarios: {0}. This checklist is not a security-coverage percentage." -f `

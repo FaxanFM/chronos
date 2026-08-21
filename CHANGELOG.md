@@ -40,7 +40,8 @@
   failed or partial setup creates no recurrence.
 - Run Governor Git probes with the canonical repository explicitly marked safe
   for the subprocess. This preserves repository identity after a Codex restart
-  changes the sandbox execution identity without changing user Git config.
+  changes the sandbox execution identity while ignoring global and system Git
+  config files and without changing user Git config.
 - Return an explicit retry contract for a unique Heartbeat cycle that overlaps
   the bounded state mutex wait. Do not silently discard the cycle.
 
