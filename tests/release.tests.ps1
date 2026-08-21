@@ -25,6 +25,13 @@ $first = Join-Path $testRoot "first"
 $second = Join-Path $testRoot "second"
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
+function Get-TextHash {
+  param([string]$Value)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
+}
+
 try {
   if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSEdition -ne 'Desktop') {
     throw "Release validation must run under inbox Windows PowerShell 5.1."
@@ -99,7 +106,8 @@ try {
     '60 minutes while monitored work is active and 360 minutes while idle',
     '336 cycles or 14 days',
     '-SupervisionConfirmRecurrenceStopped',
-    '%TEMP%\Chronos\Supervision\session-registry.json',
+    '%TEMP%\Chronos\Supervision-v2\<scope-sha256>\session-registry.json',
+    'recurrenceEligible=true',
     'one compact complete host task-list call',
     'gpt-5.6-terra',
     'configuration',
@@ -429,7 +437,8 @@ try {
   if ($configuredHookExit -ne 0 -or $configuredHookStdout -or $configuredHookStderr) {
     throw 'Packaged configured lifecycle hook did not execute silently through the Codex cmd.exe boundary.'
   }
-  $configuredRegistryPath = Join-Path $configuredHookTemp 'Chronos\Supervision\session-registry.json'
+  $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $configuredRegistryPath = Join-Path $configuredHookTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $configuredScopeHash 'session-registry.json'))
   if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf)) {
     throw 'Packaged configured lifecycle hook reported success without reaching the registry script.'
   }

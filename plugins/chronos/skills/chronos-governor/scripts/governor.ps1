@@ -286,6 +286,7 @@ function Invoke-SanitizedGit {
     $env:GIT_TRACE2_EVENT = $null
     $env:GIT_OPTIONAL_LOCKS = '0'
     $gitArguments = @(
+      '-c', ('safe.directory=' + $script:RepositoryRoot),
       '-c', 'core.fsmonitor=false',
       '-c', 'core.hooksPath=NUL',
       '-c', 'diff.external=',

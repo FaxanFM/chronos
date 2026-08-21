@@ -176,8 +176,11 @@ do not ask me to relay routine findings.
 ```
 
 Chronos verifies the package source and native status, reuses or creates one
-dedicated Governor, reconciles one host recurrence, enables due Heartbeat
-evaluation there, and proves that worker tasks have no recurrence. Normal Codex
+dedicated Governor, enables due Heartbeat evaluation there, and proves that
+worker tasks have no recurrence. It creates or reconciles the single Governor
+recurrence only after supervision and Heartbeat state are readable and one
+complete host inventory contains the verified Governor. Any failed or partial
+setup leaves zero Chronos recurrences. Normal Codex
 hook trust is optional for autonomous discovery. If Codex presents a trust
 request, only the user can approve it; Chronos proceeds through one complete
 host inventory per Governor cycle whether the hooks are trusted or dispatched.

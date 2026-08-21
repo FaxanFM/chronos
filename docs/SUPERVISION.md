@@ -242,16 +242,25 @@ surfaced to the user.
 The default registry is:
 
 ```text
-%TEMP%\Chronos\Supervision\session-registry.json
+%TEMP%\Chronos\Supervision-v2\<scope-sha256>\session-registry.json
 ```
 
 The directory retains the current user's inherited TEMP permissions. Chronos
 does not replace them with a transient sandbox identity. Task and agent
-identifiers remain protected by Windows DPAPI. On first use after an upgrade,
-Chronos imports a valid legacy
-LocalAppData registry and its separate installation-scope anchor into the temp
-state root. It reports the state-store mode, write preflight, protection mode,
-and migration result without returning a path.
+identifiers remain protected by Windows DPAPI. The scope hash binds the machine
+and Codex home without exposing either value. On first use after an upgrade,
+Chronos reads a valid prior fixed-TEMP or LocalAppData registry and its separate
+installation-scope anchor into the v2 state root. An inaccessible prior root is
+left unchanged and reported as `prior_state_unavailable_new_root` with
+`priorStateWriteAttempted=false`; authoritative host inventory rebuilds the
+advisory registry. Chronos reports the state-store mode, write preflight,
+protection mode, migration result, and prior-state disposition without
+returning a path.
+
+Initialization alone never authorizes a recurrence. The first complete host
+inventory cycle must contain the selected Governor exactly once and return
+`recurrenceEligible=true`. A failed initialization, unreadable status, missing
+Governor, or failed inventory cycle requires zero Chronos recurrences.
 
 The registry is capped at 256 KiB and 256 retained records. Task and agent identifiers are
 encrypted with Windows DPAPI for the current Windows user and indexed by

@@ -107,6 +107,9 @@ Governor claim and conflict, revision cursors, duplicate events, active-agent
 discovery, rotating eight-entry batches across 17 tasks, bounded idle and active
 cadence, stable and isolated opaque installation equivalence keys, malformed
 scope rejection, reconciliation retry budget and postcondition,
+private machine-and-Codex-home-scoped v2 TEMP state, read-only prior-state
+migration semantics, recurrence ineligibility before a complete Governor-bearing
+host inventory, rejection of an inventory that omits the selected Governor,
 cycle and age limits, mandatory complete per-cycle host inventory
 reconciliation, one hash-only normalized status per inventory task, passive
 non-advancing discovery, missed-hook task recovery, absent-task closure, stale inventory

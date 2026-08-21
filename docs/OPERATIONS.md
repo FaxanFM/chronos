@@ -198,19 +198,27 @@ brief hook contention. Do not edit or delete the fallback directory. A malformed
 entry is removed and increments the degraded counter; capacity pressure is
 reported without evicting the committed registry.
 
-The default registry is `%TEMP%\Chronos\Supervision\session-registry.json`.
+The default registry is
+`%TEMP%\Chronos\Supervision-v2\<scope-sha256>\session-registry.json`.
 The sibling `installation-scope.json` contains only a schema number and random
 opaque installation ID. Keep it during ordinary registry recovery so the host
 can match the existing Governor. Removing the entire supervision directory is
 a full identity reset and requires explicit host reconciliation before another
 Governor is created.
-On first use, a valid legacy LocalAppData registry and installation-scope anchor
-are imported into the temporary state root. Loss of the registry disables the
+On first use, a valid prior fixed-TEMP or LocalAppData registry and
+installation-scope anchor are imported read-only into the v2 temporary state
+root. If the prior root is inaccessible, Chronos preserves it, creates the v2
+root, and rebuilds from complete host inventory. Loss of the registry disables the
 discovery hint but does not affect Codex tasks. Reconcile existing host
 automations before recreating a claim so registry
 loss cannot justify a duplicate task or recurrence. `engine=degraded` with
 `registryCapacity=exhausted` means Chronos retained the existing 256 records and
 refused a new hint; use host task tools as authority.
+
+Never create or enable a Governor recurrence after initialization alone. First
+require readable supervision and Heartbeat status and one successful complete
+host-inventory cycle that contains the Governor exactly once and returns
+`recurrenceEligible=true`. Any failure leaves zero Chronos recurrences.
 
 Delayed start events cannot revive terminal records. After host task
 status proves that an ended task is active again, the Governor can use

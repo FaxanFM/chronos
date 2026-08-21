@@ -67,6 +67,11 @@ whether hooks execute or not. Hooks are an optional accelerator only.
 `hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
 must not make setup fail after complete inventory and topology postconditions
 pass.
+Do not create or enable the Governor recurrence until initialization succeeds,
+supervision and Heartbeat status are readable, and one complete host-inventory
+cycle contains the selected Governor exactly once and returns
+`recurrenceEligible=true`. Any earlier failure must leave zero Chronos
+recurrences; a recurrence is never a recovery mechanism for failed setup.
 
 ## Complete status request
 

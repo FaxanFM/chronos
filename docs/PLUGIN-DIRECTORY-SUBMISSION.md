@@ -18,10 +18,14 @@ v0.9.2 is the candidate Directory update. It mitigates the embedded-quote
 Windows hook-launcher defect, makes complete host inventory authoritative when
 the host does not dispatch hooks, preserves terminal state when asynchronous
 lifecycle events arrive out of order, and requires a full host restart after
-upgrade. It retains the improved first-use prompts, listing copy, full-setup
-contract, and deterministic prompt-quality gates. The candidate
+upgrade. It also isolates supervision state across restarted sandbox
+identities, gates recurrence creation on one successful complete-inventory
+cycle, permits Governor repository discovery without changing user Git config,
+and makes overlapping Heartbeat cycles explicitly retryable. It retains the
+improved first-use prompts, listing copy, full-setup contract, and deterministic
+prompt-quality gates. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`fb92539e61d31924ef05a054f3b807d5ed955f06d5aa3147f54a0db80c075b79`.
+`a00d000c97e14b5f2ee3ac1ceda1d34ec49bac34a4c65a21b77dd06ce4ae20f6`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

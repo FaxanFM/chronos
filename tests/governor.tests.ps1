@@ -817,6 +817,9 @@ $input | ForEach-Object { $_ }
   if ($scriptText -match "Invoke-Git\s+@\('diff'|git\s+diff") {
     throw 'Governor fingerprinting must not invoke working-tree git diff.'
   }
+  if (-not $scriptText.Contains("'-c', ('safe.directory=' + `$script:RepositoryRoot)")) {
+    throw 'Governor Git discovery must trust only the already-canonicalized requested repository for a restarted sandbox identity.'
+  }
 
   Write-Output ("Chronos Governor deterministic validations passed. Scenarios: {0}. This checklist is not a security-coverage percentage." -f `
     $validatedScenarios)

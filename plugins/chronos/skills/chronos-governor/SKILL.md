@@ -55,7 +55,16 @@ name alone is not an equivalence key. Never copy a key from another machine.
    won, the loser must stop, create no automation, and may be archived after host
    verification. Use `-Force` only after host task status proves the recorded
    owner is not live.
-6. Reconcile all matching automations after the claim succeeds. Update the
+6. Before creating or enabling any recurrence, require the successful
+   initialization payload, re-read supervision and Heartbeat status, and run one
+   complete host-inventory `cycle` that contains the selected Governor exactly
+   once. Continue only when native state is writable, Heartbeat is readable,
+   the cycle returns `recurrenceEligible=true`, and its compact status includes
+   the selected Governor. If initialization, status, Heartbeat, or the complete
+   cycle fails, create no recurrence. Remove any recurrence created during the
+   failed attempt and retain only bounded local recovery state.
+7. Reconcile all matching automations after the claim and complete inventory
+   cycle succeed. Update the
    deterministic winner in place when possible, or create one when none exists.
    Attach it to the selected task, pause or delete every non-winner, then re-list
    host state. Recompute the same winner after every mutation. Use at most three
@@ -65,7 +74,7 @@ name alone is not an equivalence key. Never copy a key from another machine.
    failure, stop all further setup retries in that pulse. Preserve the candidate
    state and retry later; never turn routine convergence failure into a user
    chore or rely on a create or allow result alone as proof.
-7. Before `discover` on Governor cycles zero and one, repeat the host candidate
+8. Before `discover` on Governor cycles zero and one, repeat the host candidate
    scan and exact postcondition check. This catches a concurrently created
    recurrence that was not visible during setup. A non-winning Governor must
    pause or delete its own recurrence, verify that the deterministic winner
@@ -75,12 +84,12 @@ name alone is not an equivalence key. Never copy a key from another machine.
    claim. After cycle one, do not rescan all host
    automations during normal cycles unless claim loss, rotation, or recovery
    requires reconciliation.
-8. Use the cadence returned by supervision: 60 minutes with active monitored
+9. Use the cadence returned by supervision: 60 minutes with active monitored
    work and 360 minutes while idle. The setup is an explicit opt-in to those
    recurring model turns. A Governor is bounded to 336 cycles or 14 days. At the
    bound, perform a verified fresh-task handoff when host tools support it;
    otherwise pause the recurrence and retain the reason in Governor-local state.
-9. If task creation is unavailable, use the current task only when the user's
+10. If task creation is unavailable, use the current task only when the user's
    setup request is explicit. State that it is the fallback and do not duplicate
    the current conversation through `fork_thread`.
 
@@ -116,6 +125,8 @@ degraded, exactly one live dedicated Governor owns exactly one active matching
 recurrence, Heartbeat status is readable from that Governor, and no worker task
 has a recurrence. Return a compact setup summary with those fields. Do not make
 the user infer success from `governorClaimed` or another internal state name.
+Initialization or status failure is a hard no-recurrence postcondition, not a
+reason to schedule a retrying Governor.
 
 Plugin monitoring hooks register `SessionStart`, `SessionEnd`,
 `SubagentStart`, `SubagentStop`, and one `Stop` signal after each completed main

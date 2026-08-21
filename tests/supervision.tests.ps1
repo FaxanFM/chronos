@@ -82,7 +82,12 @@ function Start-HookProcess {
     $process.StandardInput.Write($Json)
     $process.StandardInput.Close()
   }
-  [pscustomobject]@{ Process = $process; State = $State }
+  $stage = 'unparsed-hook'
+  try {
+    $stageData = $Json | ConvertFrom-Json -ErrorAction Stop
+    $stage = '{0}:{1}' -f [string]$stageData.hook_event_name, [string]$stageData.session_id
+  } catch {}
+  [pscustomobject]@{ Process = $process; State = $State; Stage = $stage }
 }
 
 function Start-SupervisionStatusProcess {
@@ -102,7 +107,7 @@ function Complete-HookProcess {
   param($Invocation, [int]$TimeoutMilliseconds = 10000)
   if (-not $Invocation.Process.WaitForExit($TimeoutMilliseconds)) {
     try { $Invocation.Process.Kill() } catch {}
-    throw 'Lifecycle hook exceeded its bounded test timeout.'
+    throw ('Lifecycle hook exceeded its bounded test timeout: ' + [string]$Invocation.Stage)
   }
   $result = [pscustomobject]@{
     ExitCode = $Invocation.Process.ExitCode
@@ -143,6 +148,35 @@ function Invoke-ConfiguredWindowsHook {
     ExitCode = $process.ExitCode
     Output = $process.StandardOutput.ReadToEnd()
     Error = $process.StandardError.ReadToEnd()
+  }
+  $process.Dispose()
+  $result
+}
+
+function Invoke-SupervisionInTempRoot {
+  param([string]$TempRoot, [string]$State = '')
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = 'powershell.exe'
+  $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction status' -f $wrapper
+  if ($State) { $info.Arguments += ' -SupervisionStatePath "{0}"' -f $State }
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.EnvironmentVariables['TEMP'] = $TempRoot
+  $info.EnvironmentVariables['TMP'] = $TempRoot
+  $process = [Diagnostics.Process]::Start($info)
+  if (-not $process.WaitForExit(10000)) {
+    try { $process.Kill() } catch {}
+    throw 'TEMP-scoped supervision status exceeded its bounded test timeout.'
+  }
+  $output = $process.StandardOutput.ReadToEnd()
+  $errorOutput = $process.StandardError.ReadToEnd()
+  $result = [pscustomobject]@{
+    ExitCode = $process.ExitCode
+    Output = @($output -split "`r?`n" | Where-Object { $_ })
+    Text = (($output + $errorOutput).Trim())
   }
   $process.Dispose()
   $result
@@ -191,10 +225,49 @@ try {
   } | ConvertTo-Json -Compress
   $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
   Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
-  $configuredStatePath = Join-Path $configuredHookTemp 'Chronos\Supervision\session-registry.json'
+  $configuredScopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME, ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))))
+  $configuredStatePath = Join-Path $configuredHookTemp (Join-Path 'Chronos\Supervision-v2' (Join-Path $configuredScopeHash 'session-registry.json'))
   Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Configured Windows hook reported success without reaching the registry script.'
   $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
+
+  # A prior fixed TEMP registry that the restarted host cannot read must never
+  # block the private v2 namespace or be modified during the transition.
+  $upgradeTemp = Join-Path $root 'upgrade temp'
+  $priorUpgradeDirectory = Join-Path $upgradeTemp 'Chronos\Supervision'
+  $priorUpgradeState = Join-Path $priorUpgradeDirectory 'session-registry.json'
+  New-Item -ItemType Directory -Path $priorUpgradeDirectory -Force | Out-Null
+  $priorSeed = Invoke-Supervision $priorUpgradeState 'initialize' 'prior-upgrade-seed'
+  Assert-True ($priorSeed.ExitCode -eq 0 -and (Test-Path -LiteralPath $priorUpgradeState -PathType Leaf)) 'Could not seed the prior fixed TEMP supervision registry.'
+  Remove-Item -LiteralPath (Join-Path $upgradeTemp 'Chronos\Supervision-v2') -Recurse -Force -ErrorAction SilentlyContinue
+  $priorWriteTime = (Get-Item -LiteralPath $priorUpgradeState -Force).LastWriteTimeUtc
+  $priorAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  $denyRights = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData
+  $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+  $denyRule = New-Object Security.AccessControl.FileSystemAccessRule($sid, $denyRights, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Deny)
+  $restrictedAcl = Get-Acl -LiteralPath $priorUpgradeDirectory
+  [void]$restrictedAcl.AddAccessRule($denyRule)
+  Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $restrictedAcl
+  $denyEffective = $false
+  try {
+    $accessProbe = New-Object IO.FileStream($priorUpgradeState, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $accessProbe.Dispose()
+  } catch { $denyEffective = $true }
+  try {
+    $upgradeStatus = Invoke-SupervisionInTempRoot $upgradeTemp
+    Assert-True ($upgradeStatus.ExitCode -eq 0) 'Inaccessible prior supervision state blocked the private v2 registry.'
+    $upgradePayload = Get-Payload $upgradeStatus
+    $expectedMigration = if ($denyEffective) { 'prior_state_unavailable_new_root' } else { 'prior_state_imported' }
+    $expectedDisposition = if ($denyEffective) { 'unavailable_preserved' } else { 'read_only_imported' }
+    Assert-True ($upgradePayload.stateStoreMigration -eq $expectedMigration) "Prior supervision handling did not match the host ACL result. Expected $expectedMigration, got $($upgradePayload.stateStoreMigration)."
+    Assert-True ($upgradePayload.priorStateDisposition -eq $expectedDisposition -and -not $upgradePayload.priorStateWriteAttempted) 'Prior supervision state was not handled as read-only evidence.'
+    Assert-True (-not $upgradePayload.recurrenceEligible) 'State migration alone incorrectly authorized a Governor recurrence.'
+  } finally {
+    Set-Acl -LiteralPath $priorUpgradeDirectory -AclObject $priorAcl -ErrorAction SilentlyContinue
+    Assert-True ((Get-Item -LiteralPath $priorUpgradeState -Force).LastWriteTimeUtc -eq $priorWriteTime) 'Prior supervision state changed during read-only migration.'
+    Remove-Item -LiteralPath $upgradeTemp -Recurse -Force -ErrorAction SilentlyContinue
+  }
   $governorSkillText = Get-Content -Raw -LiteralPath $governorSkillPath
   foreach ($requiredConvergenceControl in @(
     'chronos-supervision-v1',
@@ -249,6 +322,8 @@ try {
   $hostGovernor = 'thread-host-governor'
   $hostInitialize = Invoke-Supervision $hostState 'initialize' $hostGovernor
   Assert-True ($hostInitialize.ExitCode -eq 0) 'Host reconciliation fixture could not claim its Governor.'
+  $hostInitializeData = Get-Payload $hostInitialize
+  Assert-True (-not $hostInitializeData.recurrenceEligible -and $hostInitializeData.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'Initialization incorrectly authorized a recurrence before a complete host inventory cycle.'
   $hostInventoryPath = Join-Path $root 'host-inventory.json'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1
@@ -283,6 +358,13 @@ try {
   Assert-True (-not $passiveDiscovery.cycleAdvanced -and $passiveDiscovery.governorCycleCount -eq 0 -and $passiveDiscovery.requiredHostAction -eq 'run_cycle_with_complete_host_inventory') 'Passive discovery was incorrectly counted as a Governor cycle.'
   $missingCycleInventory = Get-Payload (Invoke-Supervision $cycleState 'cycle' $cycleGovernor)
   Assert-True (-not $missingCycleInventory.ok -and $missingCycleInventory.error -eq 'supervision_host_inventory_required') 'A Governor cycle without host inventory did not fail closed.'
+  $governorOmittedInventory = Join-Path $root 'governor-omitted-inventory.json'
+  [IO.File]::WriteAllText($governorOmittedInventory, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
+    tasks = @([ordered]@{ id = 'thread-other-live'; status = 'running'; generation = 'generation-other' })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $governorOmitted = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $governorOmittedInventory)
+  Assert-True (-not $governorOmitted.ok -and $governorOmitted.error -eq 'supervision_governor_not_in_host_inventory') 'A complete inventory that omitted its Governor advanced the cycle.'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $false
     tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = 'cycle-governor-generation' })
@@ -299,6 +381,7 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $cycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $hostInventoryPath)
   Assert-True ($cycle.ok -and $cycle.governorCycleCount -eq 1 -and $cycle.hostInventoryCycle -eq 1 -and $cycle.hostInventoryComplete -and $cycle.hostInventoryObserved -eq 3) 'A complete host inventory did not advance exactly one Governor cycle.'
+  Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'A verified complete inventory cycle did not authorize the one Governor recurrence.'
   Assert-True (@($cycle.hostTaskStatuses).Count -eq 3 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'ended').Count -eq 1) 'The cycle did not return one normalized status per host task.'
   Assert-True (($cycle.hostTaskStatuses | ConvertTo-Json -Compress) -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Compact host statuses exposed a raw task ID or generation.'
   Assert-True ($cycle.taskWakePolicy -eq 'intervention_claim_required' -and $cycle.routineUserAction -eq 'none') 'A normal cycle did not prohibit unclaimed task wakes.'

@@ -199,6 +199,12 @@ task batches, and delivery. Worker tasks run no Chronos model cycle. The
 recurrence is bounded to 336 cycles or 14 days. See
 [Supervision](SUPERVISION.md).
 
+Recurrence creation is gated by native postconditions. Initialization must
+succeed, supervision and Heartbeat status must be readable, and one complete
+host-inventory cycle must contain the selected Governor exactly once before the
+registry returns `recurrenceEligible=true`. Failed setup cannot schedule its
+own recovery turn.
+
 ## Persistent Data
 
 The inspector persists nothing. Governor persists only coordination metadata

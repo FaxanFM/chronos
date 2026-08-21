@@ -43,6 +43,10 @@ $script:StateStoreWriteReady = $false
 $script:StateStoreProtection = 'dpapi_ids'
 $script:LegacyDefaultStatePath = $null
 $script:LegacyInstallationScopePath = $null
+$script:PriorDefaultStatePath = $null
+$script:PriorInstallationScopePath = $null
+$script:PriorStateDisposition = 'not_checked'
+$script:PriorStateWriteAttempted = $false
 
 function Get-Value {
   param($Object, [string]$Name, $Default = $null)
@@ -220,18 +224,25 @@ function Resolve-StatePath {
   $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
   if ([string]::IsNullOrWhiteSpace($localAppData)) { throw 'supervision_state_path_invalid' }
   $localRoot = [IO.Path]::GetFullPath((Join-Path $localAppData 'Chronos\Supervision'))
-  $privateTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision'))
+  $priorTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision'))
+  $privateTempRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Chronos\Supervision-v2'))
+  $codexHome = [IO.Path]::GetFullPath((Join-Path $HOME '.codex'))
+  $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
   $script:LegacyDefaultStatePath = Join-Path $localRoot 'session-registry.json'
   $script:LegacyInstallationScopePath = Join-Path $localRoot 'installation-scope.json'
+  $script:PriorDefaultStatePath = Join-Path $priorTempRoot 'session-registry.json'
+  $script:PriorInstallationScopePath = Join-Path $priorTempRoot 'installation-scope.json'
   $candidate = if ([string]::IsNullOrWhiteSpace($Requested)) {
     $script:StateStoreMode = 'temp_private'
-    $script:StateStoreMigration = 'not_needed'
-    Join-Path $privateTempRoot 'session-registry.json'
+    $script:StateStoreMigration = 'namespace_v2_new_root'
+    Join-Path $privateTempRoot (Join-Path $scopeHash 'session-registry.json')
   } else {
     $script:StateStoreMode = 'explicit'
     try { [IO.Path]::GetFullPath($Requested) } catch { throw 'supervision_state_path_invalid' }
   }
-  $contained = (Test-ContainedPath $candidate $localRoot) -or (Test-ContainedPath $candidate $privateTempRoot)
+  $contained = (Test-ContainedPath $candidate $localRoot) -or
+    (Test-ContainedPath $candidate $priorTempRoot) -or
+    (Test-ContainedPath $candidate $privateTempRoot)
   if ([IO.Path]::GetExtension($candidate) -ne '.json' -or -not $contained) {
     throw 'supervision_state_path_invalid'
   }
@@ -300,6 +311,10 @@ function Read-InstallationScopeId {
     return [string]$scope.id
   } catch {
     if ([string]$_.Exception.Message -eq 'supervision_install_scope_path_invalid') { throw }
+    $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+      $_.Exception -is [UnauthorizedAccessException] -or
+      $_.Exception.InnerException -is [UnauthorizedAccessException]
+    if ($accessDenied) { throw }
     throw 'supervision_install_scope_invalid'
   }
 }
@@ -331,13 +346,33 @@ function Get-OrCreateInstallationScopeId {
   param([string]$ResolvedStatePath)
   $path = Resolve-InstallationScopePath $ResolvedStatePath
   if (Test-Path -LiteralPath $path -PathType Leaf) { return Read-InstallationScopeId $path }
-  if ($script:StateStoreMode -eq 'temp_private' -and
-      -not [string]::IsNullOrWhiteSpace($script:LegacyInstallationScopePath) -and
-      (Test-Path -LiteralPath $script:LegacyInstallationScopePath -PathType Leaf)) {
-    if (-not (Test-NoReparseAncestors $script:LegacyInstallationScopePath)) { throw 'supervision_install_scope_path_invalid' }
-    $legacyId = Read-InstallationScopeId $script:LegacyInstallationScopePath
-    $script:StateStoreMigration = 'legacy_scope_imported'
-    return Write-InstallationScopeId $path $legacyId
+  if ($script:StateStoreMode -eq 'temp_private') {
+    foreach ($priorPath in @($script:PriorInstallationScopePath, $script:LegacyInstallationScopePath)) {
+      if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
+      try {
+        $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
+        if ($priorItem.PSIsContainer -or ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $priorPath)) {
+          $script:StateStoreMigration = 'prior_state_invalid_new_root'
+          continue
+        }
+        $priorId = Read-InstallationScopeId $priorPath
+        if ($script:StateStoreMigration -eq 'namespace_v2_new_root') { $script:StateStoreMigration = 'prior_scope_imported' }
+        $script:PriorStateDisposition = 'read_only_imported'
+        return Write-InstallationScopeId $path $priorId
+      } catch {
+        $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+          $_.Exception -is [UnauthorizedAccessException] -or
+          $_.Exception.InnerException -is [UnauthorizedAccessException]
+        if ($accessDenied) {
+          $script:StateStoreMigration = 'prior_state_unavailable_new_root'
+          $script:PriorStateDisposition = 'unavailable_preserved'
+          continue
+        }
+        if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) {
+          $script:StateStoreMigration = 'prior_state_invalid_new_root'
+        }
+      }
+    }
   }
   $directory = Split-Path -Parent $path
   if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
@@ -546,7 +581,13 @@ function Read-State {
     $state = Upgrade-State (ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop))
     Assert-State $state -ValidateProtectedIds:$ValidateProtectedIds
     return $state
-  } catch { throw 'supervision_state_invalid' }
+  } catch {
+    $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+      $_.Exception -is [UnauthorizedAccessException] -or
+      $_.Exception.InnerException -is [UnauthorizedAccessException]
+    if ($accessDenied) { throw }
+    throw 'supervision_state_invalid'
+  }
 }
 
 function Write-State {
@@ -587,20 +628,33 @@ function Write-State {
 
 function Import-LegacyStateIfPresent {
   param([string]$ResolvedStatePath)
-  if ($script:StateStoreMode -ne 'temp_private' -or
-      (Test-Path -LiteralPath $ResolvedStatePath) -or
-      [string]::IsNullOrWhiteSpace($script:LegacyDefaultStatePath) -or
-      -not (Test-Path -LiteralPath $script:LegacyDefaultStatePath -PathType Leaf)) { return }
-  if (-not (Test-NoReparseAncestors $script:LegacyDefaultStatePath)) {
-    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
-    return
-  }
-  try {
-    $legacy = Read-State $script:LegacyDefaultStatePath -ValidateProtectedIds
-    Write-State $legacy $ResolvedStatePath
-    $script:StateStoreMigration = 'legacy_state_imported'
-  } catch {
-    $script:StateStoreMigration = 'legacy_state_invalid_rebuilt'
+  if ($script:StateStoreMode -ne 'temp_private' -or (Test-Path -LiteralPath $ResolvedStatePath)) { return }
+  foreach ($priorPath in @($script:PriorDefaultStatePath, $script:LegacyDefaultStatePath)) {
+    if ([string]::IsNullOrWhiteSpace($priorPath)) { continue }
+    try {
+      $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
+      if ($priorItem.PSIsContainer -or ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $priorPath)) {
+        $script:StateStoreMigration = 'prior_state_invalid_new_root'
+        continue
+      }
+      $legacy = Read-State $priorPath -ValidateProtectedIds
+      Write-State $legacy $ResolvedStatePath
+      $script:StateStoreMigration = 'prior_state_imported'
+      $script:PriorStateDisposition = 'read_only_imported'
+      return
+    } catch {
+      $accessDenied = $_.CategoryInfo.Category -eq [Management.Automation.ErrorCategory]::PermissionDenied -or
+        $_.Exception -is [UnauthorizedAccessException] -or
+        $_.Exception.InnerException -is [UnauthorizedAccessException]
+      if ($accessDenied) {
+        $script:StateStoreMigration = 'prior_state_unavailable_new_root'
+        $script:PriorStateDisposition = 'unavailable_preserved'
+        continue
+      }
+      if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound) {
+        $script:StateStoreMigration = 'prior_state_invalid_new_root'
+      }
+    }
   }
 }
 
@@ -1302,6 +1356,8 @@ try {
       stateStoreWriteReady = $script:StateStoreWriteReady
       stateStoreProtection = $script:StateStoreProtection
       stateStoreMigration = $script:StateStoreMigration
+      priorStateDisposition = $script:PriorStateDisposition
+      priorStateWriteAttempted = $script:PriorStateWriteAttempted
       hostReconcileAttemptLimit = $script:HostReconcileAttemptLimit
       hostRecheckThroughCycle = $script:HostRecheckThroughCycle
       hostPostcondition = 'one_live_governor_one_active_recurrence_zero_duplicates'
@@ -1312,6 +1368,8 @@ try {
       monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
       hookModelContext = 'none'
       workerModelTurns = 0
+      recurrenceEligible = ($null -ne $state.governor -and [long]$state.governor.cycleCount -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$state.governor.lastCycleUtc))
+      recurrenceCreationPolicy = 'after_successful_complete_host_inventory_cycle'
       recommendedGovernorModel = 'gpt-5.6-terra'
       recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
@@ -1356,7 +1414,11 @@ try {
       }
     }
     Write-State $state $resolved
-    Write-SafeOutput (Get-DiscoveryPayload $state 'initialize' $current $SinceRevision $now)
+    $initializePayload = Get-DiscoveryPayload $state 'initialize' $current $SinceRevision $now
+    $initializePayload['recurrenceEligible'] = $false
+    $initializePayload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
+    $initializePayload['requiredHostAction'] = 'run_complete_host_inventory_cycle_before_recurrence'
+    Write-SafeOutput $initializePayload
     exit 0
   }
   if ($Action -eq 'confirm-active') {
@@ -1386,6 +1448,8 @@ try {
     $payload['hostTaskStatuses'] = @(Get-CompactHostTaskStatuses $inventory)
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
+    $payload['recurrenceEligible'] = $false
+    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
     Write-State $state $resolved
     Write-SafeOutput $payload
     exit 0
@@ -1412,6 +1476,7 @@ try {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
     $inventory = Read-HostInventory $HostInventoryPath $now
     if (-not [bool]$inventory.Complete) { throw 'supervision_host_inventory_incomplete' }
+    if (@($inventory.Tasks | Where-Object { [string]$_.Id -eq $current }).Count -ne 1) { throw 'supervision_governor_not_in_host_inventory' }
     $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
     $state.governor.cycleCount = [long]$state.governor.cycleCount + 1
     $state.governor.lastCycleUtc = $now.ToString('o')
@@ -1429,6 +1494,8 @@ try {
     $payload['hostTaskStatuses'] = @(Get-CompactHostTaskStatuses $inventory)
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
+    $payload['recurrenceEligible'] = $true
+    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
     $state.health.scanOffset = [long]$payload.nextBatchOffset
     Write-State $state $resolved
     Write-SafeOutput $payload

@@ -31,6 +31,18 @@
   task wake.
 - Retain v0.9.1's full-setup, diagnostic-status, and bounded-delegation starter
   prompts and their deterministic listing-quality gates.
+- Move supervision state to a machine-and-Codex-home-scoped private v2 TEMP
+  namespace. Treat inaccessible prior state as preserved read-only evidence
+  instead of failing the new registry, and never attempt to modify it.
+- Make recurrence eligibility an explicit postcondition of a successful
+  initialization, readable supervision and Heartbeat state, verified Governor
+  identity, and one complete host inventory that contains that Governor. A
+  failed or partial setup creates no recurrence.
+- Run Governor Git probes with the canonical repository explicitly marked safe
+  for the subprocess. This preserves repository identity after a Codex restart
+  changes the sandbox execution identity without changing user Git config.
+- Return an explicit retry contract for a unique Heartbeat cycle that overlaps
+  the bounded state mutex wait. Do not silently discard the cycle.
 
 ## v0.9.1
 

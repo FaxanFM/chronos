@@ -23,21 +23,40 @@ function Assert-Equal {
   if ($Actual -ne $Expected) { throw "$Message Expected '$Expected', got '$Actual'." }
 }
 
-function Start-HiddenPowerShell {
-  param([string]$EncodedCommand)
-  $info = New-Object Diagnostics.ProcessStartInfo
-  $info.FileName = 'powershell.exe'
-  $info.Arguments = '-NoProfile -NonInteractive -EncodedCommand ' + $EncodedCommand
-  $info.UseShellExecute = $false
-  $info.CreateNoWindow = $true
-  $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-  $process = New-Object Diagnostics.Process
-  $process.StartInfo = $info
-  if (-not $process.Start()) {
-    $process.Dispose()
-    throw 'Could not start the bounded Heartbeat test helper.'
+if (-not ('ChronosHeartbeatMutexFixture' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Threading;
+
+public sealed class ChronosHeartbeatMutexFixture : IDisposable {
+  private readonly Mutex mutex;
+  private readonly ManualResetEventSlim ready = new ManualResetEventSlim(false);
+  private readonly Thread thread;
+  private readonly int holdMilliseconds;
+  private readonly bool abandon;
+
+  public ChronosHeartbeatMutexFixture(string name, int holdMilliseconds, bool abandon) {
+    this.mutex = new Mutex(false, name);
+    this.holdMilliseconds = holdMilliseconds;
+    this.abandon = abandon;
+    this.thread = new Thread(Run);
+    this.thread.IsBackground = true;
+    this.thread.Start();
   }
-  return $process
+
+  private void Run() {
+    mutex.WaitOne();
+    ready.Set();
+    if (abandon) return;
+    Thread.Sleep(holdMilliseconds);
+    mutex.ReleaseMutex();
+  }
+
+  public bool WaitReady(int timeoutMilliseconds) { return ready.Wait(timeoutMilliseconds); }
+  public void WaitDone() { thread.Join(); }
+  public void Dispose() { thread.Join(); ready.Dispose(); mutex.Dispose(); }
+}
+'@
 }
 
 function Get-TestStableHash {
@@ -610,20 +629,15 @@ try {
 
   $busy = New-Case 'cycle-busy'
   $busyInput = Join-Path $busy.Path 'busy.json'
-  $busyReady = Join-Path $busy.Path 'ready.txt'
   [IO.File]::WriteAllText($busyInput, (@{ schemaVersion = 1; capturedAtUtc = $busy.BaseTime.ToString('o'); sourceEpoch = 'busy'; sourceSequence = 1; runId = 'busy-run'; origin = 'test'; forceCadence = $true; collectorCoverage = @{ agent_stall = 'observed' }; agents = @() } | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
   $busyMutexName = 'Global\ChronosHeartbeat-' + (Get-TestHash (Get-TestCanonicalStateIdentity $busy.State)).Substring(0, 24)
-  $busyCommand = "`$m=New-Object Threading.Mutex(`$false,'$busyMutexName');[void]`$m.WaitOne();[IO.File]::WriteAllText('$($busyReady.Replace("'", "''"))','ready');Start-Sleep -Seconds 7;`$m.ReleaseMutex();`$m.Dispose()"
-  $busyEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($busyCommand))
-  $busyHolder = Start-HiddenPowerShell $busyEncoded
+  $busyHolder = [ChronosHeartbeatMutexFixture]::new($busyMutexName, 7000, $false)
   try {
-    $busyDeadline = [DateTime]::UtcNow.AddSeconds(5)
-    while (-not (Test-Path -LiteralPath $busyReady) -and [DateTime]::UtcNow -lt $busyDeadline) { Start-Sleep -Milliseconds 50 }
-    Assert-True (Test-Path -LiteralPath $busyReady) 'Cycle contention fixture did not acquire the Heartbeat mutex.'
+    Assert-True ($busyHolder.WaitReady(5000)) 'Cycle contention fixture did not acquire the Heartbeat mutex.'
     $busyResult = Invoke-RawModule @('-InputPath', $busyInput, '-StatePath', $busy.State)
     Assert-True ($busyResult.ExitCode -ne 0 -and $busyResult.Text -match 'heartbeat_mutex_busy' -and $busyResult.Text -match '"retryRequired":true') 'A unique overlapping cycle was silently discarded instead of returning an explicit retry contract.'
   } finally {
-    $busyHolder.WaitForExit()
+    $busyHolder.WaitDone()
     $busyHolder.Dispose()
   }
 
@@ -974,12 +988,10 @@ try {
   $abandonedData = @{ schemaVersion = 1; capturedAtUtc = $abandoned.BaseTime.ToString('o'); runId = 'abandoned-run'; origin = 'test'; forceCadence = $true; collectorCoverage = @{ agent_stall = 'observed' }; agents = @() }
   [IO.File]::WriteAllText($abandonedInput, ($abandonedData | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
   $mutexName = 'Global\ChronosHeartbeat-' + (Get-TestHash (Get-TestCanonicalStateIdentity $abandoned.State)).Substring(0, 24)
-  $holder = New-Object Threading.Mutex($false, $mutexName)
+  $holder = [ChronosHeartbeatMutexFixture]::new($mutexName, 0, $true)
   try {
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("`$m=New-Object Threading.Mutex(`$false,'$mutexName');[void]`$m.WaitOne();[Environment]::Exit(0)"))
-    $child = Start-HiddenPowerShell $encodedCommand
-    $child.WaitForExit()
-    $child.Dispose()
+    Assert-True ($holder.WaitReady(5000)) 'Abandoned mutex fixture did not acquire the Heartbeat mutex.'
+    $holder.WaitDone()
     $abandonedResult = Invoke-RawModule @('-InputPath', $abandonedInput, '-StatePath', $abandoned.State)
     Assert-Silent $abandonedResult 'Abandoned mutex recovery.'
   } finally { $holder.Dispose() }
