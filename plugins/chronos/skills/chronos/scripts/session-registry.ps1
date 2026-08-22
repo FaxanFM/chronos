@@ -346,24 +346,28 @@ function Initialize-StateStore {
       $probe = Join-Path $directory ('.supervision-probe-' + [guid]::NewGuid().ToString('N') + '.tmp')
       $stream = New-Object IO.FileStream($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
       try { $stream.Flush($true) } finally { $stream.Dispose() }
-      foreach ($existingPath in @($candidate, (Join-Path $directory 'installation-scope.json'))) {
-        if (-not (Test-Path -LiteralPath $existingPath -PathType Leaf)) { continue }
-        $existingItem = Get-Item -LiteralPath $existingPath -Force -ErrorAction Stop
-        if ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'supervision_state_store_unwritable' }
-        $readProbe = New-Object IO.FileStream($existingPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-        $readProbe.Dispose()
-      }
-      if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-        $existingState = Read-State $candidate -PreserveUnavailable
-        try {
-          Assert-StateProtectedIdentity $existingState
-        } catch {
-          if ([string]$_.Exception.Message -ne 'supervision_state_identity_unavailable') { throw }
-          $scopePath = Join-Path $directory 'installation-scope.json'
-          if ($null -eq $script:RecoveredV3InstallationScopeId -and (Test-Path -LiteralPath $scopePath -PathType Leaf)) {
-            try { $script:RecoveredV3InstallationScopeId = Read-InstallationScopeId $scopePath } catch {}
+      if ($script:StateStoreMode -eq 'temp_private') {
+        # Default-slot selection happens before the registry mutex exists. It
+        # must inspect prior state to recover from an inaccessible sandbox slot.
+        foreach ($existingPath in @($candidate, (Join-Path $directory 'installation-scope.json'))) {
+          if (-not (Test-Path -LiteralPath $existingPath -PathType Leaf)) { continue }
+          $existingItem = Get-Item -LiteralPath $existingPath -Force -ErrorAction Stop
+          if ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'supervision_state_store_unwritable' }
+          $readProbe = New-Object IO.FileStream($existingPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+          $readProbe.Dispose()
+        }
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+          $existingState = Read-State $candidate -PreserveUnavailable
+          try {
+            Assert-StateProtectedIdentity $existingState
+          } catch {
+            if ([string]$_.Exception.Message -ne 'supervision_state_identity_unavailable') { throw }
+            $scopePath = Join-Path $directory 'installation-scope.json'
+            if ($null -eq $script:RecoveredV3InstallationScopeId -and (Test-Path -LiteralPath $scopePath -PathType Leaf)) {
+              try { $script:RecoveredV3InstallationScopeId = Read-InstallationScopeId $scopePath } catch {}
+            }
+            throw
           }
-          throw
         }
       }
       $script:StateStoreWriteReady = $true

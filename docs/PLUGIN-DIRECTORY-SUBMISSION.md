@@ -26,10 +26,14 @@ Heartbeat now use canonical `CODEX_HOME` installation identity, isolate
 separate Codex homes, reject reparse-point ancestors before state creation, and
 reserve unscoped legacy migration for the default `.codex` home so a shared
 legacy identity or outbox cannot be cloned into custom installations. It retains the
-improved first-use prompts, listing copy, full-setup contract, and deterministic
-prompt-quality gates. The candidate
+full-setup contract and replaces generic first-use actions with three meaningful
+starters for complete setup, read-only health briefing, and bounded Governor
+research. Explicit-state hooks now wait for the shared registry mutex before
+they read state content. A contended hook writes one protected pending event
+instead, which removes a startup race without weakening the silent-hook
+contract. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`3c8cc8831006ca84d6ca930b0d33f25a2f47ed37d21f51167cf1d94600189fc9`.
+`7b308dd23efecf0d9060ac5264033fa30dd6b420de68e0e62a054dfb272181b0`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -119,9 +123,9 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `Set up Chronos post-restart: check supervision/Heartbeat, run inventory, activate one Governor recurrence, no worker recurrence.`
-2. `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
-3. `Use Chronos Governor for suitable read-only work; delegate only with safe V2 support, otherwise complete and verify it here.`
+1. `Set up Chronos: verify source, enable one Governor and Heartbeats, inventory every live task, and prove zero worker recurrences.`
+2. `Give me a read-only Chronos health briefing: separate PC, workflow, quota, approvals, rules, SQLite, Heartbeat, and supervision.`
+3. `Use Chronos Governor for safe read-only research and review; keep edits and final decisions here; finish locally if unavailable.`
 
 All three are unique, single-line, at most 128 characters, and contain no app
 mention.
@@ -130,7 +134,7 @@ mention.
 
 ### 1. Complete first-use setup
 
-- Prompt: `Set up Chronos post-restart: check supervision/Heartbeat, run inventory, activate one Governor recurrence, no worker recurrence.`
+- Prompt: `Set up Chronos: verify source, enable one Governor and Heartbeats, inventory every live task, and prove zero worker recurrences.`
 - Expected behavior: verify the installed source and native status, perform
   optional hook trust review when the host presents it, reuse or create one history-free Governor, and
   reconcile the installation-scoped recurrence without prompting worker tasks.
@@ -147,7 +151,7 @@ mention.
 
 ### 2. Complete separated status
 
-- Prompt: `Run a complete Chronos status. Separate machine health from workflow, quota, approval, rule, SQLite, and supervision issues.`
+- Prompt: `Give me a read-only Chronos health briefing: separate PC, workflow, quota, approvals, rules, SQLite, Heartbeat, and supervision.`
 - Expected behavior: run native inspection and compact supervision and
   Heartbeat status reads without creating a Governor or recurrence.
 - Expected result: machine health remains separate from workflow diagnostic
@@ -178,7 +182,7 @@ mention.
 
 ### 5. Delegate and verify bounded read work
 
-- Prompt: `Use Chronos Governor for suitable read-only work; delegate only with safe V2 support, otherwise complete and verify it here.`
+- Prompt: `Use Chronos Governor for safe read-only research and review; keep edits and final decisions here; finish locally if unavailable.`
 - Expected behavior: preflight the active V2 worker contract before Governor
   status or planning. Without safe V2 support, complete and verify the work in
   the coordinator without reserving a plan. With V2, use only advertised models,

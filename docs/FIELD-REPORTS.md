@@ -160,6 +160,31 @@ successfully exercises the candidate release from a fresh task.
   inventory tests require all live tasks, compact statuses, zero routine wakes,
   and zero worker model turns.
 
+### Concurrent explicit-state hooks could read before the mutex
+
+- Affected version: the signed v0.9.2 candidate at
+  `45d781835fc857b195edfe7bd428c0ab167138c8`.
+- Reproduction scope: GitHub Actions release run `32584434536` failed the
+  concurrent silent-hook assertion on `windows-latest`. The same run passed on
+  `windows-2022`, and the external canary passed before this release gate.
+- Root cause: explicit-state initialization inspected existing state content
+  before it acquired the shared registry mutex. Another hook could replace the
+  state file during that inspection. The later authoritative read was already
+  protected by the mutex, so the early read added risk without adding safety.
+- v0.9.2 correction: explicit-state initialization now checks the state
+  directory only. It reads and validates state content after it acquires the
+  registry mutex. Default bounded-slot recovery still inspects prior state
+  before mutex creation because that inspection selects a safe recovery slot.
+- Regression: hold the exact registry mutex and deny reads on a valid explicit
+  state file. A concurrent diagnostic hook must return silently, write one
+  protected pending event, and merge that event exactly once after release.
+  The concurrent eight-hook test now reports the exact stage, exit code,
+  standard output, and standard error if it fails.
+- Validation status: Inspector, Heartbeat, Supervision, Governor 49 scenarios,
+  Release 2/2, and a 50-round eight-process stress run pass locally. Both
+  Windows CI jobs, independent source audit, and a new installed-package canary
+  remain required.
+
 ## Heuristic / Tuning Issues
 
 No threshold, scoring, prediction, or calibration-sensitive change is included

@@ -1155,10 +1155,45 @@ try {
   }
   foreach ($invocation in $race) {
     $result = Complete-HookProcess $invocation
-    Assert-True ($result.ExitCode -eq 0 -and -not $result.Output -and -not $result.Error) 'Concurrent hook was not silent.'
+    $raceFailure = 'Concurrent hook was not silent: stage={0}; exit={1}; stdout={2}; stderr={3}' -f
+      [string]$invocation.Stage,
+      [string]$result.ExitCode,
+      ([string]$result.Output).Trim(),
+      ([string]$result.Error).Trim()
+    Assert-True ($result.ExitCode -eq 0 -and -not $result.Output -and -not $result.Error) $raceFailure
   }
   $raceStatus = Get-Payload (Invoke-Supervision $raceState)
   Assert-True ($raceStatus.engine -eq 'healthy' -and $raceStatus.activeTasks -eq 8 -and $raceStatus.retainedRecords -eq 8) "Concurrent lifecycle writes were lost or corrupted: $($raceStatus | ConvertTo-Json -Compress -Depth 8)"
+
+  # Explicit-state content is authoritative only after the registry mutex is
+  # acquired. A contended hook must queue its event without a pre-mutex read.
+  $preMutexState = Join-Path $root 'pre-mutex-read.json'
+  [void](Invoke-Hook $preMutexState @{ session_id = 'thread-pre-mutex-1'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
+  $preMutexSha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $preMutexHash = ([BitConverter]::ToString($preMutexSha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($preMutexState).ToUpperInvariant())))).Replace('-', '').ToLowerInvariant()
+  } finally { $preMutexSha.Dispose() }
+  $preMutex = New-Object Threading.Mutex($false, ('Global\ChronosSupervision-' + $preMutexHash.Substring(0, 24)))
+  $stateLock = $null
+  try {
+    Assert-True ($preMutex.WaitOne(1000)) 'Test could not acquire the pre-mutex read regression lock.'
+    $stateLock = New-Object IO.FileStream($preMutexState, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $queuedHook = Complete-HookProcess (Start-HookProcess $preMutexState (@{
+      session_id = 'thread-pre-mutex-2'
+      cwd = $cwd
+      hook_event_name = 'SessionStart'
+      source = 'startup'
+      model = 'gpt-5.6-terra'
+    } | ConvertTo-Json -Compress) -Diagnostic)
+    Assert-True ($queuedHook.ExitCode -eq 0 -and -not $queuedHook.Output -and -not $queuedHook.Error) 'Contended explicit-state hook read state before it acquired the registry mutex.'
+  } finally {
+    if ($stateLock) { $stateLock.Dispose() }
+    try { $preMutex.ReleaseMutex() | Out-Null } catch {}
+    $preMutex.Dispose()
+  }
+  $preMutexStatus = Get-Payload (Invoke-Supervision $preMutexState)
+  Assert-True ($preMutexStatus.activeTasks -eq 2 -and $preMutexStatus.hookRuns -eq 2) 'Queued explicit-state hook did not merge after the mutex was released.'
+  Assert-True (@(Get-ChildItem -LiteralPath ($preMutexState + '.pending') -File -Force).Count -eq 0) 'Merged explicit-state fallback event was not removed.'
 
   # A direct-state failure must preserve the prepared event in the protected
   # pending queue before the production hook returns silently.

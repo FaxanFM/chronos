@@ -82,7 +82,7 @@ pushing when the signer's public key is available:
 
 ```powershell
 git verify-commit HEAD
-git verify-tag v0.9.0
+git verify-tag v0.9.2
 ```
 
 See GitHub's [commit and tag signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
@@ -104,16 +104,16 @@ for the provenance and verification model.
 Verify a downloaded artifact:
 
 ```powershell
-Get-FileHash .\chronos-v0.9.0.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.9.0.zip -R FaxanFM/chronos
-gh release verify v0.9.0 -R FaxanFM/chronos
-gh release verify-asset v0.9.0 .\chronos-v0.9.0.zip -R FaxanFM/chronos
+Get-FileHash .\chronos-v0.9.2.zip -Algorithm SHA256
+gh attestation verify .\chronos-v0.9.2.zip -R FaxanFM/chronos
+gh release verify v0.9.2 -R FaxanFM/chronos
+gh release verify-asset v0.9.2 .\chronos-v0.9.2.zip -R FaxanFM/chronos
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.9.0.sha256`. These controls prove
+Compare the first command with `chronos-v0.9.2.sha256`. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published

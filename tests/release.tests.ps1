@@ -64,9 +64,9 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('set up chronos', 'post-restart', 'supervision', 'heartbeat', 'run inventory', 'activate one governor recurrence', 'no worker recurrence') },
-    @{ Index = 1; Terms = @('complete chronos status', 'machine health', 'workflow', 'quota', 'approval', 'rule', 'sqlite', 'supervision') },
-    @{ Index = 2; Terms = @('chronos governor', 'read-only', 'delegate only', 'v2 support', 'otherwise complete', 'verify') }
+    @{ Index = 0; Terms = @('set up chronos', 'verify source', 'one governor', 'heartbeats', 'inventory every live task', 'zero worker recurrences') },
+    @{ Index = 1; Terms = @('read-only chronos health briefing', 'pc', 'workflow', 'quota', 'approvals', 'rules', 'sqlite', 'heartbeat', 'supervision') },
+    @{ Index = 2; Terms = @('chronos governor', 'read-only', 'research', 'review', 'edits', 'final decisions', 'finish locally', 'unavailable') }
   )
   foreach ($promptRequirement in $promptRequirements) {
     $promptIndex = [int]$promptRequirement.Index

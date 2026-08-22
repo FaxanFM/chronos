@@ -206,8 +206,8 @@ host inventory per Governor cycle whether the hooks are trusted or dispatched.
 For an on-demand diagnostic without enabling supervision, ask:
 
 ```text
-Run a complete Chronos status. Separate machine health from workflow, quota,
-approval, rule, SQLite, and supervision issues.
+Give me a read-only Chronos health briefing: separate PC, workflow, quota,
+approvals, rules, SQLite, Heartbeat, and supervision.
 ```
 
 Optionally review and trust the packaged lifecycle hooks through Codex `/hooks`.
@@ -227,6 +227,31 @@ the automatic fallback; the user does not register tasks or relay routine
 findings. See
 [Supervision](docs/SUPERVISION.md) for setup, routing, usage, and privacy limits.
 
+### What the hooks do
+
+Chronos includes five small lifecycle hooks. `SessionStart` records a task start,
+resume, clear, or compaction. `Stop` records one completed main-task turn.
+`SessionEnd` records the task end. `SubagentStart` and `SubagentStop` record
+worker lifecycle changes.
+
+The hooks run headless and return no text to the model. Four request asynchronous
+execution when the host supports it. `SessionEnd` is synchronous so the final
+event has a bounded chance to finish before shutdown. Every hook has a
+three-second host timeout. Brief registry contention uses one protected pending
+event, which the next hook or Governor cycle merges and removes.
+
+Hooks do not read prompts, transcripts, source files, diffs, commands, tool
+output, or credentials. They store only bounded local coordination data such as
+protected task identifiers, workspace and generation hashes, a model label,
+lifecycle state, and timestamps. They do not create worker turns or recurrences.
+
+Hooks are an optional accelerator, not the source of truth. The Governor still
+uses one complete host task inventory per cycle for discovery and liveness. The
+user controls hook trust through Codex `/hooks`; Chronos never approves trust on
+the user's behalf. Installed or trusted status shows configuration only. Chronos
+reports hook execution as observed only after native status records a new hook
+run.
+
 Heartbeats use the same Governor and recurrence created by full setup. The
 Codex host owns the recurring schedule and model choice. Chronos does not
 install a service or scheduler. Monitored tasks can use any model and do not
@@ -245,7 +270,8 @@ routing, delivery, deduplication, and stored fields.
 To delegate a small repository task, ask:
 
 ```text
-Use Chronos Governor to delegate this bounded low-complexity task.
+Use Chronos Governor for safe read-only research and review; keep edits and
+final decisions here; finish locally if unavailable.
 ```
 
 Governor validates the worker models advertised by the active runtime and
