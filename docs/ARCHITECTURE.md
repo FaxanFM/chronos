@@ -169,10 +169,13 @@ The configured hooks invoke `hook-intake.ps1`. It validates one event and writes
 one DPAPI-protected record to a machine-and-CODEX_HOME-scoped inbox. It does not
 load or mutate the main registry inside the host timeout. A later status or
 Governor cycle owns the registry mutex, merges each valid inbox event once, and
-removes the file. The private state stores only bounded SHA-256 event receipts
-for files still present. A committed receipt blocks replay when deletion is
-temporarily denied. DPAPI failure is handled as one malformed entry inside the
-per-file boundary, so it cannot abort later events or the enclosing cycle.
+removes the file. The private state stores bounded receipts that pair the
+SHA-256 slot-path hash with the SHA-256 event hash. It scans both bounded inboxes
+for presence before pruning receipts. A committed receipt therefore survives a
+temporary read or deletion lock and a second queue that fills the 256-event
+processing window. Temporarily unreadable files are deferred. DPAPI failure is
+handled as one malformed entry inside the per-file boundary, so it cannot abort
+later events or the enclosing cycle.
 
 The internal `session-registry.ps1` module maintains the bounded discovery index
 with protected task and agent IDs, workspace hashes, safe model slugs,
@@ -222,7 +225,8 @@ task batches, and delivery. Worker tasks run no Chronos model cycle. The
 configured hook path writes one protected lifecycle event to a small
 installation-scoped inbox within its three-second host bound. The next
 mutex-owning status or Governor cycle validates, receipts, merges, and removes
-that event. A deletion-locked file remains receipted and cannot replay. Hook
+that event. A locked file remains receipted and cannot replay, even when the
+other bounded inbox fills one processing window. Hook
 intake does not parse or mutate the full registry synchronously. The
 inventory uses schema v1 when the host includes the caller. Schema v2 explicitly
 declares caller exclusion and adds only the registry-verified Governor inside

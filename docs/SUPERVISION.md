@@ -71,10 +71,14 @@ completed-turn signal, and writes one physically flushed event to a private
 inbox scoped by canonical `CODEX_HOME` and machine identity. It does not read or
 write the main registry. The next supervision status or Governor cycle selects
 the safe state slot, owns the registry mutex, merges each valid inbox event once,
-persists a bounded SHA-256 receipt, and removes the merged file. A receipt stays
-authoritative if Windows temporarily refuses deletion, so the same file cannot
-change state or counters twice. DPAPI decoding and normalized-ID validation stay
-inside the per-file boundary. Undecryptable or malformed entries increment the
+persists a bounded receipt that pairs the slot-path hash with the exact event
+hash, and removes the merged file. It scans both bounded inboxes for presence
+before it prunes receipts. A receipt stays authoritative if Windows temporarily
+refuses reads or deletion, or if the other inbox fills the 256-event processing
+window, so the same file cannot change state or counters twice. A temporarily
+unreadable file is deferred without being classified as corrupt. DPAPI decoding
+and normalized-ID validation stay inside the per-file boundary. Undecryptable or
+malformed entries increment the
 dropped-entry counter once, change no task state, and are removed only after the
 degraded state is saved.
 

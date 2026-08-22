@@ -394,6 +394,72 @@ try {
   $deleteLockedState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($deleteLockedCleanup.hookRuns -eq 2 -and @($deleteLockedState.health.processedHookEvents).Count -eq 0) 'Processed-event receipt was not pruned after inbox cleanup.'
 
+  $receiptBoundaryTemp = Join-Path $root 'receipt boundary temp'
+  New-Item -ItemType Directory -Path $receiptBoundaryTemp -Force | Out-Null
+  $receiptBoundaryPayload = @{
+    session_id = 'thread-receipt-boundary'
+    cwd = $repo
+    hook_event_name = 'SessionStart'
+    source = 'startup'
+    model = 'gpt-5.6-terra'
+  } | ConvertTo-Json -Compress
+  $receiptBoundaryHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $receiptBoundaryTemp $receiptBoundaryPayload
+  Assert-True ($receiptBoundaryHook.ExitCode -eq 0 -and -not $receiptBoundaryHook.Output -and -not $receiptBoundaryHook.Error) 'Receipt-boundary fixture hook was not silent and successful.'
+  $receiptBoundaryStatePath = Get-DefaultSupervisionStatePath $receiptBoundaryTemp
+  $receiptBoundaryInbox = Get-HookInboxDirectory $receiptBoundaryTemp
+  $receiptBoundaryFile = @(Get-ChildItem -LiteralPath $receiptBoundaryInbox -File -Filter 'pending-slot-*.json')
+  Assert-True ($receiptBoundaryFile.Count -eq 1) 'Receipt-boundary fixture did not create one inbox event.'
+
+  $receiptBoundaryDeleteLock = New-Object IO.FileStream($receiptBoundaryFile[0].FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $receiptBoundaryFirst = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
+    Assert-True ($receiptBoundaryFirst.hookRuns -eq 1 -and $receiptBoundaryFirst.droppedEntries -eq 0) 'Receipt-boundary event was not committed once before the read-lock test.'
+    Assert-True (Test-Path -LiteralPath $receiptBoundaryFile[0].FullName) 'Receipt-boundary source file was not retained under the deletion lock.'
+  } finally {
+    $receiptBoundaryDeleteLock.Dispose()
+  }
+
+  $receiptBoundaryLegacyState = Get-Content -Raw -LiteralPath $receiptBoundaryStatePath | ConvertFrom-Json
+  $receiptBoundaryTokenParts = @(([string]@($receiptBoundaryLegacyState.health.processedHookEvents)[0]) -split '\|', 2)
+  Assert-True ($receiptBoundaryTokenParts.Count -eq 2) 'Fresh receipt did not bind a slot hash to an event hash.'
+  $receiptBoundaryLegacyState.health.processedHookEvents = @([string]$receiptBoundaryTokenParts[1])
+  [IO.File]::WriteAllText($receiptBoundaryStatePath, ($receiptBoundaryLegacyState | ConvertTo-Json -Compress -Depth 20), [Text.UTF8Encoding]::new($false))
+
+  $receiptBoundaryReadLock = New-Object IO.FileStream($receiptBoundaryFile[0].FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+  try {
+    $receiptBoundaryUnreadable = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
+    Assert-True ($receiptBoundaryUnreadable.hookRuns -eq 1 -and $receiptBoundaryUnreadable.droppedEntries -eq 0) 'A temporarily unreadable committed event replayed or was misclassified as malformed.'
+    Assert-True (Test-Path -LiteralPath $receiptBoundaryFile[0].FullName) 'A temporarily unreadable committed event was not deferred intact.'
+  } finally {
+    $receiptBoundaryReadLock.Dispose()
+  }
+
+  $receiptBoundaryTemplate = [Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($receiptBoundaryFile[0].FullName)) | ConvertFrom-Json
+  $receiptBoundaryDiagnosticInbox = $receiptBoundaryStatePath + '.pending'
+  New-Item -ItemType Directory -Path $receiptBoundaryDiagnosticInbox -Force | Out-Null
+  foreach ($slot in 0..255) {
+    $receiptBoundaryTemplate.observedAtUtc = [DateTimeOffset]::UtcNow.AddTicks($slot + 1).ToString('o')
+    $receiptBoundaryBytes = [Text.UTF8Encoding]::new($false).GetBytes(($receiptBoundaryTemplate | ConvertTo-Json -Compress))
+    [IO.File]::WriteAllBytes((Join-Path $receiptBoundaryDiagnosticInbox ('pending-slot-{0:D3}.json' -f $slot)), $receiptBoundaryBytes)
+  }
+  $receiptBoundaryQueueLock = New-Object IO.FileStream($receiptBoundaryFile[0].FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $receiptBoundaryBulk = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
+    Assert-True ($receiptBoundaryBulk.hookRuns -eq 257 -and $receiptBoundaryBulk.droppedEntries -eq 0) 'The full diagnostic queue did not merge once per file.'
+    Assert-True (Test-Path -LiteralPath $receiptBoundaryFile[0].FullName) 'The second-inbox receipt fixture was not retained while outside the 256-item processing window.'
+    Assert-True (@(Get-ChildItem -LiteralPath $receiptBoundaryDiagnosticInbox -File -Filter 'pending-*.json').Count -eq 0) 'The 256-item diagnostic queue was not emptied after merge.'
+  } finally {
+    $receiptBoundaryQueueLock.Dispose()
+  }
+
+  $receiptBoundaryFinal = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
+  Assert-True ($receiptBoundaryFinal.hookRuns -eq 257 -and $receiptBoundaryFinal.droppedEntries -eq 0) 'A committed second-inbox event replayed after leaving the processing window.'
+  Assert-True (-not (Test-Path -LiteralPath $receiptBoundaryFile[0].FullName)) 'The committed second-inbox event was not eventually removed.'
+  $receiptBoundaryCleanup = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
+  $receiptBoundaryState = Get-Content -Raw -LiteralPath $receiptBoundaryStatePath | ConvertFrom-Json
+  Assert-True ($receiptBoundaryCleanup.hookRuns -eq 257 -and @($receiptBoundaryState.health.processedHookEvents).Count -eq 0) 'Slot-bound receipts were not pruned after both inboxes were empty.'
+  Assert-True ($receiptBoundaryState.schema -eq 5) 'Receipt-boundary state did not preserve the compatible private schema.'
+
   $configuredConcurrentHooks = @(0..7 | ForEach-Object {
     $concurrentPayload = @{
       session_id = 'thread-configured-concurrent-{0}' -f $_

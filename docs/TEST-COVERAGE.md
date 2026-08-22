@@ -114,7 +114,10 @@ hook retains its three-second host ceiling, protected inbox persistence before
 registry creation, malformed-input rejection without an event, and exactly-once
 mutex-bound inbox merge. It also proves that undecryptable DPAPI records degrade
 once without blocking status and that a committed deletion-locked event cannot
-replay before eventual cleanup,
+replay before eventual cleanup. Separate regressions hold the committed file
+under an exclusive read lock and fill the sibling inbox with 256 events. They
+require zero replay or false corruption, complete presence-aware receipt
+retention, eventual removal, and an empty receipt set after cleanup,
 asynchronous completed-turn activity, duplicate turn-signal deduplication,
 mid-session self-discovery,
 strict UTF-8 and BOM-framed hook input,

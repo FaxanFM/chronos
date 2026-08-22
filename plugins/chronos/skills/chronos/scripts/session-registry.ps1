@@ -24,6 +24,7 @@ $script:EndedRetentionHours = 24
 $script:ActiveRetentionDays = 30
 $script:JsonNodeLimit = 8192
 $script:PendingEventLimit = 256
+$script:PendingEventReceiptLimit = $script:PendingEventLimit * 3
 $script:PendingEventByteLimit = 4096
 $script:PendingEventWriteAttemptLimit = 2
 $script:PendingEventRetryDelayMilliseconds = 10
@@ -703,15 +704,15 @@ function Assert-State {
   }
   if (-not ($State.health.processedHookEvents -is [Collections.IEnumerable]) -or
       $State.health.processedHookEvents -is [string] -or
-      @($State.health.processedHookEvents).Count -gt $script:PendingEventLimit) {
+      @($State.health.processedHookEvents).Count -gt $script:PendingEventReceiptLimit) {
     throw 'supervision_state_invalid'
   }
   $processedHookEventSet = @{}
-  foreach ($eventId in @($State.health.processedHookEvents)) {
-    if (-not ($eventId -is [string]) -or [string]$eventId -notmatch '^[a-f0-9]{64}$' -or $processedHookEventSet.ContainsKey([string]$eventId)) {
+  foreach ($receipt in @($State.health.processedHookEvents)) {
+    if (-not ($receipt -is [string]) -or [string]$receipt -notmatch '^[a-f0-9]{64}(\|[a-f0-9]{64})?$' -or $processedHookEventSet.ContainsKey([string]$receipt)) {
       throw 'supervision_state_invalid'
     }
-    $processedHookEventSet[[string]$eventId] = $true
+    $processedHookEventSet[[string]$receipt] = $true
   }
   if ($null -ne $State.health.lastHookUtc) { [void](ConvertTo-UtcTimestamp $State.health.lastHookUtc) }
   if ($null -ne $State.governor) {
@@ -969,22 +970,34 @@ function Write-PendingHookEventDurably {
 function Read-PendingHookEvents {
   param([string]$ResolvedStatePath)
   $result = [Collections.Generic.List[object]]::new()
+  $files = [Collections.Generic.List[object]]::new()
+  $presentPathHashes = [Collections.Generic.List[string]]::new()
   $directories = @((Get-PendingEventDirectory $ResolvedStatePath))
   if ($script:StateStoreMode -eq 'temp_private' -and -not [string]::IsNullOrWhiteSpace([string]$script:HookInboxDirectory)) {
     $directories += @([string]$script:HookInboxDirectory)
   }
   foreach ($directory in @($directories | Select-Object -Unique)) {
-    if ($result.Count -ge $script:PendingEventLimit) { break }
     if (-not (Test-Path -LiteralPath $directory)) { continue }
     $directoryItem = Get-Item -LiteralPath $directory -Force
     if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
-    $remaining = $script:PendingEventLimit - $result.Count
-    foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name | Select-Object -First $remaining)) {
-      $eventId = Get-TextHash ('pending-file|{0}|{1}|{2}' -f $file.FullName.ToUpperInvariant(), $file.Length, $file.LastWriteTimeUtc.Ticks)
+    foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name)) {
+      $pathHash = Get-TextHash ('pending-path|{0}' -f $file.FullName.ToUpperInvariant())
+      $presentPathHashes.Add($pathHash) | Out-Null
+      $files.Add([pscustomobject]@{ File = $file; PathHash = $pathHash }) | Out-Null
+      if ($files.Count -gt $script:PendingEventReceiptLimit) { throw 'supervision_pending_event_capacity' }
+    }
+  }
+  foreach ($candidate in @($files | Select-Object -First $script:PendingEventLimit)) {
+      $file = $candidate.File
+      $pathHash = [string]$candidate.PathHash
+      $eventHash = Get-TextHash ('pending-invalid|{0}|{1}|{2}' -f $pathHash, $file.Length, $file.LastWriteTimeUtc.Ticks)
       try {
         if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt $script:PendingEventByteLimit) { throw 'invalid' }
-        $bytes = [IO.File]::ReadAllBytes($file.FullName)
-        $eventId = Get-BytesHash $bytes
+        try { $bytes = [IO.File]::ReadAllBytes($file.FullName) } catch {
+          $result.Add([pscustomobject]@{ Path = $file.FullName; PathHash = $pathHash; EventHash = $null; Record = $null; SessionId = $null; AgentId = $null; ObservedAt = $null; Readable = $false; Valid = $false }) | Out-Null
+          continue
+        }
+        $eventHash = Get-BytesHash $bytes
         $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
         Assert-StrictJson $text 'supervision_pending_event_invalid'
         $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
@@ -995,35 +1008,49 @@ function Read-PendingHookEvents {
         $observedAt = ConvertTo-UtcTimestamp $record.observedAtUtc
         $result.Add([pscustomobject]@{
           Path = $file.FullName
-          EventId = $eventId
+          PathHash = $pathHash
+          EventHash = $eventHash
           Record = $record
           SessionId = $session
           AgentId = $agent
           ObservedAt = $observedAt
+          Readable = $true
           Valid = $true
         }) | Out-Null
       } catch {
-        $result.Add([pscustomobject]@{ Path = $file.FullName; EventId = $eventId; Record = $null; SessionId = $null; AgentId = $null; ObservedAt = $null; Valid = $false }) | Out-Null
+        $result.Add([pscustomobject]@{ Path = $file.FullName; PathHash = $pathHash; EventHash = $eventHash; Record = $null; SessionId = $null; AgentId = $null; ObservedAt = $null; Readable = $true; Valid = $false }) | Out-Null
       }
-    }
   }
-  return @($result)
+  return [pscustomobject]@{ Items = @($result); PresentPathHashes = @($presentPathHashes) }
 }
 
 function Merge-PendingHookEvents {
   param($State, [string]$ResolvedStatePath, [DateTimeOffset]$Now)
-  $items = @(Read-PendingHookEvents $ResolvedStatePath)
-  $currentEventIds = @{}
-  foreach ($item in $items) { $currentEventIds[[string]$item.EventId] = $true }
-  $processedEventIds = @{}
-  foreach ($eventId in @($State.health.processedHookEvents)) {
-    if ($currentEventIds.ContainsKey([string]$eventId)) { $processedEventIds[[string]$eventId] = $true }
+  $snapshot = Read-PendingHookEvents $ResolvedStatePath
+  $items = @($snapshot.Items)
+  $presentPathHashes = @{}
+  foreach ($pathHash in @($snapshot.PresentPathHashes)) { $presentPathHashes[[string]$pathHash] = $true }
+  $processedByPath = @{}
+  $legacyEventHashes = @{}
+  foreach ($receipt in @($State.health.processedHookEvents)) {
+    $parts = @(([string]$receipt) -split '\|', 2)
+    if ($parts.Count -eq 1) {
+      if ($presentPathHashes.Count -gt 0) { $legacyEventHashes[[string]$parts[0]] = $true }
+    } elseif ($presentPathHashes.ContainsKey([string]$parts[0])) {
+      $processedByPath[[string]$parts[0]] = [string]$parts[1]
+    }
   }
-  $State.health.processedHookEvents = @($processedEventIds.Keys | Sort-Object)
 
-  $valid = @($items | Where-Object { $_.Valid } | Sort-Object ObservedAt, Path)
+  $valid = @($items | Where-Object { $_.Readable -and $_.Valid } | Sort-Object ObservedAt, Path)
   foreach ($item in $valid) {
-    if ($processedEventIds.ContainsKey([string]$item.EventId)) { continue }
+    $pathHash = [string]$item.PathHash
+    $eventHash = [string]$item.EventHash
+    if ($processedByPath.ContainsKey($pathHash) -and [string]$processedByPath[$pathHash] -eq $eventHash) { continue }
+    if ($legacyEventHashes.ContainsKey($eventHash)) {
+      $legacyEventHashes.Remove($eventHash)
+      $processedByPath[$pathHash] = $eventHash
+      continue
+    }
     $record = $item.Record
     $hookData = @{
       hook_event_name = [string]$record.event
@@ -1037,16 +1064,28 @@ function Merge-PendingHookEvents {
       $preparedProtectedId = [string]$record.protectedAgentId
     }
     Invoke-HookEvent $State $hookData $Now $item.ObservedAt $preparedProtectedId ([string]$record.workspaceHash) ([string](Get-Value $record 'signalHash' ''))
-    $processedEventIds[[string]$item.EventId] = $true
+    $processedByPath[$pathHash] = $eventHash
   }
-  foreach ($item in @($items | Where-Object { -not $_.Valid })) {
-    if ($processedEventIds.ContainsKey([string]$item.EventId)) { continue }
+  foreach ($item in @($items | Where-Object { $_.Readable -and -not $_.Valid })) {
+    $pathHash = [string]$item.PathHash
+    $eventHash = [string]$item.EventHash
+    if ($processedByPath.ContainsKey($pathHash) -and [string]$processedByPath[$pathHash] -eq $eventHash) { continue }
+    if ($legacyEventHashes.ContainsKey($eventHash)) {
+      $legacyEventHashes.Remove($eventHash)
+      $processedByPath[$pathHash] = $eventHash
+      continue
+    }
     $State.health.droppedEntries = [long]$State.health.droppedEntries + 1
-    $processedEventIds[[string]$item.EventId] = $true
+    $processedByPath[$pathHash] = $eventHash
   }
-  if ($processedEventIds.Count -gt $script:PendingEventLimit) { throw 'supervision_pending_event_capacity' }
-  $State.health.processedHookEvents = @($processedEventIds.Keys | Sort-Object)
-  return @($items)
+  $processedReceipts = [Collections.Generic.List[string]]::new()
+  foreach ($eventHash in @($legacyEventHashes.Keys | Sort-Object)) { $processedReceipts.Add([string]$eventHash) | Out-Null }
+  foreach ($pathHash in @($processedByPath.Keys | Sort-Object)) {
+    $processedReceipts.Add(('{0}|{1}' -f $pathHash, [string]$processedByPath[$pathHash])) | Out-Null
+  }
+  if ($processedReceipts.Count -gt $script:PendingEventReceiptLimit) { throw 'supervision_pending_event_capacity' }
+  $State.health.processedHookEvents = @($processedReceipts)
+  return @($items | Where-Object { $_.Readable })
 }
 
 function Remove-PendingHookEvents {
@@ -1595,9 +1634,10 @@ try {
   }
   $state = Read-State $resolved -ValidateProtectedIds:($Action -ne 'hook')
   $now = [DateTimeOffset]::UtcNow
-  $processedHookEventCountBeforeMerge = @($state.health.processedHookEvents).Count
+  $processedHookEventsBeforeMerge = ConvertTo-Json -InputObject @($state.health.processedHookEvents) -Compress -Depth 4
   $pendingItems = @(Merge-PendingHookEvents $state $resolved $now)
-  $processedHookEventsChanged = $processedHookEventCountBeforeMerge -ne @($state.health.processedHookEvents).Count
+  $processedHookEventsAfterMerge = ConvertTo-Json -InputObject @($state.health.processedHookEvents) -Compress -Depth 4
+  $processedHookEventsChanged = $processedHookEventsBeforeMerge -ne $processedHookEventsAfterMerge
 
   if ($Action -eq 'hook') {
     Invoke-HookEvent $state $hookData $now $eventObservedAt $preparedProtectedId ([string]$preparedHookEvent.workspaceHash)

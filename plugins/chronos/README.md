@@ -160,9 +160,12 @@ not the full supervision engine. Intake validates the host event, protects task
 and agent IDs for the current Windows user, writes one durable event to a
 CODEX_HOME-scoped inbox, and exits. The next supervision status or Governor
 cycle merges the event exactly once while it owns the registry mutex, then
-removes it. A bounded receipt set prevents replay if Windows temporarily refuses
-deletion. Undecryptable or malformed records are counted once, removed after the
-degraded state is saved, and never block host-inventory fallback. Direct
+removes it. Each bounded receipt binds the inbox slot hash to the exact event
+hash. Both inboxes are scanned before receipts are pruned, so a committed event
+cannot replay when Windows blocks deletion or another queue fills the processing
+window. A temporarily unreadable file is deferred intact. Undecryptable or
+malformed records are counted once, removed after the degraded state is saved,
+and never block host-inventory fallback. Direct
 diagnostic hooks use the same protected pending-event format when the registry
 is busy.
 

@@ -40,8 +40,9 @@ When trusted and dispatched by Codex, the plugin's five monitoring hooks write
 protected task, subagent, and completed-turn events to a bounded local inbox.
 The next status or Governor cycle merges them into the supervision registry
 under its mutex. It validates DPAPI identities inside the per-file boundary and
-persists bounded event receipts before deletion, so one bad or deletion-locked
-file cannot block or replay supervision. Four request
+persists bounded slot-and-content receipts before deletion. It scans both
+bounded inboxes before pruning receipts and defers temporarily unreadable files,
+so one bad, locked, or queued file cannot block or replay supervision. Four request
 asynchronous execution where supported; `SessionEnd` remains synchronous. They do not run on tools, commands, approvals, or prompts and
 return no model context. Direct diagnostic hooks use the same protected event
 format if registry contention prevents an immediate write. On Windows, each

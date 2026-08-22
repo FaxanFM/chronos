@@ -235,7 +235,12 @@ so a deletion-locked file could replay. The correction decodes DPAPI identities
 inside each file's validation boundary and persists a bounded SHA-256 receipt
 before applying or dropping the record. A bad record degrades once without task
 mutation. A committed record cannot change state or counters again while its
-source file remains. Deterministic tests cover both cases and eventual cleanup.
+slot remains present. A follow-up boundary review found that a byte-only receipt
+could still be lost when Windows denied reads or when the sibling inbox pushed a
+present file outside the 256-event processing window. The final receipt pairs a
+slot-path hash with the exact event hash, scans both bounded inboxes for presence,
+and defers unreadable files. Regressions cover an exclusive read lock and a
+257-file combined queue before eventual cleanup.
 
 ## Heuristic / Tuning Issues
 
