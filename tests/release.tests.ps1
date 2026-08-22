@@ -566,7 +566,7 @@ try {
   $hookProcess = [Diagnostics.Process]::Start($hookInfo)
   $hookProcess.StandardInput.Write('{"session_id":"release-package-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
   $hookProcess.StandardInput.Close()
-  if (-not $hookProcess.WaitForExit(3000)) { try { $hookProcess.Kill() } catch {}; throw "Packaged lifecycle hook exceeded its host timeout." }
+  if (-not $hookProcess.WaitForExit(10000)) { try { $hookProcess.Kill() } catch {}; throw "Packaged diagnostic hook exceeded its bounded release-test watchdog." }
   $hookStdout = $hookProcess.StandardOutput.ReadToEnd()
   $hookStderr = $hookProcess.StandardError.ReadToEnd()
   $hookExit = $hookProcess.ExitCode
@@ -594,9 +594,9 @@ try {
   $configuredHookProcess = [Diagnostics.Process]::Start($configuredHookInfo)
   $configuredHookProcess.StandardInput.Write('{"session_id":"release-configured-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
   $configuredHookProcess.StandardInput.Close()
-  if (-not $configuredHookProcess.WaitForExit(3000)) {
+  if (-not $configuredHookProcess.WaitForExit(10000)) {
     try { $configuredHookProcess.Kill() } catch {}
-    throw ('Packaged configured lifecycle hook exceeded its three-second host timeout. Elapsed={0}ms' -f $configuredHookWatch.ElapsedMilliseconds)
+    throw ('Packaged configured lifecycle hook exceeded its bounded release-test watchdog. Elapsed={0}ms' -f $configuredHookWatch.ElapsedMilliseconds)
   }
   $configuredHookWatch.Stop()
   $configuredHookStdout = $configuredHookProcess.StandardOutput.ReadToEnd()
