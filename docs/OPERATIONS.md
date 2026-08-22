@@ -16,6 +16,18 @@ This proves same-environment reproducibility for the tested Windows runtime. It
 does not claim byte identity across arbitrary ZIP implementations or operating
 systems.
 
+Run the packaged Supervision and Release validation under inbox Windows
+PowerShell 5.1, not PowerShell 7:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/supervision.tests.ps1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/release.tests.ps1
+```
+
+The bounded default-slot fixtures use an explicit isolated `CODEX_HOME`. Live
+legacy state from an installed plugin must not replace the slot-recovery
+provenance that those fixtures are intended to verify.
+
 The authoritative immutable v0.7.6 ZIP SHA-256 is
 `e90c789d56e3b512109b467f116721c2fe948d66c89a77c624162ab538e88497`.
 Different hashes recorded for attempted or pre-publication packages are not the

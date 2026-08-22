@@ -550,18 +550,19 @@ try {
   Assert-True ((Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'session-registry.json') -Algorithm SHA256).Hash -eq $concurrentStateHash -and (Get-FileHash -LiteralPath (Join-Path $concurrentLegacyDirectory 'installation-scope.json') -Algorithm SHA256).Hash -eq $concurrentScopeHash) 'Concurrent isolation modified global legacy state or its anchor.'
 
   $slotTemp = Join-Path $root 'bounded slot temp'
-  New-Item -ItemType Directory -Path $slotTemp -Force | Out-Null
-  $slotZeroState = Get-DefaultSupervisionStatePath $slotTemp 0
+  $slotHome = Join-Path $root 'bounded slot home'
+  New-Item -ItemType Directory -Path $slotTemp, $slotHome -Force | Out-Null
+  $slotZeroState = Get-DefaultSupervisionStatePath $slotTemp 0 $slotHome
   $slotZeroRoot = Split-Path -Parent $slotZeroState
   [IO.File]::WriteAllText($slotZeroRoot, 'occupied-without-state', [Text.UTF8Encoding]::new($false))
   try {
-    $slotRecovery = Invoke-SupervisionInTempRoot $slotTemp
+    $slotRecovery = Invoke-SupervisionInTempRoot -TempRoot $slotTemp -CodexHomeOverride $slotHome
     Assert-True ($slotRecovery.ExitCode -eq 0) 'A blocked primary v3 slot prevented bounded state-store recovery.'
     $slotPayload = Get-Payload $slotRecovery
     Assert-True ($slotPayload.stateStoreSlot -eq 1 -and $slotPayload.stateStoreMigration -eq 'default_state_slot_recovered') 'Default state-store recovery did not select the next bounded slot.'
-    $slotInitialize = Invoke-SupervisionInTempRoot $slotTemp '' 'initialize' 'slot-recovery-governor'
+    $slotInitialize = Invoke-SupervisionInTempRoot -TempRoot $slotTemp -Action 'initialize' -Session 'slot-recovery-governor' -CodexHomeOverride $slotHome
     Assert-True ($slotInitialize.ExitCode -eq 0) 'Recovered state slot could not initialize supervision.'
-    Assert-True ((Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $slotTemp 1) -PathType Leaf) -and (Get-Content -Raw -LiteralPath $slotZeroRoot) -eq 'occupied-without-state') 'Slot recovery modified the blocked path or omitted the recovered registry.'
+    Assert-True ((Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $slotTemp 1 $slotHome) -PathType Leaf) -and (Get-Content -Raw -LiteralPath $slotZeroRoot) -eq 'occupied-without-state') 'Slot recovery modified the blocked path or omitted the recovered registry.'
   } finally {
     Remove-Item -LiteralPath $slotZeroRoot -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $slotTemp -Recurse -Force -ErrorAction SilentlyContinue
@@ -570,35 +571,37 @@ try {
   # A structurally valid v3 state encrypted for an unavailable sandbox identity
   # is preserved in place while the next bounded slot reuses its installation anchor.
   $identitySlotTemp = Join-Path $root 'identity slot temp'
-  New-Item -ItemType Directory -Path $identitySlotTemp -Force | Out-Null
+  $identitySlotHome = Join-Path $root 'identity slot home'
+  New-Item -ItemType Directory -Path $identitySlotTemp, $identitySlotHome -Force | Out-Null
   try {
-    $identitySeed = Invoke-SupervisionInTempRoot $identitySlotTemp '' 'initialize' 'identity-slot-governor'
+    $identitySeed = Invoke-SupervisionInTempRoot -TempRoot $identitySlotTemp -Action 'initialize' -Session 'identity-slot-governor' -CodexHomeOverride $identitySlotHome
     Assert-True ($identitySeed.ExitCode -eq 0) 'Could not seed the v3 identity-recovery fixture.'
     $identitySeedPayload = Get-Payload $identitySeed
-    $identitySlotZeroState = Get-DefaultSupervisionStatePath $identitySlotTemp 0
+    $identitySlotZeroState = Get-DefaultSupervisionStatePath $identitySlotTemp 0 $identitySlotHome
     $identityState = Get-Content -Raw -LiteralPath $identitySlotZeroState | ConvertFrom-Json
     $identityState.governor.protectedId = [Convert]::ToBase64String([byte[]](0..31))
     [IO.File]::WriteAllText($identitySlotZeroState, ($identityState | ConvertTo-Json -Compress -Depth 12), [Text.UTF8Encoding]::new($false))
     $identitySlotZeroHash = (Get-FileHash -LiteralPath $identitySlotZeroState -Algorithm SHA256).Hash
     $explicitIdentityFailure = Get-Payload (Invoke-Supervision $identitySlotZeroState)
     Assert-True (-not $explicitIdentityFailure.ok -and $explicitIdentityFailure.error -eq 'supervision_state_invalid') 'Explicit state did not fail closed on an inaccessible protected identity.'
-    $identityRecovery = Invoke-SupervisionInTempRoot $identitySlotTemp
+    $identityRecovery = Invoke-SupervisionInTempRoot -TempRoot $identitySlotTemp -CodexHomeOverride $identitySlotHome
     Assert-True ($identityRecovery.ExitCode -eq 0) 'Default v3 state did not recover from an inaccessible protected identity.'
     $identityRecoveryPayload = Get-Payload $identityRecovery
     Assert-True ($identityRecoveryPayload.stateStoreSlot -eq 1 -and $identityRecoveryPayload.stateStoreMigration -eq 'default_state_slot_recovered') 'Protected-identity recovery did not select the next bounded slot.'
     Assert-True ($identityRecoveryPayload.installationScopeSource -eq 'recovered_v3_anchor' -and $identityRecoveryPayload.hostEquivalenceKey -eq $identitySeedPayload.hostEquivalenceKey) 'Protected-identity recovery orphaned the installation equivalence key.'
-    $identityInitialize = Invoke-SupervisionInTempRoot $identitySlotTemp '' 'initialize' 'identity-slot-governor-recovered'
-    Assert-True ($identityInitialize.ExitCode -eq 0 -and (Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $identitySlotTemp 1) -PathType Leaf)) 'Recovered protected-identity slot could not initialize.'
+    $identityInitialize = Invoke-SupervisionInTempRoot -TempRoot $identitySlotTemp -Action 'initialize' -Session 'identity-slot-governor-recovered' -CodexHomeOverride $identitySlotHome
+    Assert-True ($identityInitialize.ExitCode -eq 0 -and (Test-Path -LiteralPath (Get-DefaultSupervisionStatePath $identitySlotTemp 1 $identitySlotHome) -PathType Leaf)) 'Recovered protected-identity slot could not initialize.'
     Assert-True ((Get-FileHash -LiteralPath $identitySlotZeroState -Algorithm SHA256).Hash -eq $identitySlotZeroHash) 'Protected-identity recovery modified the preserved source state.'
   } finally {
     Remove-Item -LiteralPath $identitySlotTemp -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   $concurrentDefaultTemp = Join-Path $root 'concurrent default temp'
-  New-Item -ItemType Directory -Path $concurrentDefaultTemp -Force | Out-Null
+  $concurrentDefaultHome = Join-Path $root 'concurrent default home'
+  New-Item -ItemType Directory -Path $concurrentDefaultTemp, $concurrentDefaultHome -Force | Out-Null
   try {
-    $defaultProcessA = Start-SupervisionInTempRoot $concurrentDefaultTemp
-    $defaultProcessB = Start-SupervisionInTempRoot $concurrentDefaultTemp
+    $defaultProcessA = Start-SupervisionInTempRoot -TempRoot $concurrentDefaultTemp -CodexHomeOverride $concurrentDefaultHome
+    $defaultProcessB = Start-SupervisionInTempRoot -TempRoot $concurrentDefaultTemp -CodexHomeOverride $concurrentDefaultHome
     $defaultResultA = Complete-SupervisionInTempRoot $defaultProcessA
     $defaultResultB = Complete-SupervisionInTempRoot $defaultProcessB
     Assert-True ($defaultResultA.ExitCode -eq 0 -and $defaultResultB.ExitCode -eq 0) 'Concurrent default-state initialization did not converge successfully.'
