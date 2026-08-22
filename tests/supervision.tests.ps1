@@ -346,6 +346,54 @@ try {
   Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Inbox merge did not create the private registry.'
   $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
+
+  $undecryptableRecord = [ordered]@{
+    schema = 2
+    event = 'SessionStart'
+    protectedSessionId = [Convert]::ToBase64String([byte[]](0..63))
+    protectedAgentId = $null
+    workspaceHash = ('a' * 64)
+    model = 'gpt-5.6-terra'
+    source = 'startup'
+    signalHash = $null
+    observedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+  }
+  $undecryptablePath = Join-Path $configuredInbox 'pending-slot-250.json'
+  [IO.File]::WriteAllText($undecryptablePath, ($undecryptableRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+  $undecryptableStatus = Get-Payload (Invoke-SupervisionInTempRoot $configuredHookTemp)
+  Assert-True ($undecryptableStatus.engine -eq 'degraded' -and $undecryptableStatus.droppedEntries -eq 1) 'Undecryptable pending identity did not degrade the registry exactly once.'
+  Assert-True ($undecryptableStatus.hookRuns -eq 1 -and $undecryptableStatus.activeTasks -eq 1) 'Undecryptable pending identity mutated lifecycle state.'
+  Assert-True (-not (Test-Path -LiteralPath $undecryptablePath)) 'Undecryptable pending identity was not removed after the degraded state was persisted.'
+  $undecryptableRepeat = Get-Payload (Invoke-SupervisionInTempRoot $configuredHookTemp)
+  Assert-True ($undecryptableRepeat.droppedEntries -eq 1 -and $undecryptableRepeat.hookRuns -eq 1 -and $undecryptableRepeat.activeTasks -eq 1) 'Undecryptable pending identity blocked or incremented a second status call.'
+
+  $deleteLockPayload = @{
+    session_id = 'thread-configured-delete-lock'
+    cwd = $repo
+    hook_event_name = 'SessionStart'
+    source = 'startup'
+    model = 'gpt-5.6-terra'
+  } | ConvertTo-Json -Compress
+  $deleteLockHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $deleteLockPayload
+  Assert-True ($deleteLockHook.ExitCode -eq 0 -and -not $deleteLockHook.Output -and -not $deleteLockHook.Error) 'Deletion-replay fixture hook was not silent and successful.'
+  $deleteLockFile = @(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json')
+  Assert-True ($deleteLockFile.Count -eq 1) 'Deletion-replay fixture did not create exactly one inbox event.'
+  $deleteLockStream = New-Object IO.FileStream($deleteLockFile[0].FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $deleteLockedFirst = Get-Payload (Invoke-SupervisionInTempRoot $configuredHookTemp)
+    Assert-True ($deleteLockedFirst.hookRuns -eq 2 -and $deleteLockedFirst.activeTasks -eq 2) 'Deletion-locked inbox event was not committed exactly once.'
+    Assert-True (Test-Path -LiteralPath $deleteLockFile[0].FullName) 'Deletion-replay fixture did not retain the locked source file.'
+  } finally {
+    $deleteLockStream.Dispose()
+  }
+  $deleteLockedSecond = Get-Payload (Invoke-SupervisionInTempRoot $configuredHookTemp)
+  Assert-True ($deleteLockedSecond.hookRuns -eq 2 -and $deleteLockedSecond.activeTasks -eq 2) 'Committed inbox event replayed after its deletion lock was released.'
+  Assert-True ($deleteLockedSecond.ignoredStaleEvents -eq $deleteLockedFirst.ignoredStaleEvents -and $deleteLockedSecond.duplicateSignals -eq $deleteLockedFirst.duplicateSignals) 'Replay protection changed stale or duplicate counters.'
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 0) 'Previously committed inbox event was not removed after its deletion lock was released.'
+  $deleteLockedCleanup = Get-Payload (Invoke-SupervisionInTempRoot $configuredHookTemp)
+  $deleteLockedState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
+  Assert-True ($deleteLockedCleanup.hookRuns -eq 2 -and @($deleteLockedState.health.processedHookEvents).Count -eq 0) 'Processed-event receipt was not pruned after inbox cleanup.'
+
   $configuredConcurrentHooks = @(0..7 | ForEach-Object {
     $concurrentPayload = @{
       session_id = 'thread-configured-concurrent-{0}' -f $_
@@ -365,7 +413,7 @@ try {
   $configuredConcurrentStatus = Invoke-SupervisionInTempRoot $configuredHookTemp
   Assert-True ($configuredConcurrentStatus.ExitCode -eq 0) 'Supervision did not merge concurrent configured hook events.'
   $configuredConcurrentData = Get-Payload $configuredConcurrentStatus
-  Assert-True ($configuredConcurrentData.hookRuns -eq 9 -and $configuredConcurrentData.activeTasks -eq 9) 'Concurrent configured hooks did not merge exactly once per task.'
+  Assert-True ($configuredConcurrentData.hookRuns -eq 10 -and $configuredConcurrentData.activeTasks -eq 10) 'Concurrent configured hooks did not merge exactly once per task.'
   Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 0) 'Concurrent configured hook inbox was not emptied after merge.'
 
   # A prior fixed TEMP registry that the restarted host cannot read must never

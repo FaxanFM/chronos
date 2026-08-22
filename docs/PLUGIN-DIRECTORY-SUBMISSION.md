@@ -34,11 +34,13 @@ instead, which removes a startup race without weakening the silent-hook
 contract. The normal configured hook now uses a small protected intake path
 instead of loading the full supervision engine inside its three-second host
 window. It writes one CODEX_HOME-scoped event; the next mutex-owning status or
-Governor cycle merges and removes it. The Governor assignment, result,
-verification, lifecycle, and exclusion contracts are now self-contained in the
-installed skill. The candidate
+Governor cycle validates, receipts, merges, and removes it. Undecryptable
+records degrade once without blocking supervision, and a deletion-locked file
+cannot replay after its state change is committed. The Governor assignment,
+result, verification, lifecycle, and exclusion contracts are now
+self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`65871acfa7911a84697fbd1f9c75e241811cd099432c073599e948f0396203e2`.
+`7101b60d637c3b65a1c09b4ac6b119eedc77e7938e2904ec47eefd49165b3734`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

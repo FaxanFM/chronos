@@ -227,6 +227,16 @@ correction separates those assertions: the manifest must still say three
 seconds, while the test permits ten seconds to collect exit status, silence,
 protected persistence, concurrency, and exactly-once merge evidence.
 
+The same independent audit found two receipt-boundary defects in the first
+dedicated-intake candidate. Structural Base64 validation happened before DPAPI
+decoding, so an undecryptable ID could abort every later cycle. State was also
+committed before best-effort file deletion without a persisted event identity,
+so a deletion-locked file could replay. The correction decodes DPAPI identities
+inside each file's validation boundary and persists a bounded SHA-256 receipt
+before applying or dropping the record. A bad record degrades once without task
+mutation. A committed record cannot change state or counters again while its
+source file remains. Deterministic tests cover both cases and eventual cleanup.
+
 ## Heuristic / Tuning Issues
 
 No threshold, scoring, prediction, or calibration-sensitive change is included

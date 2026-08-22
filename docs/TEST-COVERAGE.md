@@ -112,7 +112,9 @@ lifecycle start and end, the exact quote-free configured Windows intake through
 a scheduler-tolerant test watchdog, a separate assertion that every manifest
 hook retains its three-second host ceiling, protected inbox persistence before
 registry creation, malformed-input rejection without an event, and exactly-once
-mutex-bound inbox merge,
+mutex-bound inbox merge. It also proves that undecryptable DPAPI records degrade
+once without blocking status and that a committed deletion-locked event cannot
+replay before eventual cleanup,
 asynchronous completed-turn activity, duplicate turn-signal deduplication,
 mid-session self-discovery,
 strict UTF-8 and BOM-framed hook input,

@@ -71,8 +71,12 @@ completed-turn signal, and writes one physically flushed event to a private
 inbox scoped by canonical `CODEX_HOME` and machine identity. It does not read or
 write the main registry. The next supervision status or Governor cycle selects
 the safe state slot, owns the registry mutex, merges each valid inbox event once,
-and removes the merged file. Malformed inbox entries increment a dropped-entry
-counter and do not change task state.
+persists a bounded SHA-256 receipt, and removes the merged file. A receipt stays
+authoritative if Windows temporarily refuses deletion, so the same file cannot
+change state or counters twice. DPAPI decoding and normalized-ID validation stay
+inside the per-file boundary. Undecryptable or malformed entries increment the
+dropped-entry counter once, change no task state, and are removed only after the
+degraded state is saved.
 
 Direct diagnostic use of `session-registry.ps1 -Action hook` retains the
 mutex-bound path. `SessionEnd` mutex acquisition is capped at 250 ms;

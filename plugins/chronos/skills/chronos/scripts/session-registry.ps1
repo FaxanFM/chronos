@@ -209,6 +209,16 @@ function Get-TextHash {
   }
 }
 
+function Get-BytesHash {
+  param([byte[]]$Value)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($sha.ComputeHash($Value))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 function Test-ContainedPath {
   param([string]$Path, [string]$Root)
   try {
@@ -607,7 +617,7 @@ function ConvertTo-UtcTimestamp {
 
 function New-State {
   return [ordered]@{
-    schema = 4
+    schema = 5
     revision = 0L
     governor = $null
     sessions = @{}
@@ -619,6 +629,7 @@ function New-State {
       lastHookUtc = $null
       turnSignals = 0L
       duplicateSignals = 0L
+      processedHookEvents = @()
     }
   }
 }
@@ -640,6 +651,10 @@ function Upgrade-State {
       if (-not $record.Contains('turnSignals')) { $record['turnSignals'] = 0L }
     }
     $State.schema = 4
+  }
+  if ((Test-IsInteger $State.schema) -and [int]$State.schema -eq 4) {
+    if (-not $State.health.Contains('processedHookEvents')) { $State.health['processedHookEvents'] = @() }
+    $State.schema = 5
   }
   return $State
 }
@@ -670,14 +685,14 @@ function Assert-StateProtectedIdentity {
 function Assert-State {
   param($State, [switch]$ValidateProtectedIds)
   Assert-ExactKeys $State @('schema', 'revision', 'governor', 'sessions', 'health')
-  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 4 -or
+  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 5 -or
       -not (Test-IsInteger $State.revision) -or [long]$State.revision -lt 0 -or
       -not ($State.sessions -is [Collections.IDictionary]) -or
       -not ($State.health -is [Collections.IDictionary]) -or
       $State.sessions.Count -gt $script:SessionLimit) {
     throw 'supervision_state_invalid'
   }
-  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc', 'turnSignals', 'duplicateSignals')
+  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc', 'turnSignals', 'duplicateSignals', 'processedHookEvents')
   if (-not (Test-IsInteger $State.health.hookRuns) -or [long]$State.health.hookRuns -lt 0 -or
       -not (Test-IsInteger $State.health.droppedEntries) -or [long]$State.health.droppedEntries -lt 0 -or
       -not (Test-IsInteger $State.health.ignoredStaleEvents) -or [long]$State.health.ignoredStaleEvents -lt 0 -or
@@ -685,6 +700,18 @@ function Assert-State {
       -not (Test-IsInteger $State.health.turnSignals) -or [long]$State.health.turnSignals -lt 0 -or
       -not (Test-IsInteger $State.health.duplicateSignals) -or [long]$State.health.duplicateSignals -lt 0) {
     throw 'supervision_state_invalid'
+  }
+  if (-not ($State.health.processedHookEvents -is [Collections.IEnumerable]) -or
+      $State.health.processedHookEvents -is [string] -or
+      @($State.health.processedHookEvents).Count -gt $script:PendingEventLimit) {
+    throw 'supervision_state_invalid'
+  }
+  $processedHookEventSet = @{}
+  foreach ($eventId in @($State.health.processedHookEvents)) {
+    if (-not ($eventId -is [string]) -or [string]$eventId -notmatch '^[a-f0-9]{64}$' -or $processedHookEventSet.ContainsKey([string]$eventId)) {
+      throw 'supervision_state_invalid'
+    }
+    $processedHookEventSet[[string]$eventId] = $true
   }
   if ($null -ne $State.health.lastHookUtc) { [void](ConvertTo-UtcTimestamp $State.health.lastHookUtc) }
   if ($null -ne $State.governor) {
@@ -953,16 +980,30 @@ function Read-PendingHookEvents {
     if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
     $remaining = $script:PendingEventLimit - $result.Count
     foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name | Select-Object -First $remaining)) {
+      $eventId = Get-TextHash ('pending-file|{0}|{1}|{2}' -f $file.FullName.ToUpperInvariant(), $file.Length, $file.LastWriteTimeUtc.Ticks)
       try {
         if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt $script:PendingEventByteLimit) { throw 'invalid' }
         $bytes = [IO.File]::ReadAllBytes($file.FullName)
+        $eventId = Get-BytesHash $bytes
         $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
         Assert-StrictJson $text 'supervision_pending_event_invalid'
         $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
         Assert-PendingHookEvent $record
-        $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $record; Valid = $true }) | Out-Null
+        $session = Unprotect-OpaqueId $record.protectedSessionId
+        $agent = $null
+        if ([string]$record.event -in @('SubagentStart', 'SubagentStop')) { $agent = Unprotect-OpaqueId $record.protectedAgentId }
+        $observedAt = ConvertTo-UtcTimestamp $record.observedAtUtc
+        $result.Add([pscustomobject]@{
+          Path = $file.FullName
+          EventId = $eventId
+          Record = $record
+          SessionId = $session
+          AgentId = $agent
+          ObservedAt = $observedAt
+          Valid = $true
+        }) | Out-Null
       } catch {
-        $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $null; Valid = $false }) | Out-Null
+        $result.Add([pscustomobject]@{ Path = $file.FullName; EventId = $eventId; Record = $null; SessionId = $null; AgentId = $null; ObservedAt = $null; Valid = $false }) | Out-Null
       }
     }
   }
@@ -972,34 +1013,49 @@ function Read-PendingHookEvents {
 function Merge-PendingHookEvents {
   param($State, [string]$ResolvedStatePath, [DateTimeOffset]$Now)
   $items = @(Read-PendingHookEvents $ResolvedStatePath)
-  $valid = @($items | Where-Object { $_.Valid } | Sort-Object @{Expression={ ConvertTo-UtcTimestamp $_.Record.observedAtUtc }}, Path)
+  $currentEventIds = @{}
+  foreach ($item in $items) { $currentEventIds[[string]$item.EventId] = $true }
+  $processedEventIds = @{}
+  foreach ($eventId in @($State.health.processedHookEvents)) {
+    if ($currentEventIds.ContainsKey([string]$eventId)) { $processedEventIds[[string]$eventId] = $true }
+  }
+  $State.health.processedHookEvents = @($processedEventIds.Keys | Sort-Object)
+
+  $valid = @($items | Where-Object { $_.Valid } | Sort-Object ObservedAt, Path)
   foreach ($item in $valid) {
+    if ($processedEventIds.ContainsKey([string]$item.EventId)) { continue }
     $record = $item.Record
-    $session = Unprotect-OpaqueId $record.protectedSessionId
     $hookData = @{
       hook_event_name = [string]$record.event
-      session_id = $session
+      session_id = [string]$item.SessionId
       model = [string]$record.model
       source = [string]$record.source
     }
     $preparedProtectedId = [string]$record.protectedSessionId
     if ([string]$record.event -in @('SubagentStart', 'SubagentStop')) {
-      $hookData.agent_id = Unprotect-OpaqueId $record.protectedAgentId
+      $hookData.agent_id = [string]$item.AgentId
       $preparedProtectedId = [string]$record.protectedAgentId
     }
-    Invoke-HookEvent $State $hookData $Now (ConvertTo-UtcTimestamp $record.observedAtUtc) $preparedProtectedId ([string]$record.workspaceHash) ([string](Get-Value $record 'signalHash' ''))
+    Invoke-HookEvent $State $hookData $Now $item.ObservedAt $preparedProtectedId ([string]$record.workspaceHash) ([string](Get-Value $record 'signalHash' ''))
+    $processedEventIds[[string]$item.EventId] = $true
   }
   foreach ($item in @($items | Where-Object { -not $_.Valid })) {
+    if ($processedEventIds.ContainsKey([string]$item.EventId)) { continue }
     $State.health.droppedEntries = [long]$State.health.droppedEntries + 1
+    $processedEventIds[[string]$item.EventId] = $true
   }
-  return @($items | ForEach-Object { [string]$_.Path })
+  if ($processedEventIds.Count -gt $script:PendingEventLimit) { throw 'supervision_pending_event_capacity' }
+  $State.health.processedHookEvents = @($processedEventIds.Keys | Sort-Object)
+  return @($items)
 }
 
 function Remove-PendingHookEvents {
-  param([string[]]$Paths, [string]$ResolvedStatePath)
+  param($Items, [string]$ResolvedStatePath)
   # Keep the empty parent directory. Fallback writers do not hold the registry
   # mutex, so deleting it here can race a writer between its path check and write.
-  foreach ($path in @($Paths)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+  foreach ($item in @($Items)) {
+    try { Remove-Item -LiteralPath ([string]$item.Path) -Force -ErrorAction Stop } catch {}
+  }
 }
 
 function Read-HostInventory {
@@ -1539,18 +1595,20 @@ try {
   }
   $state = Read-State $resolved -ValidateProtectedIds:($Action -ne 'hook')
   $now = [DateTimeOffset]::UtcNow
-  $pendingPaths = @(Merge-PendingHookEvents $state $resolved $now)
+  $processedHookEventCountBeforeMerge = @($state.health.processedHookEvents).Count
+  $pendingItems = @(Merge-PendingHookEvents $state $resolved $now)
+  $processedHookEventsChanged = $processedHookEventCountBeforeMerge -ne @($state.health.processedHookEvents).Count
 
   if ($Action -eq 'hook') {
     Invoke-HookEvent $state $hookData $now $eventObservedAt $preparedProtectedId ([string]$preparedHookEvent.workspaceHash)
     Write-State $state $resolved -TrustedHookMutation
     $hookDurable = $true
-    Remove-PendingHookEvents $pendingPaths $resolved
+    Remove-PendingHookEvents $pendingItems $resolved
     exit 0
   }
-  if ($pendingPaths.Count -gt 0) {
+  if ($pendingItems.Count -gt 0 -or $processedHookEventsChanged) {
     Write-State $state $resolved -TrustedHookMutation
-    Remove-PendingHookEvents $pendingPaths $resolved
+    Remove-PendingHookEvents $pendingItems $resolved
   }
 
   if ($Action -eq 'status') {
