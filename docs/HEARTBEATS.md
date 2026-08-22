@@ -90,7 +90,10 @@ not prove progress, account billing, fleet state, or installation intent. An
 Inspector result cannot replace the collector snapshot. Without authorized,
 compatible Inspector evidence, review and approval fields remain unavailable.
 Compatible evidence must name the installed plugin version and be captured
-within 15 minutes of its companion snapshot.
+within 15 minutes of its companion snapshot. When Inspector declares review
+coverage complete, every required numeric field must parse and be within its
+allowed range. Malformed complete evidence fails closed. Chronos does not omit
+the bad value, replace it with zero, or label Guardian coverage `observed`.
 
 ## Host responsibilities
 
@@ -140,7 +143,7 @@ input paths fail closed.
 | `schemaVersion` | integer | `2` is the current Governor contract. It requires timestamp, epoch, sequence, and all eight coverage labels. Schema `1` remains a compatibility input. |
 | `capturedAtUtc` | ISO 8601 string | Collector timestamp. Out-of-order evidence is not evaluated and cannot block a due outbox retry. |
 | `sourceEpoch` | opaque ID | Stable collector-process or source epoch. Required to prove continuity for resolution. |
-| `sourceSequence` | integer | Monotonic sequence within `sourceEpoch`. Reuse or rollback fails closed. |
+| `sourceSequence` | integer | Monotonic sequence within `sourceEpoch`. Every accepted schema-v2 snapshot advances the source-level high-water mark before family cadence is checked. Reuse or rollback fails closed. |
 | `runId` | opaque ID | Optional. Repeated IDs are suppressed across processes. |
 | `origin` | enum | `host`, `inspector`, `test`, `heartbeat`, or `heartbeat_notification`. Heartbeat-generated origins are ignored. |
 | `collectorCoverage` | object | Per-family `observed`, `partial`, or `unsupported` labels. |
@@ -173,6 +176,13 @@ Coverage is a control, not a display label.
 A supplied family without a matching coverage field is `unsupported`.
 Schema v2 requires a label for all eight public families. The label can still be
 `unsupported`; explicit coverage does not mean evidence exists.
+
+The source watermark is separate from family baselines. A newer partial,
+unsupported, or cadence-skipped schema-v2 snapshot still advances the watermark.
+It cannot evaluate or resolve a family. A later lower sequence from the same
+epoch fails before detector evaluation, condition resolution, or event creation.
+A duplicate `runId` is only a bounded delivery replay for the existing outbox;
+it does not evaluate collectors or advance the source watermark.
 
 ## Collector contract
 

@@ -260,8 +260,10 @@ churn, tests, Git state, or machine health.
 Create a separate bounded Heartbeat collector file under `%TEMP%`. Use schema
 v2, one Governor-local opaque `sourceEpoch`, an increasing `sourceSequence`, and
 an explicit `observed`, `partial`, or `unsupported` label for each of the eight
-public families. Include only current compatible evidence. Never substitute a
-zero for an unavailable field. Run `chronos.cmd -Action heartbeat -HeartbeatInputPath <collector-file>`,
+public families. Include only current compatible evidence. Every accepted
+schema-v2 snapshot advances the source watermark even when a family is not due
+or its coverage is partial or unsupported. Never substitute a zero for an
+unavailable or malformed field. Run `chronos.cmd -Action heartbeat -HeartbeatInputPath <collector-file>`,
 then remove the file. A plain
 `chronos.cmd -Action heartbeat` call reads prior state only. It does not count as
 the current pulse's evaluation. Require compact status to report

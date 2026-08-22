@@ -150,7 +150,9 @@ and chooses when to invoke the action. The engine enforces its registered
 minimum cadence for each observed family. Supply a stable
 `sourceEpoch` and increasing `sourceSequence`; without continuity proof, Chronos
 can open a condition but will not resolve one. Governor-generated snapshots use
-schema v2 and include all eight public family coverage labels. Host inventory is
+schema v2 and include all eight public family coverage labels. Every accepted
+schema-v2 snapshot advances the source watermark before family cadence is
+checked, including partial, unsupported, and cadence-skipped snapshots. Host inventory is
 the liveness authority, but it is not a substitute for this collector snapshot.
 
 ```powershell
@@ -178,7 +180,10 @@ Use `-HeartbeatInspectorOutputPath` only with captured compact `CHRONOS` and
 `-HeartbeatInspectorAuthorized` with the schema-v2 companion snapshot. The
 adapter rejects missing, incompatible, or stale provenance. See the public
 [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
-for the strict normalized input contract and coverage limits.
+for the strict normalized input contract and coverage limits. Complete Guardian
+coverage also requires every required Inspector metric to parse and pass its
+range check. Malformed complete evidence fails closed; it is never converted to
+an observed result or a zero.
 
 Only the dedicated Governor uses `-HeartbeatInterventionAction`. It must plan
 all events before sending, keep one active intervention per target generation, recheck the

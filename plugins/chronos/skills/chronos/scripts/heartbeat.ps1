@@ -885,8 +885,15 @@ function Convert-InspectorNumber {
   if ($null -eq $Value) { return $null }
   $number = 0.0
   $text = ([string]$Value).Replace(',', '.')
-  if ([double]::TryParse($text, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { return $number }
+  if ([double]::TryParse($text, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -and -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number)) { return $number }
   return $null
+}
+
+function Convert-InspectorInteger {
+  param($Value, [double]$Maximum = 9000000000000000)
+  $number = Convert-InspectorNumber $Value
+  if ($null -eq $number -or $number -lt 0 -or $number -gt $Maximum -or [math]::Floor($number) -ne $number) { return $null }
+  return [int64]$number
 }
 
 function Merge-InspectorOutput {
@@ -931,14 +938,25 @@ function Merge-InspectorOutput {
   if (-not (Has-Value $Snapshot 'collectorCoverage')) { $Snapshot['collectorCoverage'] = @{} }
 
   if (-not (Has-Value $Snapshot 'guardian') -and $fields.Contains('approvalReviewTurnsObserved')) {
-    $reviewCount = Convert-InspectorNumber $fields.approvalReviewTurnsObserved
+    $reviewCount = Convert-InspectorInteger $fields.approvalReviewTurnsObserved
     $reviewsPerHour = Convert-InspectorNumber $fields.approvalReviewsPerHour
     $turnShare = Convert-InspectorNumber $fields.approvalReviewTurnShare
     $inputRatio = Convert-InspectorNumber $fields.approvalReviewerMainInputRatio
+    $repeatValues = @('approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries') | ForEach-Object { Convert-InspectorInteger $fields[$_] }
+    $nested = if ($fields.Contains('nestedReviewerSessionsObserved')) { Convert-InspectorInteger $fields.nestedReviewerSessionsObserved } else { $null }
+    $coverage = [string]$fields.approvalReviewCoverage
+    $completeRequested = $coverage -match '^(complete|observed)$'
+    $requiredGuardianFields = @('approvalReviewTurnsObserved', 'approvalReviewsPerHour', 'approvalReviewTurnShare', 'approvalReviewerMainInputRatio', 'approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries', 'nestedReviewerSessionsObserved')
+    $requiredPresent = @($requiredGuardianFields | Where-Object { -not $fields.Contains($_) }).Count -eq 0
+    $requiredValid = $null -ne $reviewCount -and $null -ne $reviewsPerHour -and $reviewsPerHour -ge 0 -and $reviewsPerHour -le 1000000000 -and
+      $null -ne $turnShare -and $turnShare -ge 0 -and $turnShare -le 100 -and
+      $null -ne $inputRatio -and $inputRatio -ge 0 -and $inputRatio -le 1000000000 -and
+      @($repeatValues | Where-Object { $null -ne $_ }).Count -eq 3 -and $null -ne $nested
+    if ($completeRequested -and (-not $requiredPresent -or -not $requiredValid)) { throw 'heartbeat_inspector_input_invalid' }
     if ($null -ne $turnShare -and $turnShare -gt 1 -and $turnShare -le 100) { $turnShare = $turnShare / 100.0 }
-    $inputShare = if ($null -ne $inputRatio -and $inputRatio -ge 0) { $inputRatio / (1.0 + $inputRatio) } else { $null }
-    $repeatValues = @('approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries') | ForEach-Object { Convert-InspectorNumber $fields[$_] }
-    $repeats = [int](($repeatValues | Where-Object { $null -ne $_ } | Measure-Object -Maximum).Maximum)
+    $inputShare = if ($null -ne $inputRatio -and $inputRatio -ge 0 -and $inputRatio -le 1000000000) { $inputRatio / (1.0 + $inputRatio) } else { $null }
+    $validRepeatValues = @($repeatValues | Where-Object { $null -ne $_ })
+    $repeats = if ($validRepeatValues.Count -gt 0) { [int64](($validRepeatValues | Measure-Object -Maximum).Maximum) } else { $null }
     if ($null -eq $reviewCount) { throw 'heartbeat_inspector_input_invalid' }
     $metricFields = @{}
     foreach ($key in $fields.Keys) {
@@ -949,25 +967,19 @@ function Merge-InspectorOutput {
       owner = 'governor'
       owningSolThread = 'governor'
       reviewCount = [int64]$reviewCount
-      equivalentApprovalRequests = $repeats
       progressHash = (Get-StableHash $metricFields).Substring(0, 32)
     }
-    if ($null -ne $reviewsPerHour) { $guardian.reviewsPerHour = $reviewsPerHour }
+    if ($null -ne $repeats) { $guardian.equivalentApprovalRequests = $repeats }
+    if ($null -ne $reviewsPerHour -and $reviewsPerHour -ge 0 -and $reviewsPerHour -le 1000000000) { $guardian.reviewsPerHour = $reviewsPerHour }
     if ($null -ne $turnShare -and $turnShare -ge 0 -and $turnShare -le 1) { $guardian.reviewerTurnShare = $turnShare }
     if ($null -ne $inputShare -and $inputShare -ge 0 -and $inputShare -le 1) { $guardian.reviewerUsageRatio = $inputShare }
     if ($fields.Contains('approvalAverageIntervalSeconds')) {
       $interval = Convert-InspectorNumber $fields.approvalAverageIntervalSeconds
       if ($null -ne $interval -and $interval -ge 0) { $guardian.averageReviewIntervalSeconds = $interval }
     }
-    if ($fields.Contains('nestedReviewerSessionsObserved')) {
-      $nested = Convert-InspectorNumber $fields.nestedReviewerSessionsObserved
-      if ($null -ne $nested) { $guardian.reviewerRecursion = ($nested -gt 0) }
-    }
+    if ($null -ne $nested) { $guardian.reviewerRecursion = ($nested -gt 0) }
     $Snapshot['guardian'] = $guardian
-    $coverage = [string]$fields.approvalReviewCoverage
-    $requiredGuardianFields = @('approvalReviewTurnsObserved', 'approvalReviewsPerHour', 'approvalReviewTurnShare', 'approvalReviewerMainInputRatio', 'approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries', 'nestedReviewerSessionsObserved')
-    $completeGuardianEvidence = @($requiredGuardianFields | Where-Object { -not $fields.Contains($_) }).Count -eq 0
-    $Snapshot.collectorCoverage['guardian'] = if ($coverage -match '^(complete|observed)$' -and $completeGuardianEvidence) { 'observed' } else { 'partial' }
+    $Snapshot.collectorCoverage['guardian'] = if ($completeRequested -and $requiredPresent -and $requiredValid) { 'observed' } else { 'partial' }
   }
 
   if (-not (Has-Value $Snapshot 'usage') -and $fields.Contains('tokenIntervalInputM')) {
@@ -1050,6 +1062,8 @@ function New-DefaultState {
       runtimeClassification = 'unobserved'
       runtimeOverrunStreak = 0
       runtimeBackoffApplied = $false
+      sourceEpochHash = $null
+      lastSourceSequence = $null
     }
     runIds = @()
   }
@@ -1156,7 +1170,7 @@ function Assert-State {
     Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'governorHash', 'state', 'attempts', 'claimHash', 'claimExpiresAt', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
     if ([int]$item.version -lt 1 -or [int]$item.attempts -lt 0 -or [int]$item.attempts -gt 2 -or [int]$item.coalescedCount -lt 0) { throw 'heartbeat_state_invalid' }
   }
-  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
+  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied', 'sourceEpochHash', 'lastSourceSequence')
   foreach ($runId in @($State.runIds)) { if ([string]$runId -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' } }
 }
 
@@ -2679,14 +2693,19 @@ function Invoke-Cycle {
   foreach ($pendingEvent in @(Get-DueOutboxEvents $State $DeliveryNow)) { $routed.Add($pendingEvent) | Out-Null }
   $runId = [string](Get-Value $Snapshot 'runId' '')
   $runHash = $null
+  $duplicateRun = $false
   if (-not [string]::IsNullOrWhiteSpace($runId)) {
     $runHash = Get-StableHash $runId
-    if (@($State.runIds) -contains $runHash) {
-      $State.health.duplicateRuns = [int64]$State.health.duplicateRuns + 1
-      $State.revision = [int64]$State.revision + 1
-      Write-State $State $ResolvedStatePath
-      return @($routed)
-    }
+    $duplicateRun = @($State.runIds) -contains $runHash
+  }
+  if ($duplicateRun) {
+    # A duplicate run is a delivery replay, not a newly accepted collector
+    # snapshot. It may drain the existing outbox but cannot evaluate detectors
+    # or advance the schema-v2 source watermark.
+    $State.health.duplicateRuns = [int64]$State.health.duplicateRuns + 1
+    $State.revision = [int64]$State.revision + 1
+    Write-State $State $ResolvedStatePath
+    return @($routed)
   }
   if (-not [string]::IsNullOrWhiteSpace([string]$State.health.lastCycleUtc)) {
     $lastCycle = ConvertTo-UtcTimestamp ([string]$State.health.lastCycleUtc) 'heartbeat_state_invalid'
@@ -2697,6 +2716,25 @@ function Invoke-Cycle {
       }
       throw 'heartbeat_time_out_of_order'
     }
+  }
+  if ([int](Get-Value $Snapshot 'schemaVersion' 1) -eq 2) {
+    $sourceEpochHash = Get-StableHash ([string]$Snapshot.sourceEpoch)
+    $sourceSequence = [int64]$Snapshot.sourceSequence
+    $priorSourceEpochHash = [string](Get-Value $State.health 'sourceEpochHash' '')
+    $priorSourceSequence = Get-Value $State.health 'lastSourceSequence' $null
+    $hasSourceWatermark = -not [string]::IsNullOrWhiteSpace($priorSourceEpochHash) -and $null -ne $priorSourceSequence
+    $sameSourceEpoch = $hasSourceWatermark -and $priorSourceEpochHash -eq $sourceEpochHash
+    if ($sameSourceEpoch -and ($sourceSequence -lt [int64]$priorSourceSequence -or ($sourceSequence -eq [int64]$priorSourceSequence -and -not $duplicateRun))) {
+      throw 'heartbeat_source_out_of_order'
+    }
+    if ($hasSourceWatermark -and -not $sameSourceEpoch) {
+      foreach ($family in $script:Families) {
+        $State.collectors[$family].sourceEpochHash = $null
+        $State.collectors[$family].lastSequence = $null
+      }
+    }
+    $State.health.sourceEpochHash = $sourceEpochHash
+    $State.health.lastSourceSequence = $sourceSequence
   }
   if ($runHash) {
     $State.runIds = @($State.runIds + $runHash)

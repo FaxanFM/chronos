@@ -586,6 +586,31 @@ try {
   [IO.File]::WriteAllText($sourceInput, ($sourceData | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $sourceInput, '-StatePath', $sourceOrder.State)) 'heartbeat_source_out_of_order' 'Non-monotonic source sequence.'
 
+  $skippedRollback = New-Case 'source-order-cadence-skip'
+  $rollbackAt = $skippedRollback.BaseTime.AddHours(1)
+  $rollbackWarning = Invoke-Heartbeat $skippedRollback @{ schemaVersion = 2; sourceEpoch = 'epoch-cadence-rollback'; sourceSequence = 1; collectorCoverage = (Get-StrictCoverage @{ agent_stall = 'observed' }); agents = @(@{ id = 'rollback-agent'; active = $true; progressHash = 'stalled'; totalTokens = 50000; tokensSinceMeaningfulChange = 49000; repeatedEquivalentActions = 8; minutesSinceMeaningfulChange = 40 }) } -At $rollbackAt -NoForce
+  Assert-Event $rollbackWarning 'AGENT_STALL' 'governor' | Out-Null
+  Assert-Silent (Invoke-Heartbeat $skippedRollback @{ schemaVersion = 2; sourceEpoch = 'epoch-cadence-rollback'; sourceSequence = 100; collectorCoverage = (Get-StrictCoverage @{ agent_stall = 'observed' }); agents = @(@{ id = 'rollback-agent'; active = $true; progressHash = 'healthy'; totalTokens = 51000; tokensSinceMeaningfulChange = 0; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) } -At ($rollbackAt.AddSeconds(10)) -NoForce) 'Cadence-skipped high source sequence.'
+  $rollbackBefore = Get-Content -Raw $skippedRollback.State | ConvertFrom-Json
+  $rollbackPreviousProperty = @($rollbackBefore.previous.agent_stall.PSObject.Properties)[0]
+  $rollbackPrevious = $rollbackPreviousProperty.Value
+  $rollbackEventCount = @($rollbackBefore.events).Count
+  $rollbackInterventionCount = @($rollbackBefore.interventions).Count
+  Assert-Equal $rollbackBefore.health.lastSourceSequence 100 'Cadence-skipped snapshot did not advance the source watermark.'
+  $rollbackResult = Invoke-Heartbeat $skippedRollback @{ schemaVersion = 2; sourceEpoch = 'epoch-cadence-rollback'; sourceSequence = 2; collectorCoverage = (Get-StrictCoverage @{ agent_stall = 'observed' }); agents = @(@{ id = 'rollback-agent'; active = $true; progressHash = 'healthy'; totalTokens = 52000; tokensSinceMeaningfulChange = 0; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) } -At ($rollbackAt.AddMinutes(6)) -NoForce
+  Assert-FailedSafely $rollbackResult 'heartbeat_source_out_of_order' 'Cadence-skipped source-sequence rollback.'
+  $rollbackAfter = Get-Content -Raw $skippedRollback.State | ConvertFrom-Json
+  $rollbackAfterProperties = @($rollbackAfter.previous.agent_stall.PSObject.Properties)
+  Assert-Equal $rollbackAfterProperties.Count 1 'Source rollback changed the observed subject set.'
+  Assert-Equal $rollbackAfterProperties[0].Name $rollbackPreviousProperty.Name 'Source rollback changed the observed subject identity.'
+  foreach ($field in @('generationHash', 'active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status')) {
+    Assert-Equal $rollbackAfterProperties[0].Value.$field $rollbackPrevious.$field ('Source rollback mutated baseline field ' + $field + '.')
+  }
+  Assert-Equal @($rollbackAfter.events).Count $rollbackEventCount 'Source rollback created or resolved an event.'
+  Assert-Equal @($rollbackAfter.interventions).Count $rollbackInterventionCount 'Source rollback created an intervention.'
+  Assert-True (@($rollbackAfter.conditions.PSObject.Properties.Value | Where-Object { $_.family -eq 'agent_stall' -and $_.open }).Count -eq 1) 'Source rollback resolved the open condition.'
+  Assert-Equal $rollbackAfter.health.lastSourceSequence 100 'Source rollback changed the accepted source watermark.'
+
   # Reparse-point containment for input and state paths.
   $reparse = New-Case 'reparse'
   $realDirectory = Join-Path $reparse.Path 'real'
@@ -636,6 +661,17 @@ try {
   [IO.File]::WriteAllText($incompatibleInspector, ((Get-Content -Raw -LiteralPath $inspector1).Replace('pluginVersion=0.9.2', 'pluginVersion=0.9.1')), [Text.UTF8Encoding]::new($false))
   $incompatibleResult = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $incompatibleInspector -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
   Assert-FailedSafely $incompatibleResult 'heartbeat_inspector_incompatible' 'Inspector evidence from another plugin version.'
+  $malformedInspectorMetric = Join-Path $adapter.Path 'inspector-malformed-metric.txt'
+  [IO.File]::WriteAllText($malformedInspectorMetric, ((Get-Content -Raw -LiteralPath $inspector1).Replace('approvalReviewsPerHour=2', 'approvalReviewsPerHour=not-a-number')), [Text.UTF8Encoding]::new($false))
+  $malformedMetricResult = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $malformedInspectorMetric -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
+  Assert-FailedSafely $malformedMetricResult 'heartbeat_inspector_input_invalid' 'Complete Inspector evidence with a malformed required numeric metric.'
+  Assert-True (-not (Test-Path -LiteralPath $adapter.State)) 'Malformed Inspector metric created normalized Heartbeat state.'
+  $malformedInspectorRepeats = Join-Path $adapter.Path 'inspector-malformed-repeats.txt'
+  $malformedRepeatText = (Get-Content -Raw -LiteralPath $inspector1).Replace('approvalRepeatedRequests=0', 'approvalRepeatedRequests=invalid').Replace('approvalRepeatedPrefixRequests=0', 'approvalRepeatedPrefixRequests=invalid').Replace('approvalPersistenceRetries=0', 'approvalPersistenceRetries=invalid')
+  [IO.File]::WriteAllText($malformedInspectorRepeats, $malformedRepeatText, [Text.UTF8Encoding]::new($false))
+  $malformedRepeatResult = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $malformedInspectorRepeats -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
+  Assert-FailedSafely $malformedRepeatResult 'heartbeat_inspector_input_invalid' 'Complete Inspector evidence with malformed repeat counters.'
+  Assert-True (-not (Test-Path -LiteralPath $adapter.State)) 'Malformed Inspector repeat counters created normalized zero state.'
   Assert-Silent ([pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $inspector1 -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }) 'Inspector adapter baseline.'
   $adapterOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput2 -HeartbeatInspectorOutputPath $inspector2 -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1)
   $adapterResult = [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $adapterOutput; Text = ($adapterOutput -join "`n") }
