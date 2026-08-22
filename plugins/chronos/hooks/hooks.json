@@ -7,8 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABzAGUAcwBzAGkAbwBuAC0AcgBlAGcAaQBzAHQAcgB5AC4AcABzADEAJwApACAALQBBAGMAdABpAG8AbgAgAGgAbwBvAGsA",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
+            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
             "async": true,
             "timeout": 3
           }
@@ -20,8 +20,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABzAGUAcwBzAGkAbwBuAC0AcgBlAGcAaQBzAHQAcgB5AC4AcABzADEAJwApACAALQBBAGMAdABpAG8AbgAgAGgAbwBvAGsA",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
+            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
             "timeout": 3
           }
         ]
@@ -32,8 +32,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABzAGUAcwBzAGkAbwBuAC0AcgBlAGcAaQBzAHQAcgB5AC4AcABzADEAJwApACAALQBBAGMAdABpAG8AbgAgAGgAbwBvAGsA",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
+            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
             "async": true,
             "timeout": 3
           }
@@ -45,8 +45,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABzAGUAcwBzAGkAbwBuAC0AcgBlAGcAaQBzAHQAcgB5AC4AcABzADEAJwApACAALQBBAGMAdABpAG8AbgAgAGgAbwBvAGsA",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
+            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
             "async": true,
             "timeout": 3
           }
@@ -58,8 +58,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/session-registry.ps1\" -Action hook",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABzAGUAcwBzAGkAbwBuAC0AcgBlAGcAaQBzAHQAcgB5AC4AcABzADEAJwApACAALQBBAGMAdABpAG8AbgAgAGgAbwBvAGsA",
+            "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
+            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
             "async": true,
             "timeout": 3
           }

@@ -43,6 +43,13 @@ function Get-DefaultSupervisionStatePath {
   Join-Path $TempRoot (Join-Path ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $Slot) 'session-registry.json')
 }
 
+function Get-HookInboxDirectory {
+  param([string]$TempRoot, [string]$CodexHome = '')
+  $resolvedCodexHome = Get-TestCodexHome $CodexHome
+  $scopeHash = Get-TestHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $resolvedCodexHome.Identity)
+  Join-Path $TempRoot ('Chronos-Supervision-Inbox-v1-{0}' -f $scopeHash.Substring(0, 24))
+}
+
 function Get-Payload {
   param($Result)
   $line = @($Result.Output | Where-Object { $_ -like 'CHRONOS SUPERVISION *' } | Select-Object -Last 1)
@@ -144,7 +151,7 @@ function Invoke-Hook {
   Complete-HookProcess (Start-HookProcess $State ($Data | ConvertTo-Json -Compress -Depth 8) $ObservedAtUtc)
 }
 
-function Invoke-ConfiguredWindowsHook {
+function Start-ConfiguredWindowsHook {
   param([string]$Command, [string]$PluginRoot, [string]$TempRoot, [string]$Json)
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = $env:ComSpec
@@ -159,20 +166,38 @@ function Invoke-ConfiguredWindowsHook {
   $info.EnvironmentVariables['TEMP'] = $TempRoot
   $info.EnvironmentVariables['TMP'] = $TempRoot
   [void]$info.EnvironmentVariables.Remove('CODEX_HOME')
+  $watch = [Diagnostics.Stopwatch]::StartNew()
   $process = [Diagnostics.Process]::Start($info)
   $process.StandardInput.Write($Json)
   $process.StandardInput.Close()
-  if (-not $process.WaitForExit(5000)) {
-    try { $process.Kill() } catch {}
-    throw 'Configured Windows lifecycle hook exceeded its bounded test timeout.'
+  [pscustomobject]@{ Process = $process; Watch = $watch }
+}
+
+function Complete-ConfiguredWindowsHook {
+  param($Invocation)
+  $remaining = [Math]::Max(1, 3000 - [int]$Invocation.Watch.ElapsedMilliseconds)
+  if (-not $Invocation.Process.WaitForExit($remaining)) {
+    $Invocation.Watch.Stop()
+    try { $Invocation.Process.Kill() } catch {}
+    $Invocation.Process.Dispose()
+    throw ('Configured Windows lifecycle hook exceeded the three-second host timeout. Elapsed={0}ms' -f $Invocation.Watch.ElapsedMilliseconds)
   }
+  $Invocation.Watch.Stop()
+  $processMilliseconds = ($Invocation.Process.ExitTime.ToUniversalTime() - $Invocation.Process.StartTime.ToUniversalTime()).TotalMilliseconds
   $result = [pscustomobject]@{
-    ExitCode = $process.ExitCode
-    Output = $process.StandardOutput.ReadToEnd()
-    Error = $process.StandardError.ReadToEnd()
+    ExitCode = $Invocation.Process.ExitCode
+    Output = $Invocation.Process.StandardOutput.ReadToEnd()
+    Error = $Invocation.Process.StandardError.ReadToEnd()
+    ElapsedMilliseconds = $Invocation.Watch.ElapsedMilliseconds
+    ProcessMilliseconds = $processMilliseconds
   }
-  $process.Dispose()
+  $Invocation.Process.Dispose()
   $result
+}
+
+function Invoke-ConfiguredWindowsHook {
+  param([string]$Command, [string]$PluginRoot, [string]$TempRoot, [string]$Json)
+  Complete-ConfiguredWindowsHook (Start-ConfiguredWindowsHook $Command $PluginRoot $TempRoot $Json)
 }
 
 function Invoke-SupervisionInTempRoot {
@@ -282,7 +307,7 @@ try {
   Assert-True (-not $windowsCommand.Contains('"')) 'Windows hook launcher must remain quote-free for the Codex cmd.exe outer-quote boundary.'
   Assert-True ($windowsCommand -match ' -EncodedCommand ([A-Za-z0-9+/=]+)$') 'Windows hook launcher must move path-sensitive logic into an encoded PowerShell payload.'
   $decodedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
-  Assert-True ($decodedWindowsPayload -eq "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\session-registry.ps1') -Action hook") 'Windows hook payload did not suppress host noise and resolve the installed plugin path inside PowerShell.'
+  Assert-True ($decodedWindowsPayload -eq "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\hook-intake.ps1')") 'Windows hook payload did not suppress host noise and resolve the bounded intake path inside PowerShell.'
   Assert-True (([regex]::Matches($hookText, '"async"\s*:\s*true')).Count -eq 4) 'Every non-terminal hook must use supported background execution.'
   Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 5) 'Every packaged hook must retain the three-second host ceiling.'
   Assert-True (-not (($hooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async')) 'SessionEnd must remain explicitly synchronous.'
@@ -300,10 +325,44 @@ try {
   } | ConvertTo-Json -Compress
   $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
   Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
+  Assert-True ($configuredHook.ElapsedMilliseconds -lt 3000) 'Configured Windows hook exceeded the manifest host ceiling.'
   $configuredStatePath = Get-DefaultSupervisionStatePath $configuredHookTemp
-  Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Configured Windows hook reported success without reaching the registry script.'
+  $configuredInbox = Get-HookInboxDirectory $configuredHookTemp
+  Assert-True (-not (Test-Path -LiteralPath $configuredStatePath)) 'Configured Windows hook performed synchronous registry work instead of bounded intake.'
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 1) 'Configured Windows hook did not persist exactly one protected inbox event.'
+  $configuredInvalidPayload = '{"session_id":"one","SESSION_ID":"two","cwd":"C:/invalid","hook_event_name":"SessionStart","source":"startup"}'
+  $configuredInvalidHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredInvalidPayload
+  Assert-True ($configuredInvalidHook.ExitCode -eq 0 -and -not $configuredInvalidHook.Output -and -not $configuredInvalidHook.Error) 'Invalid configured hook input was not rejected silently.'
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 1) 'Invalid configured hook input created an inbox event.'
+  $configuredStatus = Invoke-SupervisionInTempRoot $configuredHookTemp
+  Assert-True ($configuredStatus.ExitCode -eq 0) 'Supervision did not merge the configured hook inbox.'
+  $configuredStatusData = Get-Payload $configuredStatus
+  Assert-True ($configuredStatusData.hookRuns -eq 1) 'Configured hook inbox did not merge exactly once.'
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 0) 'Merged configured hook inbox event was not removed.'
+  Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Inbox merge did not create the private registry.'
   $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
+  $configuredConcurrentHooks = @(0..7 | ForEach-Object {
+    $concurrentPayload = @{
+      session_id = 'thread-configured-concurrent-{0}' -f $_
+      cwd = $repo
+      hook_event_name = 'SessionStart'
+      source = 'startup'
+      model = 'gpt-5.6-terra'
+    } | ConvertTo-Json -Compress
+    Start-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $concurrentPayload
+  })
+  foreach ($configuredConcurrentHook in $configuredConcurrentHooks) {
+    $configuredConcurrentResult = Complete-ConfiguredWindowsHook $configuredConcurrentHook
+    Assert-True ($configuredConcurrentResult.ExitCode -eq 0 -and -not $configuredConcurrentResult.Output -and -not $configuredConcurrentResult.Error) 'Concurrent configured hook did not remain silent and successful.'
+    Assert-True ($configuredConcurrentResult.ProcessMilliseconds -lt 3000) 'Concurrent configured hook exceeded the three-second process bound.'
+  }
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 8) 'Concurrent configured hooks did not reserve eight distinct inbox slots.'
+  $configuredConcurrentStatus = Invoke-SupervisionInTempRoot $configuredHookTemp
+  Assert-True ($configuredConcurrentStatus.ExitCode -eq 0) 'Supervision did not merge concurrent configured hook events.'
+  $configuredConcurrentData = Get-Payload $configuredConcurrentStatus
+  Assert-True ($configuredConcurrentData.hookRuns -eq 9 -and $configuredConcurrentData.activeTasks -eq 9) 'Concurrent configured hooks did not merge exactly once per task.'
+  Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 0) 'Concurrent configured hook inbox was not emptied after merge.'
 
   # A prior fixed TEMP registry that the restarted host cannot read must never
   # block the private v2 namespace or be modified during the transition.

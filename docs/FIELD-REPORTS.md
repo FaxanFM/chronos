@@ -103,11 +103,12 @@ successfully exercises the candidate release from a fresh task.
   [issue 38168](https://github.com/openai/codex/issues/38168).
 - v0.9.2 correction: use one constant quote-free `-EncodedCommand` launcher.
   The decoded payload resolves `PLUGIN_ROOT` inside PowerShell and invokes only
-  the packaged registry script. Hook event selection, timeouts, asynchronous
-  flags, persistence, and model-turn behavior are unchanged.
+  the packaged bounded intake script. Hook event selection, timeouts,
+  asynchronous flags, persistence, and model-turn behavior are unchanged.
 - Regression: execute the exact configured command through `cmd.exe /D /S /C`
   from source and from an extracted plugin root containing spaces; require exit
-  zero, no output, a created registry, `hookRuns=1`, and `lastHookUtc`.
+  zero, no output, one protected inbox event, and exactly one merged hook run
+  after status owns the registry mutex.
 - Validation status: local deterministic reproduction passes. Independent
   installed-package validation remains required before release.
 
@@ -184,6 +185,35 @@ successfully exercises the candidate release from a fresh task.
   Release 2/2, and a 50-round eight-process stress run pass locally. Both
   Windows CI jobs, independent source audit, and a new installed-package canary
   remain required.
+
+### Configured Windows intake could exceed its host timeout
+
+- Affected candidate: signed v0.9.2 commit
+  `8c0b3dd1a61457c2c332da0fdc52e954729b907e`.
+- Reproduction scope: GitHub Actions run `32586894917` failed on
+  `windows-latest` after the exact configured lifecycle command did not exit
+  within its five-second launch test. The manifest host ceiling was three
+  seconds, so this was a release blocker even though hooks are optional.
+- Root cause: each configured lifecycle event started the complete 91 KB
+  supervision engine. JSON parsing, default-slot recovery, registry locking,
+  migration checks, state mutation, and process startup all competed inside one
+  short host window. Those operations belong in a mutex-owning supervision
+  cycle, not in bounded host intake.
+- v0.9.2 correction: the configured hook now starts a 13 KB intake script. It
+  strictly validates the event, protects task and agent IDs with current-user
+  DPAPI, hashes non-ID metadata, physically flushes one event to a
+  machine-and-CODEX_HOME-scoped inbox, and exits without model-visible output.
+  The next status or Governor cycle merges the event exactly once under the
+  registry mutex. Direct diagnostic hooks retain their full-engine path.
+- Regression: invoke the exact encoded command through `cmd.exe` from a plugin
+  path and TEMP path containing spaces. Require first-run exit below three
+  seconds, zero output, no synchronous registry creation, one protected inbox
+  event, no event for case-duplicate JSON keys, exactly one merged hook run, and
+  an empty inbox after merge. Extracted-package release validation repeats the
+  same boundary and merge.
+- Validation status: local first-use timing was 0.80 to 1.03 seconds across 20
+  fresh private TEMP roots. The full Supervision suite passes under inbox
+  Windows PowerShell 5.1. All remaining local and external gates are required.
 
 ## Heuristic / Tuning Issues
 

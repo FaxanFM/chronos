@@ -420,7 +420,7 @@ try {
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
       }
     }
-    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
+    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/hook-intake.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
       if ($names -notcontains $required) { throw "Release is missing $required." }
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {
@@ -491,7 +491,7 @@ try {
     throw 'Extracted Windows hook launcher is not quote-free and encoded for the Codex cmd.exe boundary.'
   }
   $installedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
-  if ($installedWindowsPayload -ne "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\session-registry.ps1') -Action hook") {
+  if ($installedWindowsPayload -ne "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\hook-intake.ps1')") {
     throw 'Extracted Windows hook payload does not resolve PLUGIN_ROOT safely inside PowerShell.'
   }
   foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
@@ -590,13 +590,15 @@ try {
   $configuredHookInfo.EnvironmentVariables['TEMP'] = $configuredHookTemp
   $configuredHookInfo.EnvironmentVariables['TMP'] = $configuredHookTemp
   [void]$configuredHookInfo.EnvironmentVariables.Remove('CODEX_HOME')
+  $configuredHookWatch = [Diagnostics.Stopwatch]::StartNew()
   $configuredHookProcess = [Diagnostics.Process]::Start($configuredHookInfo)
   $configuredHookProcess.StandardInput.Write('{"session_id":"release-configured-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
   $configuredHookProcess.StandardInput.Close()
-  if (-not $configuredHookProcess.WaitForExit(5000)) {
+  if (-not $configuredHookProcess.WaitForExit(3000)) {
     try { $configuredHookProcess.Kill() } catch {}
-    throw 'Packaged configured lifecycle hook exceeded its bounded launch test.'
+    throw ('Packaged configured lifecycle hook exceeded its three-second host timeout. Elapsed={0}ms' -f $configuredHookWatch.ElapsedMilliseconds)
   }
+  $configuredHookWatch.Stop()
   $configuredHookStdout = $configuredHookProcess.StandardOutput.ReadToEnd()
   $configuredHookStderr = $configuredHookProcess.StandardError.ReadToEnd()
   $configuredHookExit = $configuredHookProcess.ExitCode
@@ -607,8 +609,44 @@ try {
   $configuredCodexHomeIdentity = ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).ToUpperInvariant()
   $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $configuredCodexHomeIdentity)
   $configuredRegistryPath = Join-Path $configuredHookTemp (Join-Path ('Chronos-Supervision-v3-{0}-0' -f $configuredScopeHash.Substring(0, 24)) 'session-registry.json')
-  if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf)) {
-    throw 'Packaged configured lifecycle hook reported success without reaching the registry script.'
+  $configuredInboxPath = Join-Path $configuredHookTemp ('Chronos-Supervision-Inbox-v1-{0}' -f $configuredScopeHash.Substring(0, 24))
+  if (Test-Path -LiteralPath $configuredRegistryPath) {
+    throw 'Packaged configured lifecycle hook performed synchronous registry work.'
+  }
+  $configuredInboxFiles = @(Get-ChildItem -LiteralPath $configuredInboxPath -File -Filter 'pending-slot-*.json')
+  if ($configuredInboxFiles.Count -ne 1) {
+    throw 'Packaged configured lifecycle hook did not persist exactly one inbox event.'
+  }
+  $configuredInboxRecord = Get-Content -Raw -LiteralPath $configuredInboxFiles[0].FullName | ConvertFrom-Json
+  if ($configuredInboxRecord.event -ne 'SessionStart' -or
+      [string]$configuredInboxRecord.protectedSessionId -match 'release-configured-hook') {
+    throw 'Packaged configured lifecycle hook did not protect the queued identity.'
+  }
+  $configuredStatusInfo = New-Object Diagnostics.ProcessStartInfo
+  $configuredStatusInfo.FileName = $windowsPowerShell
+  $configuredStatusInfo.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction status' -f $installedHeartbeat
+  $configuredStatusInfo.UseShellExecute = $false
+  $configuredStatusInfo.CreateNoWindow = $true
+  $configuredStatusInfo.RedirectStandardOutput = $true
+  $configuredStatusInfo.RedirectStandardError = $true
+  $configuredStatusInfo.EnvironmentVariables['TEMP'] = $configuredHookTemp
+  $configuredStatusInfo.EnvironmentVariables['TMP'] = $configuredHookTemp
+  [void]$configuredStatusInfo.EnvironmentVariables.Remove('CODEX_HOME')
+  $configuredStatusProcess = [Diagnostics.Process]::Start($configuredStatusInfo)
+  if (-not $configuredStatusProcess.WaitForExit(10000)) {
+    try { $configuredStatusProcess.Kill() } catch {}
+    throw 'Packaged supervision status exceeded its bounded inbox-merge test.'
+  }
+  $configuredStatusStdout = $configuredStatusProcess.StandardOutput.ReadToEnd()
+  $configuredStatusStderr = $configuredStatusProcess.StandardError.ReadToEnd()
+  $configuredStatusExit = $configuredStatusProcess.ExitCode
+  $configuredStatusProcess.Dispose()
+  if ($configuredStatusExit -ne 0 -or $configuredStatusStderr -or $configuredStatusStdout -notmatch 'CHRONOS SUPERVISION .*"hookRuns":1') {
+    throw "Packaged supervision status did not merge the configured hook inbox exactly once.`n$configuredStatusStdout`n$configuredStatusStderr"
+  }
+  if (-not (Test-Path -LiteralPath $configuredRegistryPath -PathType Leaf) -or
+      @(Get-ChildItem -LiteralPath $configuredInboxPath -File -Filter 'pending-slot-*.json').Count -ne 0) {
+    throw 'Packaged configured hook inbox was not consumed into the private registry.'
   }
   $configuredRegistry = Get-Content -Raw -LiteralPath $configuredRegistryPath | ConvertFrom-Json
   if ($configuredRegistry.health.hookRuns -ne 1 -or -not $configuredRegistry.health.lastHookUtc) {

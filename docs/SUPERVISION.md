@@ -61,15 +61,26 @@ a hashed turn signal, safe model/workspace categories, counters, and timestamps.
 On Windows, the configured command is quote-free at the Codex `cmd.exe`
 boundary. Its constant UTF-16LE `-EncodedCommand` payload resolves
 `PLUGIN_ROOT` inside PowerShell and invokes only
-`skills\chronos\scripts\session-registry.ps1 -Action hook`. This avoids the
-Codex Windows outer-quote failure without accepting runtime script content.
-`SessionEnd` mutex acquisition is capped at 250 ms; asynchronous acquisition is
-capped at 100 ms. If the
-registry is busy, or direct registry persistence fails before commit, the hook
-makes at most two bounded attempts to write one protected fallback event and
-exits zero only after one path is durable. The next hook or Governor status
-merges the event under the registry mutex. Diagnostic mode exposes failure when
-neither path can be made durable; production hooks remain silent.
+`skills\chronos\scripts\hook-intake.ps1`. This avoids the Codex Windows
+outer-quote failure without accepting runtime script content or loading the full
+supervision engine inside the three-second host window.
+
+Intake strictly validates the bounded JSON event, protects task and agent IDs
+with Windows DPAPI for the current user, hashes the normalized workspace and
+completed-turn signal, and writes one physically flushed event to a private
+inbox scoped by canonical `CODEX_HOME` and machine identity. It does not read or
+write the main registry. The next supervision status or Governor cycle selects
+the safe state slot, owns the registry mutex, merges each valid inbox event once,
+and removes the merged file. Malformed inbox entries increment a dropped-entry
+counter and do not change task state.
+
+Direct diagnostic use of `session-registry.ps1 -Action hook` retains the
+mutex-bound path. `SessionEnd` mutex acquisition is capped at 250 ms;
+asynchronous acquisition is capped at 100 ms. If the registry is busy or direct
+persistence fails before commit, that path makes at most two bounded attempts
+to write the same protected pending-event format. Diagnostic mode exposes a
+failure when neither path is durable. Configured production hooks stay silent;
+complete host inventory remains authoritative if intake cannot persist a hint.
 
 ## Governor Selection
 
@@ -378,16 +389,16 @@ silently evicting active work. Atomic replacement, a named mutex, strict size
 limits, reparse-point checks, retention limits, and safe failure protect the
 local coordination path.
 
-Registry contention can create a temporary sibling fallback directory. Each
-entry is at most 4 KiB and contains only an event category, DPAPI-protected task
-or agent identifiers, a workspace hash, safe labels, and a timestamp. The queue
-is capped at 256 entries. Chronos merges valid entries and removes them during
-the next hook or Governor status. It removes malformed entries and records a
-degraded counter. The empty directory remains so a concurrent fallback writer
-cannot lose an event while the registry is merging earlier entries. The queue
-writer has a two-attempt local retry budget, and a prepared hook that encounters
-a transient direct-state failure uses the same queue before returning. The
-queue is not a transcript, diagnostic log, or telemetry transport.
+Configured hooks write to an installation-scoped inbox. Direct registry
+contention can also create a sibling fallback directory. Each entry is at most
+4 KiB and contains only an event category, DPAPI-protected task or agent IDs, a
+workspace hash, safe labels, and a timestamp. Chronos reads at most 256 entries
+across both locations per merge. The next status or Governor cycle merges valid
+events, removes their files, and records malformed entries in a degraded
+counter. Empty directories remain so a concurrent writer cannot lose an event
+while the registry merges earlier entries. The direct fallback writer has a
+two-attempt local retry budget. Neither queue is a transcript, diagnostic log,
+or telemetry transport.
 
 ## Usage Boundary
 

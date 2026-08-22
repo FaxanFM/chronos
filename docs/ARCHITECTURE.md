@@ -165,18 +165,21 @@ current Windows Codex and `codex exec` paths do not dispatch trusted hooks.
 When invoked, all return exit zero without output, add no model context, and
 fail silent on a registry error.
 
-The hooks invoke the internal `session-registry.ps1` module. It maintains a
-bounded local discovery index with current-user Windows DPAPI protected task
-and agent IDs, workspace hashes, safe model slugs, lifecycle state, hashed
-completed-turn signals, counters, and timestamps. It does not read the
-transcript path or assistant message supplied by the host and
-does not persist raw workspace paths. Atomic replacement, a named mutex,
-reparse containment, size limits, and retention limits protect the write path.
-If the mutex is briefly busy, the hook writes one bounded fallback event beside
-the registry. It contains the same protected or hashed metadata and no raw path
-or transcript. The next hook or Governor status merges and removes it under the
-mutex. Chronos retains the empty fallback directory to prevent a parent-delete
-race with lifecycle writers that intentionally do not wait on the registry mutex.
+The configured hooks invoke `hook-intake.ps1`. It validates one event and writes
+one DPAPI-protected record to a machine-and-CODEX_HOME-scoped inbox. It does not
+load or mutate the main registry inside the host timeout. A later status or
+Governor cycle owns the registry mutex, merges each valid inbox event once, and
+removes the file.
+
+The internal `session-registry.ps1` module maintains the bounded discovery index
+with protected task and agent IDs, workspace hashes, safe model slugs,
+lifecycle state, hashed completed-turn signals, counters, and timestamps. It
+does not read a transcript path or assistant message and does not persist raw
+workspace paths. Atomic replacement, a named mutex, reparse containment, size
+limits, and retention limits protect the write path. Direct diagnostic hooks
+use a sibling protected queue when the mutex is busy. Status and Governor cycles
+merge both queues under the mutex. Chronos retains empty queue directories to
+prevent a parent-delete race with intake writers.
 
 A separate minimal `installation-scope.json` anchor stores a 128-bit opaque ID.
 New v3 state derives it from a SHA-256 hash of the local machine name and
@@ -213,6 +216,10 @@ fork a working task. Each Governor cycle supplies one bounded host inventory so
 missed or disabled hooks do not require manual task registration. The host owns
 task creation, Terra Medium selection, one optional recurrence, compact rotating
 task batches, and delivery. Worker tasks run no Chronos model cycle. The
+configured hook path writes one protected lifecycle event to a small
+installation-scoped inbox within its three-second host bound. The next
+mutex-owning status or Governor cycle merges and removes that event; hook intake
+does not parse or mutate the full registry synchronously. The
 inventory uses schema v1 when the host includes the caller. Schema v2 explicitly
 declares caller exclusion and adds only the registry-verified Governor inside
 the

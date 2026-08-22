@@ -237,8 +237,13 @@ worker lifecycle changes.
 The hooks run headless and return no text to the model. Four request asynchronous
 execution when the host supports it. `SessionEnd` is synchronous so the final
 event has a bounded chance to finish before shutdown. Every hook has a
-three-second host timeout. Brief registry contention uses one protected pending
-event, which the next hook or Governor cycle merges and removes.
+three-second host timeout. The configured command starts a small intake script,
+not the full supervision engine. Intake validates the host event, protects task
+and agent IDs for the current Windows user, writes one durable event to a
+CODEX_HOME-scoped inbox, and exits. The next supervision status or Governor
+cycle merges the event exactly once while it owns the registry mutex, then
+removes it. Direct diagnostic hooks use the same protected pending-event format
+when the registry is busy.
 
 Hooks do not read prompts, transcripts, source files, diffs, commands, tool
 output, or credentials. They store only bounded local coordination data such as
@@ -250,7 +255,8 @@ uses one complete host task inventory per cycle for discovery and liveness. The
 user controls hook trust through Codex `/hooks`; Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
-run.
+run. If a bounded hook cannot persist an event, it stays silent and the next
+complete inventory remains authoritative.
 
 Heartbeats use the same Governor and recurrence created by full setup. The
 Codex host owns the recurring schedule and model choice. Chronos does not

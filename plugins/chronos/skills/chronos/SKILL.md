@@ -36,17 +36,18 @@ absent, and do not imply that Chronos changed the active task catalog.
 
 Keep inspection and Heartbeat evaluation lean and on-demand. Do not create an
 operating-system scheduler, daemon, service, telemetry file, or persistent log.
-When trusted and dispatched by Codex, the plugin's five monitoring hooks update
-a bounded local supervision registry for task and subagent lifecycle events and
-one completed-turn signal. Four request
+When trusted and dispatched by Codex, the plugin's five monitoring hooks write
+protected task, subagent, and completed-turn events to a bounded local inbox.
+The next status or Governor cycle merges them into the supervision registry
+under its mutex. Four request
 asynchronous execution where supported; `SessionEnd` remains synchronous. They do not run on tools, commands, approvals, or prompts and
-return no model context. On brief registry contention or a transient direct
-state-write failure, a hook makes at most two bounded attempts to write one
-DPAPI-protected fallback event; the next hook or Governor cycle merges and
-removes it. On Windows, each definition uses a quote-free encoded launcher
+return no model context. Direct diagnostic hooks use the same protected event
+format if registry contention prevents an immediate write. On Windows, each
+definition uses a quote-free encoded launcher
 because Codex passes the configured command through `cmd.exe`; the decoded
-payload only resolves the installed plugin root and invokes the registry
-script. Do not rewrite it as a quoted `-File` command.
+payload only resolves the installed plugin root and invokes the small intake
+script. Do not rewrite it as a quoted `-File` command or route configured hooks
+through the full supervision engine.
 
 ## Full setup request
 

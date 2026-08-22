@@ -109,6 +109,9 @@ silent normal cycles.
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native
 `chronos.cmd` and `chronos.ps1 -Action supervise` wrappers, empty status,
 lifecycle start and end,
+the exact quote-free configured Windows intake below its three-second host
+ceiling, protected inbox persistence before registry creation, malformed-input
+rejection without an event, and exactly-once mutex-bound inbox merge,
 asynchronous completed-turn activity, duplicate turn-signal deduplication,
 mid-session self-discovery,
 strict UTF-8 and BOM-framed hook input,

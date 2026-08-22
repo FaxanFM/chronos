@@ -64,6 +64,7 @@ $script:StateStoreIdentity = 'unresolved'
 $script:CodexHomeSource = 'unresolved'
 $script:CodexHomeIdentity = 'unresolved'
 $script:RegistryMutexIdentity = 'unresolved'
+$script:HookInboxDirectory = $null
 
 function Get-Value {
   param($Object, [string]$Name, $Default = $null)
@@ -296,6 +297,10 @@ function Resolve-StatePath {
   $scopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)
   $priorScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME, $codexHome)
   $script:DefaultInstallationScopeId = (Get-TextHash ('Chronos.Supervision.Installation.v3|{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $codexHomeIdentity)).Substring(0, 32)
+  $script:HookInboxDirectory = [IO.Path]::GetFullPath((Join-Path $tempRoot ('Chronos-Supervision-Inbox-v1-{0}' -f $scopeHash.Substring(0, 24))))
+  if (-not (Test-ContainedPath $script:HookInboxDirectory $tempRoot) -or -not (Test-NoReparseAncestors $script:HookInboxDirectory)) {
+    throw 'supervision_pending_event_path_invalid'
+  }
   $script:DefaultStateCandidates = @(0..3 | ForEach-Object {
     $slotRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $_)))
     Join-Path $slotRoot 'session-registry.json'
@@ -936,22 +941,29 @@ function Write-PendingHookEventDurably {
 
 function Read-PendingHookEvents {
   param([string]$ResolvedStatePath)
-  $directory = Get-PendingEventDirectory $ResolvedStatePath
-  if (-not (Test-Path -LiteralPath $directory)) { return @() }
-  $directoryItem = Get-Item -LiteralPath $directory -Force
-  if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
   $result = [Collections.Generic.List[object]]::new()
-  foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name | Select-Object -First $script:PendingEventLimit)) {
-    try {
-      if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt $script:PendingEventByteLimit) { throw 'invalid' }
-      $bytes = [IO.File]::ReadAllBytes($file.FullName)
-      $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
-      Assert-StrictJson $text 'supervision_pending_event_invalid'
-      $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
-      Assert-PendingHookEvent $record
-      $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $record; Valid = $true }) | Out-Null
-    } catch {
-      $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $null; Valid = $false }) | Out-Null
+  $directories = @((Get-PendingEventDirectory $ResolvedStatePath))
+  if ($script:StateStoreMode -eq 'temp_private' -and -not [string]::IsNullOrWhiteSpace([string]$script:HookInboxDirectory)) {
+    $directories += @([string]$script:HookInboxDirectory)
+  }
+  foreach ($directory in @($directories | Select-Object -Unique)) {
+    if ($result.Count -ge $script:PendingEventLimit) { break }
+    if (-not (Test-Path -LiteralPath $directory)) { continue }
+    $directoryItem = Get-Item -LiteralPath $directory -Force
+    if (-not $directoryItem.PSIsContainer -or ($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-NoReparseAncestors $directory)) { throw 'supervision_pending_event_path_invalid' }
+    $remaining = $script:PendingEventLimit - $result.Count
+    foreach ($file in @(Get-ChildItem -LiteralPath $directory -File -Force -Filter 'pending-*.json' | Sort-Object Name | Select-Object -First $remaining)) {
+      try {
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt $script:PendingEventByteLimit) { throw 'invalid' }
+        $bytes = [IO.File]::ReadAllBytes($file.FullName)
+        $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+        Assert-StrictJson $text 'supervision_pending_event_invalid'
+        $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
+        Assert-PendingHookEvent $record
+        $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $record; Valid = $true }) | Out-Null
+      } catch {
+        $result.Add([pscustomobject]@{ Path = $file.FullName; Record = $null; Valid = $false }) | Out-Null
+      }
     }
   }
   return @($result)
