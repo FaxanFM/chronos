@@ -98,6 +98,22 @@ function Get-DefaultCoverage {
   return $coverage
 }
 
+function Get-StrictCoverage {
+  param([hashtable]$Observed = @{})
+  $coverage = [ordered]@{
+    agent_stall = 'unsupported'
+    guardian = 'unsupported'
+    usage = 'unsupported'
+    sessions = 'unsupported'
+    tests = 'unsupported'
+    machines = 'unsupported'
+    tasks = 'unsupported'
+    git_build = 'unsupported'
+  }
+  foreach ($key in $Observed.Keys) { $coverage[$key] = $Observed[$key] }
+  return $coverage
+}
+
 function Invoke-Heartbeat {
   param(
     $Case,
@@ -325,8 +341,9 @@ try {
   $escalatedEvent = Assert-Event $escalated 'AGENT_STALL' 'governor'
   Assert-Equal $escalatedEvent.Severity 'HIGH' 'Material stall escalation.'
   Assert-Silent (Invoke-Heartbeat $case @{ collectorCoverage = @{ agent_stall = 'partial' }; agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-b'; totalTokens = 161000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'Partial coverage must not resolve.'
-  Assert-Resolution (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-b'; totalTokens = 161000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'AGENT_STALL' 'governor'
-  Assert-Silent (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-c'; totalTokens = 162000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'Resolved stall stays quiet.'
+  Assert-Silent (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-b'; totalTokens = 161000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'First observed cycle after partial coverage must re-establish continuity.'
+  Assert-Resolution (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-c'; totalTokens = 162000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'AGENT_STALL' 'governor'
+  Assert-Silent (Invoke-Heartbeat $case @{ agents = @(@{ id = '/root/worker'; owner = '/root/dev'; owningSolThread = '/root/dev'; active = $true; progressHash = 'progress-d'; totalTokens = 163000; repeatedEquivalentActions = 0; minutesSinceMeaningfulChange = 1 }) }) 'Resolved stall stays quiet.'
   $agentStateText = Get-Content -Raw -LiteralPath $case.State
   Assert-True ($agentStateText -notmatch '/root/worker|/root/dev|progress-a|progress-b') 'Persistent state exposed agent or route identifiers.'
 
@@ -512,6 +529,12 @@ try {
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Case-colliding JSON key.'
   [IO.File]::WriteAllText($bad, '{"schemaVersion":1,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"a","sourceSequence":1e3,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Scientific-notation sequence.'
+  [IO.File]::WriteAllText($bad, '{"schemaVersion":2,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceSequence":1,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Schema-v2 collector without a stable source epoch.'
+  [IO.File]::WriteAllText($bad, '{"schemaVersion":2,"capturedAtUtc":"2026-01-01T00:00:00Z","sourceEpoch":"strict","sourceSequence":1,"collectorCoverage":{"agent_stall":"observed"},"agents":[]}', [Text.UTF8Encoding]::new($false))
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Schema-v2 collector without explicit eight-family coverage.'
+  [IO.File]::WriteAllText($bad, (@{ schemaVersion = 2; capturedAtUtc = '2026-01-01T00:00:00Z'; sourceEpoch = 'strict'; sourceSequence = 1; collectorCoverage = (Get-StrictCoverage @{ agent_stall = 'observed' }) } | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+  Assert-FailedSafely (Invoke-RawModule @('-InputPath', $bad, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Observed schema-v2 family without a collector payload.'
   $oversized = Join-Path $boundaries.Path 'oversized.json'
   [IO.File]::WriteAllText($oversized, ('x' * 262145), [Text.UTF8Encoding]::new($false))
   Assert-FailedSafely (Invoke-RawModule @('-InputPath', $oversized, '-StatePath', (Join-Path $boundaries.Path 'bad-state.json'))) 'heartbeat_input_invalid' 'Oversized input.'
@@ -583,18 +606,38 @@ try {
   New-Item -ItemType HardLink -Path $hardlinkAlias -Target $hardlink.State | Out-Null
   Assert-FailedSafely (Invoke-Heartbeat $hardlink @{ agents = @(@{ id = 'hardlink-agent'; active = $true }) } -StatePath $hardlinkAlias) 'heartbeat_state_path_invalid' 'Hard-linked state alias.'
 
-  # Inspector adapter uses existing compact Chronos fields without persisting raw output.
+  # A task inventory is not Inspector evidence and cannot populate Guardian state.
+  $noInspector = New-Case 'inspector-unavailable'
+  Assert-Silent (Invoke-Heartbeat $noInspector @{ schemaVersion = 2; collectorCoverage = (Get-StrictCoverage @{ tasks = 'partial' }); tasks = @(@{ id = 'live-task'; status = 'active' }) }) 'Task-only collector snapshot.'
+  $noInspectorState = Get-Content -Raw $noInspector.State | ConvertFrom-Json
+  Assert-Equal @($noInspectorState.previous.guardian.PSObject.Properties).Count 0 'Task liveness manufactured Inspector-derived Guardian evidence.'
+  $noInspectorStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $noInspector.State)
+  Assert-True ($noInspectorStatus.Text -match 'evaluation=partial' -and $noInspectorStatus.Text -match 'guardian:unsupported') 'Unavailable Inspector evidence was not explicit in status.'
+
+  $coverageReplacement = New-Case 'coverage-replacement'
+  Assert-Silent (Invoke-Heartbeat $coverageReplacement @{ schemaVersion = 2; collectorCoverage = (Get-StrictCoverage @{ usage = 'observed' }); usage = @{ owner = 'governor'; totalTokens = 100; meaningfulProgress = $true; progressHash = 'first'; completedCycles = 1; stateChanges = 1; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Observed coverage baseline.'
+  Assert-Silent (Invoke-Heartbeat $coverageReplacement @{ schemaVersion = 2; collectorCoverage = (Get-StrictCoverage @{ tasks = 'partial' }); tasks = @(@{ id = 'live-task'; status = 'active' }) }) 'New partial snapshot replaces prior coverage.'
+  $coverageReplacementStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', $coverageReplacement.State)
+  Assert-True ($coverageReplacementStatus.Text -match 'evaluation=partial' -and $coverageReplacementStatus.Text -match 'coverageObserved=0 coveragePartial=1 coverageUnsupported=7' -and $coverageReplacementStatus.Text -match 'usage:unsupported') 'New unsupported coverage left a prior family observed.'
+
+  # Inspector adapter requires authorized, compatible evidence and does not persist raw output.
   $adapter = New-Case 'inspector-adapter'
   $inspector1 = Join-Path $adapter.Path 'inspector-1.txt'
   $inspector2 = Join-Path $adapter.Path 'inspector-2.txt'
-  [IO.File]::WriteAllText($inspector1, "CHRONOS HEALTHY approvalReviewCoverage=complete approvalReviewsPerHour=2 approvalReviewerMainInputRatio=0.2 approvalRepeatedRequests=0`nCHRONOS EFFICIENCY pluginVersion=0.8.0 approvalReviewTurnsObserved=2 primaryTurnsObserved=10 approvalReviewTurnShare=16.7 approvalRepeatedPrefixRequests=0 approvalPersistenceRetries=0", [Text.UTF8Encoding]::new($false))
-  [IO.File]::WriteAllText($inspector2, "CHRONOS WARNING approvalReviewCoverage=complete approvalReviewsPerHour=20 approvalReviewerMainInputRatio=0.9 approvalRepeatedRequests=10`nCHRONOS EFFICIENCY pluginVersion=0.8.0 approvalReviewTurnsObserved=30 primaryTurnsObserved=3 approvalReviewTurnShare=91 approvalRepeatedPrefixRequests=10 approvalPersistenceRetries=8", [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($inspector1, ("CHRONOS HEALTHY approvalReviewCoverage=complete approvalReviewsPerHour=2 approvalReviewerMainInputRatio=0.2 approvalRepeatedRequests=0 nestedReviewerSessionsObserved=0`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=11111111111111111111111111111111 inspectionCapturedAtUtc={0} pluginVersion=0.9.2 approvalReviewTurnsObserved=2 primaryTurnsObserved=10 approvalReviewTurnShare=16.7 approvalRepeatedPrefixRequests=0 approvalPersistenceRetries=0" -f $adapter.BaseTime.ToString('o')), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($inspector2, ("CHRONOS WARNING approvalReviewCoverage=complete approvalReviewsPerHour=20 approvalReviewerMainInputRatio=0.9 approvalRepeatedRequests=10 nestedReviewerSessionsObserved=1`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=22222222222222222222222222222222 inspectionCapturedAtUtc={0} pluginVersion=0.9.2 approvalReviewTurnsObserved=30 primaryTurnsObserved=3 approvalReviewTurnShare=91 approvalRepeatedPrefixRequests=10 approvalPersistenceRetries=8" -f $adapter.BaseTime.AddMinutes(10).ToString('o')), [Text.UTF8Encoding]::new($false))
   $adapterInput1 = Join-Path $adapter.Path 'adapter-1.json'
   $adapterInput2 = Join-Path $adapter.Path 'adapter-2.json'
-  [IO.File]::WriteAllText($adapterInput1, (@{ schemaVersion = 1; runId = 'adapter-1'; capturedAtUtc = $adapter.BaseTime.ToString('o'); origin = 'inspector'; forceCadence = $true } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-  [IO.File]::WriteAllText($adapterInput2, (@{ schemaVersion = 1; runId = 'adapter-2'; capturedAtUtc = $adapter.BaseTime.AddMinutes(10).ToString('o'); origin = 'inspector'; forceCadence = $true } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-  Assert-Silent ([pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $inspector1 -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }) 'Inspector adapter baseline.'
-  $adapterOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput2 -HeartbeatInspectorOutputPath $inspector2 -HeartbeatStatePath $adapter.State 2>&1)
+  [IO.File]::WriteAllText($adapterInput1, (@{ schemaVersion = 2; runId = 'adapter-1'; capturedAtUtc = $adapter.BaseTime.ToString('o'); sourceEpoch = 'inspector-adapter'; sourceSequence = 1; origin = 'inspector'; forceCadence = $true; collectorCoverage = (Get-StrictCoverage) } | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($adapterInput2, (@{ schemaVersion = 2; runId = 'adapter-2'; capturedAtUtc = $adapter.BaseTime.AddMinutes(10).ToString('o'); sourceEpoch = 'inspector-adapter'; sourceSequence = 2; origin = 'inspector'; forceCadence = $true; collectorCoverage = (Get-StrictCoverage) } | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+  $unauthorizedInspector = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $inspector1 -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
+  Assert-FailedSafely $unauthorizedInspector 'heartbeat_inspector_authorization_required' 'Inspector evidence without an authorized run.'
+  $incompatibleInspector = Join-Path $adapter.Path 'inspector-incompatible.txt'
+  [IO.File]::WriteAllText($incompatibleInspector, ((Get-Content -Raw -LiteralPath $inspector1).Replace('pluginVersion=0.9.2', 'pluginVersion=0.9.1')), [Text.UTF8Encoding]::new($false))
+  $incompatibleResult = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $incompatibleInspector -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
+  Assert-FailedSafely $incompatibleResult 'heartbeat_inspector_incompatible' 'Inspector evidence from another plugin version.'
+  Assert-Silent ([pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $inspector1 -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }) 'Inspector adapter baseline.'
+  $adapterOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput2 -HeartbeatInspectorOutputPath $inspector2 -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1)
   $adapterResult = [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $adapterOutput; Text = ($adapterOutput -join "`n") }
   Assert-Event $adapterResult 'GUARDIAN_RUNAWAY' 'governor' | Out-Null
   $adapterStateText = Get-Content -Raw $adapter.State
@@ -762,6 +805,9 @@ try {
   Assert-Equal $activeInterventions[0].coalescedCount 7 'Coalesced event count was not retained.'
   Assert-True ((Get-Content -Raw $coalesce.State) -notmatch 'coalesce-target') 'Intervention state persisted a raw target identifier.'
   $coalescedClaim = Get-InterventionPayload (Invoke-Intervention $coalesce 'claim' -InterventionId $activeInterventions[0].interventionId -Version 1 -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task')
+  Assert-Equal $coalescedClaim.nextHostAction 'send_once_to_verified_target' 'Claim did not return the one-send host action.'
+  Assert-True ($coalescedClaim.instruction -and $coalescedClaim.replyFormat -match '^CHRONOS INTERVENTION RESULT id=[a-f0-9]{64} version=1 state=') 'Claim did not return the fixed intervention template.'
+  Assert-True (($coalescedClaim | ConvertTo-Json -Compress) -notmatch 'coalesce-target') 'Fixed intervention template exposed the raw target.'
   $unknownDelivery = Get-InterventionPayload (Invoke-Intervention $coalesce 'transport' -InterventionId $coalescedClaim.interventionId -Version 1 -ClaimToken $coalescedClaim.claimToken -TransportResult 'unknown')
   Assert-Equal $unknownDelivery.state 'delivery_unknown' 'Ambiguous transport was not retained as delivery_unknown.'
   Assert-FailedSafely (Invoke-Intervention $coalesce 'claim' -InterventionId $coalescedClaim.interventionId -Version 1 -Target 'coalesce-target' -Generation 'generation-1' -Governor 'governor-task') 'heartbeat_intervention_transition_invalid' 'Ambiguous delivery was retried blindly.'
@@ -1316,7 +1362,7 @@ try {
   # The wrapper status path is concise and does not need an input snapshot.
   $emptyStatus = Invoke-RawModule @('-Action', 'status', '-StatePath', (Join-Path $root 'empty-status.json'))
   Assert-Equal $emptyStatus.ExitCode 0 'Empty status exit code.'
-  Assert-True ($emptyStatus.Text -match '^CHRONOS HEARTBEATS engine=healthy activeTypes=8') 'Empty status headline.'
+  Assert-True ($emptyStatus.Text -match '^CHRONOS HEARTBEATS engine=uninitialized evaluation=unsupported activeTypes=8 statusMode=prior_state' -and $emptyStatus.Text -match 'coverageObserved=0 coveragePartial=0 coverageUnsupported=8') 'Empty status must report prior state with eight unevaluated families, not clean health.'
 
   'Chronos heartbeat deterministic validations passed.'
 } finally {

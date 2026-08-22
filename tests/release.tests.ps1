@@ -64,9 +64,9 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('set up chronos', 'verify source', 'one governor', 'heartbeats', 'inventory every live task', 'zero worker recurrences') },
-    @{ Index = 1; Terms = @('read-only chronos health briefing', 'pc', 'workflow', 'quota', 'approvals', 'rules', 'sqlite', 'heartbeat', 'supervision') },
-    @{ Index = 2; Terms = @('chronos governor', 'read-only', 'research', 'review', 'edits', 'final decisions', 'finish locally', 'unavailable') }
+    @{ Index = 0; Terms = @('set up chronos', 'verify source', 'one governor', 'explain hooks', 'heartbeat coverage', 'zero worker recurrences') },
+    @{ Index = 1; Terms = @('chronos health briefing', 'inspect pc', 'quota', 'reviews', 'rules', 'sqlite', 'heartbeat coverage', 'evidence', 'unknowns') },
+    @{ Index = 2; Terms = @('chronos governor', 'repo review', 'bounded read tasks', 'verify each result', 'edits', 'decisions') }
   )
   foreach ($promptRequirement in $promptRequirements) {
     $promptIndex = [int]$promptRequirement.Index
@@ -149,6 +149,21 @@ try {
   )) {
     if (-not $governorSkill.Contains($transportPreflightTerm)) {
       throw "Governor skill is missing the pre-plan V2 fallback boundary: $transportPreflightTerm"
+    }
+  }
+  foreach ($collectorContractTerm in @(
+    'Every Governor pulse starts by calling `-HeartbeatInterventionAction list`',
+    'The host inventory proves discovery and liveness only',
+    'Create a separate bounded Heartbeat collector file',
+    'one Governor-local opaque `sourceEpoch`',
+    'an increasing `sourceSequence`',
+    'each of the eight public families',
+    'A plain `chronos.cmd -Action heartbeat` call reads prior state only',
+    '`-HeartbeatInspectorAuthorized`',
+    'task liveness cannot supply it'
+  )) {
+    if (-not $governorSkill.Contains($collectorContractTerm)) {
+      throw "Governor skill is missing the collector evidence boundary: $collectorContractTerm"
     }
   }
   foreach ($hardGateTerm in @(
@@ -300,11 +315,13 @@ try {
   ) -join "`n"
   $publicReadmes = $publicReadmes -replace '\s+', ' '
   foreach ($required in @(
-    'Set up Chronos fully on this PC',
+    'Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.',
+    'Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.',
+    'Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here.',
     'one dedicated Governor',
     'zero worker recurrences',
     'including one that existed before the attempt',
-    'do not ask me to relay routine findings'
+    'does not ask the user to relay routine remediation'
   )) {
     if (-not $publicReadmes.Contains($required)) {
       throw "Public first-use guidance is missing an end-to-end setup requirement: $required"
@@ -507,12 +524,12 @@ try {
   $installedOutput = @(& $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File $installedHeartbeat -Action heartbeat -HeartbeatStatePath $installedState `
     -HeartbeatScope "release-install-smoke" 2>&1)
-  if ($LASTEXITCODE -ne 0 -or ($installedOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
+  if ($LASTEXITCODE -ne 0 -or ($installedOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=uninitialized evaluation=unsupported activeTypes=8 statusMode=prior_state' -or ($installedOutput -join "`n") -notmatch 'coverageUnsupported=8') {
     throw "Extracted package Heartbeat status smoke test failed.`n$($installedOutput -join "`n")"
   }
   $launcherOutput = @(& $installedLauncher -Action heartbeat -HeartbeatStatePath $installedState `
     -HeartbeatScope "release-install-smoke" 2>&1)
-  if ($LASTEXITCODE -ne 0 -or ($launcherOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=healthy activeTypes=8') {
+  if ($LASTEXITCODE -ne 0 -or ($launcherOutput -join "`n") -notmatch 'CHRONOS HEARTBEATS engine=uninitialized evaluation=unsupported activeTypes=8 statusMode=prior_state' -or ($launcherOutput -join "`n") -notmatch 'coverageUnsupported=8') {
     throw "Extracted package launcher did not apply the supported Windows PowerShell invocation.`n$($launcherOutput -join "`n")"
   }
   $installedCustomCodexHome = Join-Path $testRoot 'custom installed codex home'

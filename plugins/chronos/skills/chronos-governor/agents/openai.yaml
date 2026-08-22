@@ -1,4 +1,4 @@
 interface:
   display_name: "Chronos Governor"
   short_description: "Coordinate one bounded Codex read task."
-  default_prompt: "Use Chronos Governor to route one bounded exploration, review, or verification read task and independently verify the result."
+  default_prompt: "Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here."

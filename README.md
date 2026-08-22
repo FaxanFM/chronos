@@ -12,8 +12,10 @@ loops, quota and context pressure, broken permission rules, rollout duplication,
 diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
 stay passive. Chronos sends no publisher telemetry.
 
-One complete caller-aware host inventory per Governor cycle is the
-task-discovery authority.
+One complete caller-aware host inventory per Governor cycle is the task-discovery
+and liveness authority. It is not a health report. Heartbeat evaluation uses a
+separate normalized collector snapshot with explicit coverage for all eight
+families. Missing evidence stays `partial` or `unsupported`.
 Lifecycle hooks are an optional accelerator: a Windows host may show them as
 active and trusted without dispatching them. Missing hook execution never
 disables autonomous discovery or asks the user to register tasks.
@@ -38,10 +40,8 @@ codex.cmd plugin add chronos@chronos
 After any install or upgrade, fully quit and reopen Codex. Then open a fresh
 task and ask:
 
-> **Set up Chronos fully on this PC. Verify the installed source, enable
-> supervision and Heartbeats in one dedicated Governor, and confirm one
-> Governor recurrence with zero worker recurrences. Keep routine worker tasks
-> passive and do not ask me to relay routine findings.**
+> **Set up Chronos: verify source, create one Governor, explain hooks, and prove
+> Heartbeat coverage and zero worker recurrences.**
 
 Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
@@ -181,15 +181,15 @@ and unknown publication facts.
 For complete setup, use the first starter prompt or ask:
 
 ```text
-Set up Chronos fully on this PC. Verify the installed source, enable
-supervision and Heartbeats in one dedicated Governor, and confirm one Governor
-recurrence with zero worker recurrences. Keep routine worker tasks passive and
-do not ask me to relay routine findings.
+Set up Chronos: verify source, create one Governor, explain hooks, and prove
+Heartbeat coverage and zero worker recurrences.
 ```
 
 Chronos verifies the package source and native status, reuses or creates one
-dedicated Governor, enables due Heartbeat evaluation there, and proves that
-worker tasks have no recurrence. Before initialization, it pauses or removes
+dedicated Governor, reports whether the eight Heartbeat families are observed,
+partial, or unsupported, and proves that worker tasks have no recurrence. It
+does not call prior-state status a new evaluation. Before initialization, it
+pauses or removes
 only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
@@ -206,8 +206,8 @@ host inventory per Governor cycle whether the hooks are trusted or dispatched.
 For an on-demand diagnostic without enabling supervision, ask:
 
 ```text
-Give me a read-only Chronos health briefing: separate PC, workflow, quota,
-approvals, rules, SQLite, Heartbeat, and supervision.
+Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite,
+Heartbeat coverage; separate evidence from unknowns.
 ```
 
 Optionally review and trust the packaged lifecycle hooks through Codex `/hooks`.
@@ -282,8 +282,8 @@ routing, delivery, deduplication, and stored fields.
 To delegate a small repository task, ask:
 
 ```text
-Use Chronos Governor for safe read-only research and review; keep edits and
-final decisions here; finish locally if unavailable.
+Use Chronos Governor to split this repo review into bounded read tasks, verify
+each result, and keep edits and decisions here.
 ```
 
 Governor validates the worker models advertised by the active runtime and

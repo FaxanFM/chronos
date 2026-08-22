@@ -46,7 +46,9 @@ sources: Codex treats `chronos@chronos` and
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
 - Uses one complete caller-aware host inventory per Governor cycle as task-discovery
-  authority. Five reviewed headless hooks optionally accelerate task and
+  and liveness authority. A separate normalized collector snapshot carries
+  explicit evidence coverage for all eight Heartbeat families. Five reviewed
+  headless hooks optionally accelerate task and
   subagent lifecycle hints with no model-visible output or worker recurrence.
   A host that does not dispatch them still needs no user task registration.
 - Reuses one host-verified Governor or creates one fresh history-free Governor
@@ -103,15 +105,15 @@ catalog cannot be hot-swapped.
 For complete setup, use the first starter prompt or ask:
 
 ```text
-Set up Chronos fully on this PC. Verify the installed source, enable
-supervision and Heartbeats in one dedicated Governor, and confirm one Governor
-recurrence with zero worker recurrences. Keep routine worker tasks passive and
-do not ask me to relay routine findings.
+Set up Chronos: verify source, create one Governor, explain hooks, and prove
+Heartbeat coverage and zero worker recurrences.
 ```
 
 Chronos verifies the package source and native status, reuses or creates one
-dedicated Governor, enables due Heartbeat evaluation there, and proves that
-worker tasks have no recurrence. Before initialization, it pauses or removes
+dedicated Governor, reports whether the eight Heartbeat families are observed,
+partial, or unsupported, and proves that worker tasks have no recurrence. It
+does not call prior-state status a new evaluation. Before initialization, it
+pauses or removes
 only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
@@ -129,8 +131,8 @@ That complete inventory is the authority. Hooks are an optional accelerator.
 For an on-demand diagnostic without enabling supervision, ask:
 
 ```text
-Give me a read-only Chronos health briefing: separate PC, workflow, quota,
-approvals, rules, SQLite, Heartbeat, and supervision.
+Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite,
+Heartbeat coverage; separate evidence from unknowns.
 ```
 
 Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
@@ -200,8 +202,8 @@ user chore. Chronos does not infer model cost or quota effect from a model name.
 To delegate a small repository task, ask:
 
 ```text
-Use Chronos Governor for safe read-only research and review; keep edits and
-final decisions here; finish locally if unavailable.
+Use Chronos Governor to split this repo review into bounded read tasks, verify
+each result, and keep edits and decisions here.
 ```
 
 Governor validates the worker models advertised by the active runtime and

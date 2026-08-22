@@ -22,9 +22,9 @@
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Set up Chronos: verify source, enable one Governor and Heartbeats, inventory every live task, and prove zero worker recurrences.",
-      "Give me a read-only Chronos health briefing: separate PC, workflow, quota, approvals, rules, SQLite, Heartbeat, and supervision.",
-      "Use Chronos Governor for safe read-only research and review; keep edits and final decisions here; finish locally if unavailable."
+      "Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.",
+      "Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.",
+      "Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

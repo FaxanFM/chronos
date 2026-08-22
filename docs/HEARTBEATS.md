@@ -24,10 +24,8 @@ bound.
 The normal first-use request enables supervision and Heartbeats together:
 
 ```text
-Set up Chronos fully on this PC. Verify the installed source, enable
-supervision and Heartbeats in one dedicated Governor, and confirm one Governor
-recurrence with zero worker recurrences. Keep routine worker tasks passive and
-do not ask me to relay routine findings.
+Set up Chronos: verify source, create one Governor, explain hooks, and prove
+Heartbeat coverage and zero worker recurrences.
 ```
 
 Do not create a separate Heartbeat task or recurrence. A complete setup result
@@ -58,7 +56,7 @@ Run a normalized cycle:
 Add a captured compact Inspector result when available:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt
+"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt -HeartbeatInspectorAuthorized
 ```
 
 Show local Heartbeat status without running a collector:
@@ -67,6 +65,14 @@ Show local Heartbeat status without running a collector:
 "<skill-root>\scripts\chronos.cmd" -Action heartbeat
 ```
 
+This command reads prior state. It does not evaluate the eight families. A new
+state reports `engine=uninitialized`, `evaluation=unsupported`,
+`statusMode=prior_state`, and
+`coverageUnsupported=8`. After a cycle, `evaluation` remains `partial` until all
+eight public families have observed coverage. `coverageByFamily` names every
+family and label. A newer `partial` or `unsupported` label replaces the prior
+label and breaks source continuity for that family.
+
 After the host successfully deduplicates and delivers an event, acknowledge its
 stable `EventId`:
 
@@ -74,13 +80,17 @@ stable `EventId`:
 "<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatAcknowledgeEventId <sha256-event-id>
 ```
 
-The Inspector adapter accepts only compact lines beginning with `CHRONOS ` or
-`CHRONOS EFFICIENCY `. It maps recognized review fields to Guardian input. It
+The authorization flag records the Governor's policy decision. Use it only after
+an allowed Inspector run produced the supplied file. The Inspector adapter
+requires a schema-v2 companion snapshot and compatible run provenance. It accepts
+only compact lines beginning with `CHRONOS ` or `CHRONOS EFFICIENCY `. It maps
+recognized review fields to Guardian input. It
 marks token-window and local-version fields as partial because those fields do
 not prove progress, account billing, fleet state, or installation intent. An
-Inspector-only cycle has no source epoch or sequence, so it can open an absolute
-Guardian condition but cannot resolve an existing condition. Supply a companion
-normalized JSON snapshot when continuity is required.
+Inspector result cannot replace the collector snapshot. Without authorized,
+compatible Inspector evidence, review and approval fields remain unavailable.
+Compatible evidence must name the installed plugin version and be captured
+within 15 minutes of its companion snapshot.
 
 ## Host responsibilities
 
@@ -127,7 +137,7 @@ input paths fail closed.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schemaVersion` | integer | Optional. The accepted value is `1`. |
+| `schemaVersion` | integer | `2` is the current Governor contract. It requires timestamp, epoch, sequence, and all eight coverage labels. Schema `1` remains a compatibility input. |
 | `capturedAtUtc` | ISO 8601 string | Collector timestamp. Out-of-order evidence is not evaluated and cannot block a due outbox retry. |
 | `sourceEpoch` | opaque ID | Stable collector-process or source epoch. Required to prove continuity for resolution. |
 | `sourceSequence` | integer | Monotonic sequence within `sourceEpoch`. Reuse or rollback fails closed. |
@@ -161,6 +171,8 @@ Coverage is a control, not a display label.
   Chronos does not convert this state to zero or healthy.
 
 A supplied family without a matching coverage field is `unsupported`.
+Schema v2 requires a label for all eight public families. The label can still be
+`unsupported`; explicit coverage does not mean evidence exists.
 
 ## Collector contract
 

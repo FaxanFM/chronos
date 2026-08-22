@@ -104,6 +104,18 @@ suppression, task-to-Governor response, independent recovery, Governor self-loop
 prevention, subject-only, owner-only, and subject-or-owner target binding, and
 silent normal cycles.
 
+The release acceptance set also covers the corrective Governor contract:
+
+- status with no collector snapshot reports eight unsupported families and no
+  clean evaluation;
+- a schema-v2 snapshot can open one transition, suppress unchanged evidence,
+  and produce one fixed-template claim for one verified target;
+- task inventory cannot populate Inspector-derived Guardian evidence, and the
+  adapter rejects output without authorization and compatible run provenance;
+- supervision restart and cadence tests preserve one current-key Governor
+  recurrence as the required host postcondition and keep worker recurrence
+  disabled at both 60- and 360-minute cadences.
+
 ## Passive Supervision
 
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native

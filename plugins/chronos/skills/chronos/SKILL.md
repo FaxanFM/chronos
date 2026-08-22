@@ -95,6 +95,10 @@ not evidence of absence when coverage is partial, unsupported, outside the
 window, or discontinuous; preserve those coverage labels. Report hook trust and
 observed hook execution separately. This status-only request must not create a
 Governor task, recurrence, worker, Heartbeat event, or task wake.
+Heartbeat status without an input snapshot is prior-state inspection. Report its
+`statusMode=prior_state` and its `evaluation` field as `observed`, `partial`, or
+`unsupported`; do not call unsupported coverage healthy. A new partial or
+unsupported family label replaces prior observed coverage and breaks continuity.
 
 ## Supervision
 
@@ -145,7 +149,9 @@ task. It never broadcasts or gives monitored tasks a recurrence. The host suppli
 and chooses when to invoke the action. The engine enforces its registered
 minimum cadence for each observed family. Supply a stable
 `sourceEpoch` and increasing `sourceSequence`; without continuity proof, Chronos
-can open a condition but will not resolve one.
+can open a condition but will not resolve one. Governor-generated snapshots use
+schema v2 and include all eight public family coverage labels. Host inventory is
+the liveness authority, but it is not a substitute for this collector snapshot.
 
 ```powershell
 "<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
@@ -168,7 +174,9 @@ ID with `-HeartbeatAcknowledgeEventId <event-id>`. Unacknowledged events remain
 in a bounded local outbox and receive at most one retry after 15 minutes with the
 same ID. `plan` and `fail-closed` consume actionable events atomically.
 Use `-HeartbeatInspectorOutputPath` only with captured compact `CHRONOS` and
-`CHRONOS EFFICIENCY` lines. See the public
+`CHRONOS EFFICIENCY` lines from a policy-authorized Inspector run. Pass
+`-HeartbeatInspectorAuthorized` with the schema-v2 companion snapshot. The
+adapter rejects missing, incompatible, or stale provenance. See the public
 [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
 for the strict normalized input contract and coverage limits.
 

@@ -8,6 +8,7 @@ param(
   [int]$SampleSeconds = 2,
   [string]$HeartbeatInputPath,
   [string]$HeartbeatInspectorOutputPath,
+  [switch]$HeartbeatInspectorAuthorized,
   [string]$HeartbeatStatePath,
   [string]$HeartbeatScope,
   [string]$HeartbeatAcknowledgeEventId,
@@ -82,9 +83,9 @@ if ($Action -eq 'heartbeat') {
     if ($HeartbeatStatePath) { & $heartbeatScript @heartbeatCommon -Action status -StatePath $HeartbeatStatePath }
     else { & $heartbeatScript @heartbeatCommon -Action status }
   } elseif ($HeartbeatStatePath) {
-    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -StatePath $HeartbeatStatePath
+    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -InspectorAuthorized:$HeartbeatInspectorAuthorized -StatePath $HeartbeatStatePath
   } else {
-    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath
+    & $heartbeatScript @heartbeatCommon -Action cycle -InputPath $HeartbeatInputPath -InspectorOutputPath $HeartbeatInspectorOutputPath -InspectorAuthorized:$HeartbeatInspectorAuthorized
   }
   exit $LASTEXITCODE
 }
@@ -3341,6 +3342,9 @@ if ($Action -eq "inspect") {
     $quotaHealth.Advice)
   Write-Output $headline
   $efficiencyFields = [ordered]@{
+    inspectionEvidenceVersion = 1
+    inspectionRunId = [guid]::NewGuid().ToString('N')
+    inspectionCapturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
     pluginVersion = $script:ChronosPluginVersion
     installCurrentSource = $script:ChronosInstallStatus.CurrentSource
     installSourceObservation = $script:ChronosInstallStatus.SourceObservation

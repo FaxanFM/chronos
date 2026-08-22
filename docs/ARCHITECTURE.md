@@ -79,11 +79,28 @@ remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
 It does not infer cost or quota impact from a model name.
 
+The Governor uses two different inputs. One complete host task inventory is the
+liveness authority. A separate schema-v2 collector snapshot is the Heartbeat
+evidence authority. The collector uses one stable opaque source epoch, a
+monotonic source sequence, and an explicit coverage label for every public
+family. A status read without the collector file reports prior state only. It
+cannot produce a new clean result and reports `statusMode=prior_state`. A new
+partial or unsupported label replaces an older observed label and breaks that
+family's source continuity.
+
 The engine supports eight families: agent stall, Guardian or automatic-review
 runaway, usage burn, session or context explosion, test regression,
 cross-machine drift, task dependency or zombie work, and Git or build state.
 Each collector reports observed, partial, or unsupported coverage. Missing
 fields do not become numeric zero or proof that a condition is absent.
+
+Inspector output is optional collector evidence. The Governor requests it only
+when health is unknown before extending long-running work, when degradation is
+reported, or around long-running parallel work. The adapter requires an explicit
+policy authorization flag, a schema-v2 companion snapshot, and compatible run
+provenance from the installed plugin version within the allowed time window.
+Task liveness cannot populate Inspector-derived review, quota,
+rollout, SQLite, rule, or resource fields.
 
 Each cycle compares the current allowlisted aggregates with the previous
 persisted aggregates. Stable condition keys, semantic severity escalation,
@@ -97,6 +114,7 @@ concise evidence, ownership hints, and one Governor target. They never broadcast
 to monitored tasks. The Codex-host Governor can contact one exact verified task
 through the host task transport under the fixed intervention policy.
 
+The Governor resumes intervention state before it evaluates new evidence.
 Intervention state is separate from event delivery. One record is keyed by the
 event occurrence, intervention version, target hash, and target-generation hash.
 It moves through target resolution, queued send, claimed send, transport result,

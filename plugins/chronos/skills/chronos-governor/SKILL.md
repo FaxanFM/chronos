@@ -176,24 +176,45 @@ The dedicated task should receive this compact, self-contained assignment:
 
 ```text
 Chronos equivalence key: <complete hostEquivalenceKey from status>. Act as the
-single Chronos Governor. Claim local Chronos supervision. Reconcile the passive
-lifecycle registry with one compact host task inventory and monitor active tasks
-from this one inbox. Evaluate due Heartbeat families once per Governor cycle
-using only available normalized host evidence; mark unavailable evidence partial
-or unsupported. On a new, materially worse, or eligible resolution transition,
-use the bounded Chronos intervention state machine. Apply a returned Governor-
-local recurrence action yourself and verify its postcondition. Contact only the
-exact verified affected task. Use compact batched task waits when available. Do
-not edit repositories, read transcripts, run checks inside worker tasks, create
-another Governor, broadcast routine status, or assign remediation to the user.
-Keep worker recurrence disabled.
+single Chronos Governor. Maintain one verified Governor recurrence and zero
+worker recurrences.
+
+Start each pulse by resuming native intervention state. Follow only the returned
+permitted next action. Then use one complete host task inventory as liveness
+authority. Write only opaque IDs, safe status categories, optional opaque
+generations, capture time, and completeness to one bounded TEMP file. Run one
+native supervision cycle, then remove the file.
+
+Evaluate Heartbeats only from a current schema-v2 normalized collector snapshot
+with stable sourceEpoch, increasing sourceSequence, and explicit coverage for all
+eight public families. A Heartbeat status read without input is prior-state
+inspection, not evaluation. If evidence is unavailable, keep that family partial
+or unsupported. Never describe unevaluated families as healthy or absent.
+
+Run Inspector only when health is unknown and this pulse will extend long-running
+work, when the user reports degradation, or before and after long-running parallel
+work. Feed only its compact output to the collector, with the authorized-evidence
+flag. Do not run Inspector on every routine pulse or infer its fields from task
+liveness.
+
+For a new, materially worse, or eligible resolution transition, use only native
+plan, claim, send, and record. Contact one exact verified live target with the
+returned fixed template. Normal cycles do not wake tasks. Never read transcripts,
+edit repositories, create a worker recurrence, or ask the user to relay routine
+remediation.
+
+Apply a returned Governor-local cadence action only to this recurrence and verify
+it. Use 60 minutes for active work or 360 minutes while idle. Never create a
+second recurrence.
 ```
 
 Do not report full setup complete until all observable postconditions hold:
 the expected installed source is active, native status is healthy or explicitly
 degraded, exactly one live dedicated Governor owns exactly one active matching
-recurrence, Heartbeat status is readable from that Governor, and no worker task
-has a recurrence. Return a compact setup summary with those fields. Do not make
+recurrence, Heartbeat status is readable from that Governor, its `evaluation` is
+reported as `observed`, `partial`, or `unsupported`, and no worker task has a
+recurrence. `unsupported` is a valid coverage result, not a healthy result.
+Return a compact setup summary with those fields. Do not make
 the user infer success from `governorClaimed` or another internal state name.
 Initialization, status, Heartbeat, or inventory failure is a hard zero-recurrence
 postcondition. It applies to matching recurrences that predate the setup attempt
@@ -212,8 +233,14 @@ or relay tasks. Brief registry contention uses a bounded protected fallback even
 `status` and `discover` reconcile and remove it under the registry lock. Never
 bypass hook trust.
 
-For each Governor cycle, apply the bounded cycle-zero/one host convergence check
-when required, then call the host task list exactly once. The inventory must be
+Every Governor pulse starts by calling `-HeartbeatInterventionAction list` with
+this Governor ID. Resume or retain each record only through its returned
+`permittedNextAction`. Do this before fresh detector evaluation. Reclaim only an
+expired claimed send; native state changes it to `delivery_unknown`, never a
+blind retry.
+
+Then apply the bounded cycle-zero/one host convergence check when required and
+call the host task list exactly once. The inventory must be
 complete for the cycle to advance. Write only opaque task
 IDs, safe status categories, optional opaque generations, capture time, and a
 completeness flag to a bounded JSON file under `%TEMP%`; schema v1 requires the
@@ -226,7 +253,31 @@ remove the file, and treat the returned inventory as liveness authority. Verify
 that `hostInventoryCycle` advanced once, `hostInventoryRawObserved` matches the
 one raw list, and `hostTaskStatuses` contains one hash-only normalized entry for
 every listed task plus exactly one intrinsic Governor only in caller-excluded
-schema v2.
+schema v2. The host inventory proves discovery and liveness only. It does not
+prove Heartbeat progress, approval health, quota state, rule health, SQLite
+churn, tests, Git state, or machine health.
+
+Create a separate bounded Heartbeat collector file under `%TEMP%`. Use schema
+v2, one Governor-local opaque `sourceEpoch`, an increasing `sourceSequence`, and
+an explicit `observed`, `partial`, or `unsupported` label for each of the eight
+public families. Include only current compatible evidence. Never substitute a
+zero for an unavailable field. Run `chronos.cmd -Action heartbeat -HeartbeatInputPath <collector-file>`,
+then remove the file. A plain
+`chronos.cmd -Action heartbeat` call reads prior state only. It does not count as
+the current pulse's evaluation. Require compact status to report
+`evaluation=observed`, `partial`, or `unsupported` and retain all unsupported
+family labels.
+
+Inspector is a bounded diagnostic source, not the hourly workload. Run it only
+when health is unknown and the pulse will extend long-running work, when the
+user reports degradation, or before and after long-running parallel work. Save
+only the compact `CHRONOS` output to a bounded TEMP file. Add it to the same
+schema-v2 collector call with `-HeartbeatInspectorOutputPath` and
+`-HeartbeatInspectorAuthorized`, then remove it. The adapter requires compatible
+run provenance. Without that authorized output, Inspector-derived approval,
+review, quota, rollout, SQLite, rule, and resource evidence stays unavailable;
+task liveness cannot supply it.
+
 Use compact `wait_threads` snapshots from the rotating `checkBatch`, which
 contains at most eight entries. If host inventory is unavailable, fail closed
 for task-directed sends, retain pending state, and retry next cycle without a

@@ -14,35 +14,40 @@ v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
-v0.9.2 is the candidate Directory update. It mitigates the embedded-quote
-Windows hook-launcher defect, makes complete host inventory authoritative when
-the host does not dispatch hooks, preserves terminal state when asynchronous
-lifecycle events arrive out of order, and requires a full host restart after
-upgrade. It also isolates supervision state across restarted sandbox
-identities, gates recurrence creation on one successful complete-inventory
-cycle, permits Governor repository discovery while ignoring user Git config,
-and makes overlapping Heartbeat cycles explicitly retryable. Supervision and
-Heartbeat now use canonical `CODEX_HOME` installation identity, isolate
-separate Codex homes, reject reparse-point ancestors before state creation, and
-reserve unscoped legacy migration for the default `.codex` home so a shared
-legacy identity or outbox cannot be cloned into custom installations. It retains the
-full-setup contract and replaces generic first-use actions with three meaningful
-starters for complete setup, read-only health briefing, and bounded Governor
-research. Explicit-state hooks now wait for the shared registry mutex before
-they read state content. A contended hook writes one protected pending event
-instead, which removes a startup race without weakening the silent-hook
-contract. The normal configured hook now uses a small protected intake path
-instead of loading the full supervision engine inside its three-second host
-window. It writes one CODEX_HOME-scoped event; the next mutex-owning status or
-Governor cycle validates, receipts, merges, and removes it. Undecryptable
-records degrade once without blocking supervision, and a deletion-locked file
-cannot replay after its state change is committed. Slot-and-content receipts
-also survive a temporary read lock and a full 256-event sibling inbox. The
-Governor assignment,
-result, verification, lifecycle, and exclusion contracts are now
+v0.9.2 is the candidate Directory update. It keeps one complete host inventory
+as the liveness authority for each Governor cycle. It now treats health evidence
+as a separate contract. A schema-v2 collector snapshot carries a stable source
+epoch, an increasing source sequence, and an explicit coverage label for each
+of the eight public Heartbeat families. Missing evidence stays `partial` or
+`unsupported`; it cannot become a clean result. Inspector aggregates are
+accepted only after an authorized, compatible Inspector run produced them.
+
+The Governor resumes native intervention state before it evaluates new
+transitions. Only native plan, claim, send, and record actions can wake one
+verified task with the fixed message template. The scheduler stays at one
+Governor recurrence and zero worker recurrences. That same recurrence uses the
+verified 60-minute active cadence or 360-minute idle cadence.
+
+The release also mitigates the embedded-quote Windows hook-launcher defect,
+preserves terminal state when asynchronous lifecycle events arrive out of
+order, and requires a full host restart after upgrade. It isolates supervision
+state across restarted sandbox identities, gates recurrence creation on one
+successful complete-inventory cycle, permits Governor repository discovery
+while ignoring user Git config, and makes overlapping Heartbeat cycles
+explicitly retryable. Supervision and Heartbeat use canonical `CODEX_HOME`
+installation identity, isolate separate Codex homes, reject reparse-point
+ancestors before state creation, and reserve unscoped legacy migration for the
+default `.codex` home.
+
+Three first-use starters now lead to complete setup, an evidence-bound health
+briefing, or bounded Governor research. Optional hooks use a small protected
+intake path instead of loading the full supervision engine inside the
+three-second host window. The next mutex-owning status or Governor cycle
+validates, receipts, merges, and removes each accepted event. The Governor
+assignment, result, verification, lifecycle, and exclusion contracts are
 self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`502d5c786da93ec0b2814f935af704581b7ec4669d24327dd9efe73651f32c77`.
+`75ea5112715ed5416be7eea9e8a1a6c7bdcc42d5fac7a39ad520a775df87a974`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -132,9 +137,9 @@ Supported platform: Windows with the Codex plugin runtime.
 
 ## Starter Prompts
 
-1. `Set up Chronos: verify source, enable one Governor and Heartbeats, inventory every live task, and prove zero worker recurrences.`
-2. `Give me a read-only Chronos health briefing: separate PC, workflow, quota, approvals, rules, SQLite, Heartbeat, and supervision.`
-3. `Use Chronos Governor for safe read-only research and review; keep edits and final decisions here; finish locally if unavailable.`
+1. `Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.`
+2. `Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.`
+3. `Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here.`
 
 All three are unique, single-line, at most 128 characters, and contain no app
 mention.
@@ -143,7 +148,7 @@ mention.
 
 ### 1. Complete first-use setup
 
-- Prompt: `Set up Chronos: verify source, enable one Governor and Heartbeats, inventory every live task, and prove zero worker recurrences.`
+- Prompt: `Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.`
 - Expected behavior: verify the installed source and native status, perform
   optional hook trust review when the host presents it, reuse or create one history-free Governor, and
   reconcile the installation-scoped recurrence without prompting worker tasks.
@@ -152,15 +157,17 @@ mention.
   inventory must leave zero current-key recurrences and schedule no recovery
   recurrence.
 - Expected result: a compact summary showing the active source, native status,
-  one live Governor, one active Governor recurrence, readable Heartbeat status,
-  and zero worker recurrences. If hook trust remains pending, host inventory is
-  used as the safe discovery fallback and the limitation is named.
+  one live Governor, one active Governor recurrence, Heartbeat evaluation as
+  observed, partial, or unsupported, and zero worker recurrences. Unsupported
+  families are named and never summarized as healthy. If hook trust remains
+  pending, host inventory is used as the safe discovery fallback and the
+  limitation is named.
 - Fixture: Windows Codex with host task and automation tools. Task creation
   unavailability must use the documented current-task fallback without a fork.
 
 ### 2. Complete separated status
 
-- Prompt: `Give me a read-only Chronos health briefing: separate PC, workflow, quota, approvals, rules, SQLite, Heartbeat, and supervision.`
+- Prompt: `Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.`
 - Expected behavior: run native inspection and compact supervision and
   Heartbeat status reads without creating a Governor or recurrence.
 - Expected result: machine health remains separate from workflow diagnostic
@@ -191,7 +198,7 @@ mention.
 
 ### 5. Delegate and verify bounded read work
 
-- Prompt: `Use Chronos Governor for safe read-only research and review; keep edits and final decisions here; finish locally if unavailable.`
+- Prompt: `Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here.`
 - Expected behavior: preflight the active V2 worker contract before Governor
   status or planning. Without safe V2 support, complete and verify the work in
   the coordinator without reserving a plan. With V2, use only advertised models,

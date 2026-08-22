@@ -2,6 +2,7 @@ param(
   [string]$Action = 'cycle',
   [string]$InputPath,
   [string]$InspectorOutputPath,
+  [switch]$InspectorAuthorized,
   [string]$StatePath,
   [string]$CodexHome,
   [string]$Scope,
@@ -29,8 +30,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:Families = @('agent_stall', 'guardian', 'usage', 'sessions', 'tests', 'machines', 'tasks', 'git_build', 'heartbeat')
-$script:PublicFamilyCount = 8
+$script:PublicFamilies = @('agent_stall', 'guardian', 'usage', 'sessions', 'tests', 'machines', 'tasks', 'git_build')
+$script:Families = @($script:PublicFamilies + 'heartbeat')
+$script:PublicFamilyCount = $script:PublicFamilies.Count
 $script:CadenceSeconds = [ordered]@{
   agent_stall = 300
   guardian = 300
@@ -616,10 +618,11 @@ function Assert-Input {
   param($Snapshot)
   $allowed = @('schemaVersion', 'capturedAtUtc', 'sourceEpoch', 'sourceSequence', 'runId', 'origin', 'collectorCoverage', 'forceCadence', 'allowMachineDrift', 'isHeartbeatGenerated', 'agents', 'guardian', 'usage', 'sessions', 'tests', 'machines', 'tasks', 'git', 'build', 'heartbeatActivity')
   Assert-AllowedKeys $Snapshot $allowed
-  Assert-Field $Snapshot 'schemaVersion' integer $false 1 1
-  Assert-Field $Snapshot 'capturedAtUtc' time
-  Assert-Field $Snapshot 'sourceEpoch' opaque
-  Assert-Field $Snapshot 'sourceSequence' integer $false 0 9000000000000000
+  Assert-Field $Snapshot 'schemaVersion' integer $false 1 2
+  $strictCollector = (Has-Value $Snapshot 'schemaVersion') -and [int]$Snapshot.schemaVersion -eq 2
+  Assert-Field $Snapshot 'capturedAtUtc' time $strictCollector
+  Assert-Field $Snapshot 'sourceEpoch' opaque $strictCollector
+  Assert-Field $Snapshot 'sourceSequence' integer $strictCollector 0 9000000000000000
   Assert-Field $Snapshot 'runId' id
   Assert-Field $Snapshot 'origin' enum $false 0 0 @('host', 'inspector', 'heartbeat', 'heartbeat_notification', 'test')
   Assert-Field $Snapshot 'forceCadence' bool
@@ -629,6 +632,14 @@ function Assert-Input {
     Assert-AllowedKeys $Snapshot.collectorCoverage $script:Families
     foreach ($key in $Snapshot.collectorCoverage.Keys) {
       if ([string]$Snapshot.collectorCoverage[$key] -notin @('observed', 'partial', 'unsupported')) { throw 'heartbeat_input_invalid' }
+    }
+  } elseif ($strictCollector) {
+    throw 'heartbeat_input_invalid'
+  }
+  if ($strictCollector) {
+    foreach ($family in $script:PublicFamilies) {
+      if (-not (Has-Value $Snapshot.collectorCoverage $family)) { throw 'heartbeat_input_invalid' }
+      if ([string]$Snapshot.collectorCoverage[$family] -eq 'observed' -and -not (Test-FamilyPresent $Snapshot $family)) { throw 'heartbeat_input_invalid' }
     }
   }
   $totalRecords = 0
@@ -879,10 +890,13 @@ function Convert-InspectorNumber {
 }
 
 function Merge-InspectorOutput {
-  param($Snapshot, [string]$Path)
+  param($Snapshot, [string]$Path, [switch]$Authorized)
   if ([string]::IsNullOrWhiteSpace($Path)) { return }
+  if (-not $Authorized.IsPresent) { throw 'heartbeat_inspector_authorization_required' }
+  if (-not (Has-Value $Snapshot 'schemaVersion') -or [int]$Snapshot.schemaVersion -ne 2) { throw 'heartbeat_inspector_snapshot_required' }
   $safePath = Resolve-InputFile $Path $script:InspectorByteLimit @('.txt', '.out', '.log')
   $allowed = @(
+    'inspectionEvidenceVersion', 'inspectionRunId', 'inspectionCapturedAtUtc',
     'pluginVersion', 'approvalReviewCoverage', 'approvalReviewObservation', 'approvalReviewsPerHour',
     'approvalAverageIntervalSeconds', 'approvalReviewTurnsObserved', 'primaryTurnsObserved',
     'approvalReviewTurnShare', 'approvalReviewerMainInputRatio', 'approvalRepeatedRequests',
@@ -901,6 +915,19 @@ function Merge-InspectorOutput {
     }
   }
   if ($fields.Count -eq 0) { throw 'heartbeat_inspector_input_invalid' }
+  if ([string]$fields.inspectionEvidenceVersion -ne '1' -or [string]$fields.inspectionRunId -notmatch '^[a-f0-9]{32}$' -or [string]$fields.pluginVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'heartbeat_inspector_input_invalid'
+  }
+  try {
+    $manifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\.codex-plugin\plugin.json'))
+    $expectedPluginVersion = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
+  } catch { throw 'heartbeat_inspector_incompatible' }
+  if ([string]$fields.pluginVersion -ne $expectedPluginVersion) { throw 'heartbeat_inspector_incompatible' }
+  try {
+    $inspectionCaptured = ConvertTo-UtcTimestamp $fields.inspectionCapturedAtUtc 'heartbeat_inspector_input_invalid'
+    $snapshotCaptured = ConvertTo-UtcTimestamp $Snapshot.capturedAtUtc 'heartbeat_inspector_input_invalid'
+  } catch { throw 'heartbeat_inspector_input_invalid' }
+  if ([math]::Abs(($snapshotCaptured - $inspectionCaptured).TotalMinutes) -gt 15) { throw 'heartbeat_inspector_evidence_stale' }
   if (-not (Has-Value $Snapshot 'collectorCoverage')) { $Snapshot['collectorCoverage'] = @{} }
 
   if (-not (Has-Value $Snapshot 'guardian') -and $fields.Contains('approvalReviewTurnsObserved')) {
@@ -912,13 +939,18 @@ function Merge-InspectorOutput {
     $inputShare = if ($null -ne $inputRatio -and $inputRatio -ge 0) { $inputRatio / (1.0 + $inputRatio) } else { $null }
     $repeatValues = @('approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries') | ForEach-Object { Convert-InspectorNumber $fields[$_] }
     $repeats = [int](($repeatValues | Where-Object { $null -ne $_ } | Measure-Object -Maximum).Maximum)
+    if ($null -eq $reviewCount) { throw 'heartbeat_inspector_input_invalid' }
+    $metricFields = @{}
+    foreach ($key in $fields.Keys) {
+      if ([string]$key -notin @('inspectionEvidenceVersion', 'inspectionRunId', 'inspectionCapturedAtUtc')) { $metricFields[$key] = $fields[$key] }
+    }
     $guardian = @{
       reviewerSessionId = 'chronos-inspector-window'
       owner = 'governor'
       owningSolThread = 'governor'
-      reviewCount = [int64]$(if ($null -eq $reviewCount) { 0 } else { $reviewCount })
+      reviewCount = [int64]$reviewCount
       equivalentApprovalRequests = $repeats
-      progressHash = (Get-StableHash $fields).Substring(0, 32)
+      progressHash = (Get-StableHash $metricFields).Substring(0, 32)
     }
     if ($null -ne $reviewsPerHour) { $guardian.reviewsPerHour = $reviewsPerHour }
     if ($null -ne $turnShare -and $turnShare -ge 0 -and $turnShare -le 1) { $guardian.reviewerTurnShare = $turnShare }
@@ -933,7 +965,9 @@ function Merge-InspectorOutput {
     }
     $Snapshot['guardian'] = $guardian
     $coverage = [string]$fields.approvalReviewCoverage
-    $Snapshot.collectorCoverage['guardian'] = if ($coverage -match '^(complete|observed)$') { 'observed' } else { 'partial' }
+    $requiredGuardianFields = @('approvalReviewTurnsObserved', 'approvalReviewsPerHour', 'approvalReviewTurnShare', 'approvalReviewerMainInputRatio', 'approvalRepeatedRequests', 'approvalRepeatedPrefixRequests', 'approvalPersistenceRetries', 'nestedReviewerSessionsObserved')
+    $completeGuardianEvidence = @($requiredGuardianFields | Where-Object { -not $fields.Contains($_) }).Count -eq 0
+    $Snapshot.collectorCoverage['guardian'] = if ($coverage -match '^(complete|observed)$' -and $completeGuardianEvidence) { 'observed' } else { 'partial' }
   }
 
   if (-not (Has-Value $Snapshot 'usage') -and $fields.Contains('tokenIntervalInputM')) {
@@ -2674,16 +2708,23 @@ function Invoke-Cycle {
   $newOutbox = [Collections.Generic.List[object]]::new()
 
   foreach ($family in $script:Families) {
-    if (-not (Test-FamilyPresent $Snapshot $family)) { continue }
+    $familyPresent = Test-FamilyPresent $Snapshot $family
+    $coverageExplicit = Has-Value $coverage $family
+    if (-not $familyPresent -and -not $coverageExplicit) { continue }
     $collector = $State.collectors[$family]
     $collector.lastAttempt = $EvidenceNow.ToString('o')
     $collector.coverage = [string](Get-Value $coverage $family 'unsupported')
+    if ($collector.coverage -ne 'observed') {
+      $collector.sourceEpochHash = $null
+      $collector.lastSequence = $null
+    }
     if (-not (Test-FamilyDue $collector $EvidenceNow $force)) {
       $collector.skippedCadence = [int64]$collector.skippedCadence + 1
       continue
     }
     $collector.lastRun = $EvidenceNow.ToString('o')
     if ($collector.coverage -ne 'observed') { continue }
+    if (-not $familyPresent) { throw 'heartbeat_input_invalid' }
     $hasEpoch = Has-Value $Snapshot 'sourceEpoch'
     $hasSequence = Has-Value $Snapshot 'sourceSequence'
     $epochHash = if ($hasEpoch) { Get-StableHash ([string]$Snapshot.sourceEpoch) } else { $null }
@@ -2827,22 +2868,25 @@ function Invoke-Cycle {
 function Write-Status {
   param($State, [DateTimeOffset]$Now)
   $open = @($State.conditions.Values | Where-Object { [bool]$_.open })
-  $engine = 'healthy'
+  $engine = if ([int64]$State.health.runs -eq 0) { 'uninitialized' } else { 'healthy' }
   if (-not [string]::IsNullOrWhiteSpace([string]$State.health.lastError)) { $engine = 'degraded' }
   if (-not [string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) {
     try { if ($Now -lt (ConvertTo-UtcTimestamp ([string]$State.health.backoffUntilUtc) 'heartbeat_state_invalid')) { $engine = 'backoff' } } catch { $engine = 'degraded' }
   }
   $coverageCounts = @{ observed = 0; partial = 0; unsupported = 0 }
-  foreach ($family in $script:Families) {
+  $coverageLabels = [Collections.Generic.List[string]]::new()
+  foreach ($family in $script:PublicFamilies) {
     $value = [string]$State.collectors[$family].coverage
     if ($coverageCounts.ContainsKey($value)) { $coverageCounts[$value]++ } else { $coverageCounts.unsupported++ }
+    $coverageLabels.Add($family + ':' + $(if ($coverageCounts.ContainsKey($value)) { $value } else { 'unsupported' })) | Out-Null
   }
+  $evaluation = if ($coverageCounts.observed -eq $script:PublicFamilyCount) { 'observed' } elseif ($coverageCounts.unsupported -eq $script:PublicFamilyCount) { 'unsupported' } else { 'partial' }
   $lastCycle = if ([string]::IsNullOrWhiteSpace([string]$State.health.lastCycleUtc)) { 'never' } else { [string]$State.health.lastCycleUtc }
   $activeInterventions = @($State.interventions | Where-Object { -not (Test-InterventionTerminal ([string]$_.state)) })
   $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
   $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
   $backoffUntil = if ([string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) { 'none' } else { [string]$State.health.backoffUntilUtc }
-  Write-Output ('CHRONOS HEARTBEATS engine={0} activeTypes={1} open={2} outboxPending={3} outboxExhausted={4} interventionsActive={5} deliveryUnknown={6} coverageObserved={7} coveragePartial={8} coverageUnsupported={9} suppressed={10} routesEmitted={11} deliveryAttempts={12} lastCycle={13} durationMs={14} stateStoreMode={15} stateStoreWriteReady={16} stateStoreProtection={17} stateStoreMigration={18} priorStateDisposition={19} priorStateWriteAttempted={20} completedCycles={21} stateChanges={22} acknowledgedEvents={23} failedCycles={24} duplicateRuns={25} runtimeBudgetMs={26} runtimeObservedMs={27} runtimeOverrunMs={28} runtimeOverrunPercent={29} runtimeBaselineMs={30} runtimeClassification={31} runtimeOverrunStreak={32} runtimeBackoffApplied={33} backoffUntil={34} codexHomeSource={35} codexHomeIdentity={36}' -f $engine, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil, $script:CodexHomeSource, $script:CodexHomeIdentity)
+  Write-Output ('CHRONOS HEARTBEATS engine={0} evaluation={1} activeTypes={2} statusMode=prior_state open={3} outboxPending={4} outboxExhausted={5} interventionsActive={6} deliveryUnknown={7} coverageObserved={8} coveragePartial={9} coverageUnsupported={10} coverageByFamily={11} suppressed={12} routesEmitted={13} deliveryAttempts={14} lastCycle={15} durationMs={16} stateStoreMode={17} stateStoreWriteReady={18} stateStoreProtection={19} stateStoreMigration={20} priorStateDisposition={21} priorStateWriteAttempted={22} completedCycles={23} stateChanges={24} acknowledgedEvents={25} failedCycles={26} duplicateRuns={27} runtimeBudgetMs={28} runtimeObservedMs={29} runtimeOverrunMs={30} runtimeOverrunPercent={31} runtimeBaselineMs={32} runtimeClassification={33} runtimeOverrunStreak={34} runtimeBackoffApplied={35} backoffUntil={36} codexHomeSource={37} codexHomeIdentity={38}' -f $engine, $evaluation, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, ($coverageLabels -join ','), $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil, $script:CodexHomeSource, $script:CodexHomeIdentity)
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }
@@ -2884,7 +2928,7 @@ try {
   if ($Action -eq 'cycle') {
     if ([string]::IsNullOrWhiteSpace($InputPath) -and [string]::IsNullOrWhiteSpace($InspectorOutputPath)) { throw 'heartbeat_input_required' }
     $input = Read-NormalizedInput $InputPath
-    Merge-InspectorOutput $input $InspectorOutputPath
+    Merge-InspectorOutput $input $InspectorOutputPath -Authorized:$InspectorAuthorized
     Assert-Input $input
     $evidenceNow = if (Has-Value $input 'capturedAtUtc') { ConvertTo-UtcTimestamp $input.capturedAtUtc } else { $deliveryNow }
     if ($evidenceNow -gt $deliveryNow.AddMinutes(10)) { throw 'heartbeat_time_in_future' }

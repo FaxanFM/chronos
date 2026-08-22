@@ -896,6 +896,7 @@ try {
   Assert-True ($callerExcludedCycle.ok -and $callerExcludedCycle.hostInventoryRawObserved -eq 1 -and $callerExcludedCycle.hostInventoryObserved -eq 2) 'Caller-excluded inventory did not remain one authoritative raw call with one intrinsic Governor.'
   Assert-True ($callerExcludedCycle.hostInventoryCallerVisibility -eq 'excluded_by_host' -and $callerExcludedCycle.hostInventoryGovernorSource -eq 'intrinsic_cycle_caller') 'Caller-excluded inventory did not report its normalization source.'
   Assert-True (@($callerExcludedCycle.hostTaskStatuses).Count -eq 2 -and @($callerExcludedCycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and $callerExcludedCycle.recurrenceEligible) 'Caller-excluded inventory did not return one compact status per live task or authorize recurrence.'
+  Assert-True ($callerExcludedCycle.recommendedCadenceMinutes -eq 60 -and $callerExcludedCycle.workerRecurrence -eq 'disabled' -and $callerExcludedCycle.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'An active caller-excluded cycle changed the one-Governor, zero-worker recurrence contract.'
   [IO.File]::WriteAllText($callerExcludedInventory, ([ordered]@{
     schemaVersion = 2; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true; callerVisibility = 'excluded_by_host'
     tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = $null })
@@ -1134,7 +1135,10 @@ try {
     agent_id = $worker; agent_type = 'explorer'; model = 'gpt-5.6-luna'
   }
   Assert-True ($stop.ExitCode -eq 0) 'SubagentStop failed.'
-  Assert-True ((Get-Payload (Invoke-Supervision $state 'discover' $task)).activeAgents -eq 0) 'Stopped agent remained active.'
+  $idleAfterRestart = Get-Payload (Invoke-Supervision $state 'discover' $task)
+  Assert-True ($idleAfterRestart.activeAgents -eq 0) 'Stopped agent remained active.'
+  Assert-True ($idleAfterRestart.recommendedCadenceMinutes -eq 360 -and $idleAfterRestart.workerRecurrence -eq 'disabled') 'A fresh idle status read did not preserve the 360-minute cadence and zero-worker topology.'
+  Assert-True ($idleAfterRestart.hostEquivalenceKey -eq $discoveryData.hostEquivalenceKey -and $idleAfterRestart.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates') 'Restart handling changed the current installation key or one-Governor recurrence postcondition.'
 
   $end = Invoke-Hook $state @{
     session_id = $task; cwd = $cwd; hook_event_name = 'SessionEnd'; reason = 'other'; model = 'gpt-5.6-sol'

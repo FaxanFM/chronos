@@ -11,10 +11,8 @@ After installing or upgrading Chronos, fully quit and reopen Codex. Then open a
 fresh task and ask:
 
 ```text
-Set up Chronos fully on this PC. Verify the installed source, enable
-supervision and Heartbeats in one dedicated Governor, and confirm one Governor
-recurrence with zero worker recurrences. Keep routine worker tasks passive and
-do not ask me to relay routine findings.
+Set up Chronos: verify source, create one Governor, explain hooks, and prove
+Heartbeat coverage and zero worker recurrences.
 ```
 
 This request opts in to one host-managed recurring Governor turn: at most 24
