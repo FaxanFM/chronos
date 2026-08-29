@@ -206,49 +206,63 @@ or efficiency from a model name.
 The installed command surface is:
 
 ```powershell
+$chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
+
 # Compact state only
-chronos.cmd -Action supervise -SupervisionAction status
+& $chronos -Action supervise -SupervisionAction status
 
 # Run only inside the selected Governor task
-chronos.cmd -Action supervise -SupervisionAction initialize
+& $chronos -Action supervise -SupervisionAction initialize
 
 # Passive registry read; this does not advance the Governor cycle
-chronos.cmd -Action supervise -SupervisionAction discover
+& $chronos -Action supervise -SupervisionAction discover
 
 # After one compact complete host task-list call, run one Governor cycle
-chronos.cmd -Action supervise -SupervisionAction cycle `
+& $chronos -Action supervise -SupervisionAction cycle `
   -SupervisionHostInventoryPath <temporary-inventory.json>
 
 # Only after host liveness verifies an ended entry is active again
-chronos.cmd -Action supervise -SupervisionAction confirm-active `
+& $chronos -Action supervise -SupervisionAction confirm-active `
   -SupervisionSubjectId <task-or-agent-id>
 
 # First returns the required host cleanup action; it does not clear ownership
-chronos.cmd -Action supervise -SupervisionAction release
+& $chronos -Action supervise -SupervisionAction release
 
 # Run only after all matching recurrences are stopped and verified absent
-chronos.cmd -Action supervise -SupervisionAction release `
+& $chronos -Action supervise -SupervisionAction release `
   -SupervisionConfirmRecurrenceStopped
 ```
 
-The Governor calls the host task list once, writes only opaque task IDs, safe
-status categories, optional opaque generations, a capture time, and a
-`complete=true` flag to a bounded temporary JSON file, then calls `cycle`.
+`chronos.cmd` is not guaranteed to be on `PATH`; use the installed rooted
+launcher. The Governor writes one logical host inventory containing only opaque
+task IDs, safe status categories, optional opaque generations, a capture time,
+and a completeness flag to a bounded temporary JSON file. `complete=true` is
+valid only when the host explicitly asserts completeness or documented cursor
+pagination reaches its terminal cursor under one stable snapshot identity. A
+capped task-list response without usable complete/cursor semantics is incomplete.
+Chronos never treats a one-call snapshot as complete by assumption.
 Schema v1 means the host list includes its caller and therefore requires the
 Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
 `callerVisibility=included` under the same rule, or
 `callerVisibility=excluded_by_host` only when the host list omits the current
 caller; in that case `tasks` must omit the Governor and Chronos adds only the
 registry-verified cycle caller during normalization. It never infers omission or
-makes a second status call. The result reports `hostInventoryRawObserved`,
+makes a second unrelated status call. `notLoaded` normalizes to `unknown`, not
+`idle`: it is neither live nor ended and cannot create, revive, or close a task.
+With `complete=false`, use `reconcile-host` for partial freshness; do not advance
+a cycle, close absent tasks, enable a recurrence, or send an intervention. The
+result reports `hostInventoryRawObserved`,
 `hostInventoryObserved`, `hostInventoryCallerVisibility`, and
 `hostInventoryGovernorSource` so the one-call boundary is auditable.
 Missing or incomplete inventory fails closed and does not advance the cycle.
-Host task state is the liveness authority. The native action
+Host task state is the liveness authority only for entries whose normalized
+state is live or ended. The native action
 adds tasks missed by hooks, reactivates verified live tasks, and closes absent
 tasks. It returns one hash-only normalized status for every inventory task and the rotating
 `checkBatch`, which contains at most eight entries and covers larger registries
-fairly over successive cycles. Inventory or transport failure remains
+  fairly over successive cycles. Cycle and reconcile results omit raw task IDs,
+full task arrays, and change arrays; only counts and hash-only compact entries
+leave the native registry. Inventory or transport failure remains
 Governor-local; the routine user action is none.
 Terminal hook state has precedence: a delayed start event cannot revive
 an ended task or agent. A terminal event received before its asynchronous start
@@ -262,7 +276,7 @@ The Governor owns the only model recurrence. A normal cycle reports
 plan-and-claim state machine can authorize a task message. When the user enables recurring
 supervision, reconcile one host Heartbeat automation attached to the dedicated
 task. Use 60 minutes while monitored work is active and 360 minutes while idle.
-A normal cycle ends silently. A new, materially worse, or eligible resolution
+A normal cycle returns one compact hash-only receipt and sends no task message. A new, materially worse, or eligible resolution
 transition can open one bounded intervention for one exact affected task. The
 Governor plans all events before it sends, coalesces compatible work by target
 generation, and never
@@ -426,8 +440,9 @@ Chronos intentionally does not register `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PermissionRequest`, `PreCompact`, or `PostCompact`. This avoids
 prompt inspection, model steering, and a process launch for every tool call.
 The completed-turn signal improves discovery and recent-activity evidence; one
-complete host inventory per Governor cycle remains the task-liveness authority
-and includes both explicitly targeted and automatically discovered live tasks.
+a proven complete host inventory per Governor cycle remains the task-liveness
+authority and includes both explicitly targeted and automatically discovered
+live tasks. It supplies no Heartbeat coverage outside task liveness.
 
 Official Codex hook behavior, plugin hook discovery, trust review, asynchronous
 execution, and event fields are documented in [OpenAI Hooks](https://learn.chatgpt.com/docs/hooks).

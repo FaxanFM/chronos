@@ -10,6 +10,16 @@ architecture, safety decisions, verification, and acceptance. Use Codex native
 workers only. Do not create a daemon, operating-system scheduler, external
 service, or unbounded autonomous loop.
 
+Resolve the installed launcher once from this skill's sibling Chronos skill and
+invoke it by rooted path:
+
+```powershell
+$chronos = Join-Path '<chronos-skill-root>' 'scripts\chronos.cmd'
+```
+
+`chronos.cmd` is not guaranteed to be on `PATH`. Every command below means
+`& $chronos ...`; never depend on a bare executable lookup.
+
 ## Automatic Supervision Bootstrap
 
 When the user asks to enable Chronos supervision, enable Heartbeats, or set up
@@ -44,7 +54,7 @@ when the override is invalid, unavailable, or cannot be resolved consistently.
 This includes a reparse point in any path component. Do not treat unscoped
 legacy state as belonging to an explicit or environment-provided Codex home.
 
-1. Run `chronos.cmd -Action install-status`, compact supervision status, and
+1. Run `& $chronos -Action install-status`, compact supervision status, and
    Heartbeat status. A confirmed enabled-source conflict or unreadable native
    state fails closed before host mutation. Cached copies alone are not proof
    of a conflict. Do not run the broad Inspector or packaged validation suites
@@ -54,7 +64,7 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    Collect one all-same-name observation set containing every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
    ID, creation time when available, target task, and equivalence key. Also run
-   `chronos.cmd -Action supervise -SupervisionAction status`. Observation does
+   `& $chronos -Action supervise -SupervisionAction status`. Observation does
    not grant mutation authority.
 3. Derive a separate current-key mutation set. Include only automations whose
    compact assignment contains the complete current `hostEquivalenceKey` and
@@ -240,33 +250,54 @@ expired claimed send; native state changes it to `delivery_unknown`, never a
 blind retry.
 
 Then apply the bounded cycle-zero/one host convergence check when required and
-call the host task list exactly once. The inventory must be
-complete for the cycle to advance. Write only opaque task
+collect one logical host inventory. The inventory is complete only when the host
+explicitly says the response is complete, or when documented cursor pagination
+reaches its terminal cursor under one stable snapshot identity. A capped
+`list_threads` response with no completeness or pagination contract is not
+complete, even when it returned fewer than its visible limit. Never infer
+`complete=true` from a one-call snapshot. Write only opaque task
 IDs, safe status categories, optional opaque generations, capture time, and a
 completeness flag to a bounded JSON file under `%TEMP%`; schema v1 requires the
 Governor in `tasks`. When the host list excludes its current caller, schema v2
 must declare `callerVisibility=excluded_by_host` and omit the Governor from
 `tasks`; Chronos then adds that registry-verified cycle caller intrinsically.
-Never infer caller exclusion, supplement it from a second host call, or write titles,
-paths, or transcript content. Run `-SupervisionAction cycle` with that file,
-remove the file, and treat the returned inventory as liveness authority. Verify
+Never infer caller exclusion, supplement it from a second unrelated snapshot,
+or write titles, paths, or transcript content. Preserve the host's `notLoaded`
+status; native normalization maps it to `unknown`, which is neither live nor
+ended and cannot create, revive, or close a task. Do not map it to `idle`.
+
+Run `-SupervisionAction cycle` only with proven complete inventory. With
+unproven completeness, write `complete=false`, run `-SupervisionAction
+reconcile-host` for partial freshness, remove the file, and fail closed for
+recurrence creation, absence-based task closure, and task-directed sends. Do not
+advance the Governor cycle. For a pre-existing recurrence, preserve pending
+native state and make no liveness transition or intervention send until a later
+host response proves completeness. Verify
 that `hostInventoryCycle` advanced once, `hostInventoryRawObserved` matches the
 one raw list, and `hostTaskStatuses` contains one hash-only normalized entry for
 every listed task plus exactly one intrinsic Governor only in caller-excluded
-schema v2. The host inventory proves discovery and liveness only. It does not
+schema v2. The host inventory proves discovery and liveness only. It never
+supplies Heartbeat collector coverage for any family and does not
 prove Heartbeat progress, approval health, quota state, rule health, SQLite
 churn, tests, Git state, or machine health.
 
-Create a separate bounded Heartbeat collector file under `%TEMP%`. Use schema
-v2, one Governor-local opaque `sourceEpoch`, an increasing `sourceSequence`, and
-an explicit `observed`, `partial`, or `unsupported` label for each of the eight
+Before creating the separate bounded Heartbeat collector file under `%TEMP%`,
+run `& $chronos -Action heartbeat -HeartbeatCollectorAction reserve`. Use the
+returned `sourceEpoch` and `sourceSequence` exactly once in the schema-v2 file.
+The native reservation is installation-scoped, mutex-protected, and persists
+across Governor task or sandbox restarts. Do not cache, guess, or locally
+increment either value; an abandoned reservation may leave a harmless sequence
+gap. Use schema v2 and an explicit `observed`, `partial`, or `unsupported` label
+for each of the eight
 public families. Include only current compatible evidence. Every accepted
 schema-v2 snapshot advances the source watermark even when a family is not due
 or its coverage is partial or unsupported. Never substitute a zero for an
-unavailable or malformed field. Run `chronos.cmd -Action heartbeat -HeartbeatInputPath <collector-file>`,
-then remove the file. A plain
-`chronos.cmd -Action heartbeat` call reads prior state only. It does not count as
-the current pulse's evaluation. Require compact status to report
+unavailable or malformed field. Run `& $chronos -Action heartbeat
+-HeartbeatInputPath <collector-file>`, require its compact success receipt to
+echo the accepted epoch hash and sequence plus `evaluation` and all coverage
+counts, then remove the file. A plain
+`& $chronos -Action heartbeat` call reads prior state only. It does not count as
+the current pulse's evaluation. Require the receipt or compact status to report
 `evaluation=observed`, `partial`, or `unsupported` and retain all unsupported
 family labels.
 
@@ -292,7 +323,7 @@ or transcripts. A normal cycle must end without messaging monitored tasks;
 before the current cycle ends. See the public
 [supervision contract](https://github.com/FaxanFM/chronos/blob/main/docs/SUPERVISION.md).
 
-Before building a Governor `usage` record, run `chronos.cmd -Action heartbeat`
+Before building a Governor `usage` record, run `& $chronos -Action heartbeat`
 once and copy its five named counters exactly: `completedCycles`,
 `stateChanges`, `acknowledgedEvents`, `failedCycles`, and `duplicateRuns`.
 Combine them only with the current compact Inspector usage fields for this

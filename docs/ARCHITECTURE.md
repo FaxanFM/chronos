@@ -71,7 +71,7 @@ an unrelated payload does not count.
 
 ## Heartbeat Engine
 
-`chronos.cmd -Action heartbeat` invokes an internal deterministic transition
+The rooted installed `chronos.cmd` launcher with `-Action heartbeat` invokes an internal deterministic transition
 engine. The Codex host supplies one bounded normalized snapshot across the
 monitored task set and chooses the recurring cadence. The recommended topology
 uses one Governor task on `gpt-5.6-terra` with Medium reasoning. Monitored tasks
@@ -224,7 +224,7 @@ Unscoped legacy state is eligible only for the default `.codex` home. Custom
 homes can use only state that was already scoped to that same home, so one old
 identity or outbox cannot be cloned into several installations.
 
-`chronos.cmd -Action supervise` exposes status, single-Governor claim,
+The rooted installed `chronos.cmd` launcher with `-Action supervise` exposes status, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
 is advisory; one complete caller-aware host inventory per Governor cycle is

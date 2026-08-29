@@ -166,9 +166,9 @@ captured before the change and advertise a cache path removed by the upgrade
 even though the new version is installed correctly. Do not copy or link new
 plugin files into an old version directory; restart, use a fresh task, and
 verify the installed version.
-Run `chronos.cmd -Action install-status` to check for duplicate valid cached
+Run `& "<skill-root>\scripts\chronos.cmd" -Action install-status` to check for duplicate valid cached
 sources. The result deliberately labels this as cache inventory, not proof of
-enabled state.
+enabled state. The launcher is not guaranteed to be on `PATH`.
 
 Chronos is published in the shared OpenAI Plugins Directory for ChatGPT and
 Codex. The marketplace commands are a fallback for environments where the

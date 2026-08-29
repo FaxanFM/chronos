@@ -154,11 +154,11 @@ try {
   foreach ($collectorContractTerm in @(
     'Every Governor pulse starts by calling `-HeartbeatInterventionAction list`',
     'The host inventory proves discovery and liveness only',
-    'Create a separate bounded Heartbeat collector file',
-    'one Governor-local opaque `sourceEpoch`',
-    'an increasing `sourceSequence`',
+    'Before creating the separate bounded Heartbeat collector file',
+    '-HeartbeatCollectorAction reserve',
+    'persists across Governor task or sandbox restarts',
     'each of the eight public families',
-    'A plain `chronos.cmd -Action heartbeat` call reads prior state only',
+    'A plain `& $chronos -Action heartbeat` call reads prior state only',
     '`-HeartbeatInspectorAuthorized`',
     'task liveness cannot supply it'
   )) {
@@ -173,7 +173,7 @@ try {
     'Never use a recurrence to retry, recover, or finish a failed setup'
   )) {
     $hardGateOffset = $governorSkill.IndexOf($hardGateTerm, [StringComparison]::Ordinal)
-    $stepOneOffset = $governorSkill.IndexOf('1. Run `chronos.cmd -Action install-status`', [StringComparison]::Ordinal)
+    $stepOneOffset = $governorSkill.IndexOf('1. Run `& $chronos -Action install-status`', [StringComparison]::Ordinal)
     if ($hardGateOffset -lt 0 -or $stepOneOffset -lt 0 -or $hardGateOffset -gt $stepOneOffset) {
       throw "Governor skill does not put the fail-closed recurrence gate before setup actions: $hardGateTerm"
     }
@@ -536,7 +536,7 @@ try {
   New-Item -ItemType Directory -Path $installedCustomCodexHome -Force | Out-Null
   $installedCustomIdentity = ([IO.Path]::GetFullPath((Get-Item -LiteralPath $installedCustomCodexHome -Force).FullName)).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).ToUpperInvariant()
   $installedCustomIdentityToken = (Get-TextHash $installedCustomIdentity).Substring(0, 16)
-  $installedCustomHeartbeatIdentityToken = (Get-TextHash ($installedCustomIdentity | ConvertTo-Json -Compress)).Substring(0, 16)
+  $installedCustomHeartbeatIdentityToken = $installedCustomIdentityToken
   $installedCustomScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $installedCustomIdentity)
   $heartbeatDefaultTestRoot = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' $installedCustomScopeHash)
   $customHeartbeatOutput = @(& $installedLauncher -Action heartbeat -CodexHome $installedCustomCodexHome 2>&1)

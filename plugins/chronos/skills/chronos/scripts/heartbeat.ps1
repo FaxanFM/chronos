@@ -194,6 +194,17 @@ function Get-StableHash {
   }
 }
 
+function Get-TextHash {
+  param([string]$Value)
+  $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 function Format-Number {
   param([double]$Value)
   return $Value.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
@@ -765,7 +776,7 @@ function Resolve-StatePath {
   if ($defaultScope) {
     $resolvedCodexHome = Resolve-CodexHomeDirectory $CodexHome
     $script:CodexHomeSource = [string]$resolvedCodexHome.Source
-    $script:CodexHomeIdentity = (Get-StableHash ([string]$resolvedCodexHome.Identity)).Substring(0, 16)
+    $script:CodexHomeIdentity = (Get-TextHash ([string]$resolvedCodexHome.Identity)).Substring(0, 16)
     $RequestedScope = '{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), ([string]$resolvedCodexHome.Identity)
     # Older default scopes predate CODEX_HOME isolation. A custom home must not
     # clone their pending events, delivery state, or intervention ownership.
@@ -1029,7 +1040,7 @@ function New-DefaultState {
     $previous[$family] = @{}
   }
   return [ordered]@{
-    schema = 7
+    schema = 8
     revision = 0
     scopeHash = $ScopeHash
     previous = $previous
@@ -1064,6 +1075,8 @@ function New-DefaultState {
       runtimeBackoffApplied = $false
       sourceEpochHash = $null
       lastSourceSequence = $null
+      governorSourceEpochHash = Get-StableHash ('governor-collector|' + [guid]::NewGuid().ToString('N'))
+      governorSourceSequence = 0
     }
     runIds = @()
   }
@@ -1140,7 +1153,7 @@ function Assert-State {
   if (-not ($State -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   $top = @('schema', 'revision', 'scopeHash', 'previous', 'conditions', 'events', 'outbox', 'interventions', 'collectors', 'health', 'runIds')
   foreach ($key in $State.Keys) { if ($top -notcontains [string]$key) { throw 'heartbeat_state_invalid' } }
-  if ([int]$State.schema -ne 7 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
+  if ([int]$State.schema -ne 8 -or [int64]$State.revision -lt 0 -or [string]$State.scopeHash -ne $ExpectedScopeHash) { throw 'heartbeat_state_invalid' }
   if (-not ($State.previous -is [System.Collections.IDictionary]) -or -not ($State.conditions -is [System.Collections.IDictionary]) -or -not ($State.collectors -is [System.Collections.IDictionary]) -or -not ($State.health -is [System.Collections.IDictionary])) { throw 'heartbeat_state_invalid' }
   if ($State.conditions.Count -gt $script:ConditionLimit -or @($State.events).Count -gt $script:EventLimit -or @($State.outbox).Count -gt $script:OutboxLimit -or @($State.interventions).Count -gt $script:InterventionLimit -or @($State.runIds).Count -gt $script:RunIdLimit) { throw 'heartbeat_state_invalid' }
   $snapshotFields = @('generationHash', 'active', 'progressHash', 'repeated', 'idleMinutes', 'tokens', 'totalTokens', 'longRunning', 'status', 'reviewCount', 'reviewsPerHour', 'ratio', 'turnShare', 'repeats', 'executions', 'pendingAllowed', 'acceleration', 'recursion', 'rate', 'baselineRate', 'projectionMinutes', 'reviewerShare', 'meaningfulProgress', 'role', 'progressCountersObserved', 'completedCycles', 'stateChanges', 'acknowledgedEvents', 'failedCycles', 'duplicateRuns', 'childCount', 'forkDepth', 'overlap', 'compactions', 'rolloutBytes', 'growthRate', 'childRate', 'recursive', 'commitHash', 'suiteHash', 'repairAttempts', 'failureCount', 'environmentHash', 'required', 'ran', 'regressionActive', 'versionHash', 'intendedHash', 'drift', 'testStatus', 'installStatus', 'missingSkills', 'mcpConfigured', 'dependencyStatus', 'taskStatus', 'ageHours', 'assigned', 'acknowledgedBug', 'requiredCommit', 'requiredPush', 'requiredValidation', 'validationStatus', 'actionableActive', 'dirty', 'completedTaskIdle', 'requiresCommit', 'requiresPush', 'idleMinutes', 'ahead', 'behind', 'mergeConflict', 'branchChanged', 'destructiveOperation', 'expectedCommitPushed', 'conflictingScopes', 'buildStatus', 'identityMismatch', 'missingFiles', 'manifestMatches', 'sizeRatio', 'artifactHashMatches', 'schedulerDuplicates', 'runtimeSeconds', 'runtimeMs', 'runtimeBudgetMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied')
@@ -1170,7 +1183,7 @@ function Assert-State {
     Assert-StateRecord $item @('interventionId', 'eventId', 'conditionHash', 'type', 'severity', 'version', 'targetHash', 'targetGenerationHash', 'governorHash', 'state', 'attempts', 'claimHash', 'claimExpiresAt', 'createdAt', 'updatedAt', 'template', 'postcondition', 'resolutionNoticeRequired', 'escalationSent', 'coalescedCount', 'failureReason', 'transportResult', 'taskResponse', 'verificationSource', 'verificationResult')
     if ([int]$item.version -lt 1 -or [int]$item.attempts -lt 0 -or [int]$item.attempts -gt 2 -or [int]$item.coalescedCount -lt 0) { throw 'heartbeat_state_invalid' }
   }
-  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied', 'sourceEpochHash', 'lastSourceSequence')
+  Assert-StateRecord $State.health @('runs', 'suppressedDuplicates', 'routesEmitted', 'resolutionEvents', 'duplicateRuns', 'acknowledgedEvents', 'failedCycles', 'mutexContention', 'lastCycleUtc', 'lastSuccessUtc', 'lastDurationMs', 'lastRunIdHash', 'lastError', 'backoffUntilUtc', 'deliveryAttempts', 'runtimeBudgetMs', 'runtimeObservedMs', 'runtimeOverrunMs', 'runtimeOverrunPercent', 'runtimeBaselineMs', 'runtimeClassification', 'runtimeOverrunStreak', 'runtimeBackoffApplied', 'sourceEpochHash', 'lastSourceSequence', 'governorSourceEpochHash', 'governorSourceSequence')
   foreach ($runId in @($State.runIds)) { if ([string]$runId -notmatch '^[a-f0-9]{64}$') { throw 'heartbeat_state_invalid' } }
 }
 
@@ -1210,6 +1223,13 @@ function Upgrade-State {
       }
     }
     $State.schema = 7
+  }
+  if ([int](Get-Value $State 'schema' 0) -eq 7) {
+    if (-not (Has-Value $State.health 'governorSourceEpochHash')) {
+      $State.health['governorSourceEpochHash'] = Get-StableHash ('governor-collector|' + [guid]::NewGuid().ToString('N'))
+    }
+    if (-not (Has-Value $State.health 'governorSourceSequence')) { $State.health['governorSourceSequence'] = 0L }
+    $State.schema = 8
   }
   return $State
 }
@@ -2903,14 +2923,8 @@ function Invoke-Cycle {
   return @($routed)
 }
 
-function Write-Status {
-  param($State, [DateTimeOffset]$Now)
-  $open = @($State.conditions.Values | Where-Object { [bool]$_.open })
-  $engine = if ([int64]$State.health.runs -eq 0) { 'uninitialized' } else { 'healthy' }
-  if (-not [string]::IsNullOrWhiteSpace([string]$State.health.lastError)) { $engine = 'degraded' }
-  if (-not [string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) {
-    try { if ($Now -lt (ConvertTo-UtcTimestamp ([string]$State.health.backoffUntilUtc) 'heartbeat_state_invalid')) { $engine = 'backoff' } } catch { $engine = 'degraded' }
-  }
+function Get-CoverageSummary {
+  param($State)
   $coverageCounts = @{ observed = 0; partial = 0; unsupported = 0 }
   $coverageLabels = [Collections.Generic.List[string]]::new()
   foreach ($family in $script:PublicFamilies) {
@@ -2919,12 +2933,30 @@ function Write-Status {
     $coverageLabels.Add($family + ':' + $(if ($coverageCounts.ContainsKey($value)) { $value } else { 'unsupported' })) | Out-Null
   }
   $evaluation = if ($coverageCounts.observed -eq $script:PublicFamilyCount) { 'observed' } elseif ($coverageCounts.unsupported -eq $script:PublicFamilyCount) { 'unsupported' } else { 'partial' }
+  return [pscustomobject]@{
+    Evaluation = $evaluation
+    Observed = [int]$coverageCounts.observed
+    Partial = [int]$coverageCounts.partial
+    Unsupported = [int]$coverageCounts.unsupported
+    Labels = ($coverageLabels -join ',')
+  }
+}
+
+function Write-Status {
+  param($State, [DateTimeOffset]$Now)
+  $open = @($State.conditions.Values | Where-Object { [bool]$_.open })
+  $engine = if ([int64]$State.health.runs -eq 0) { 'uninitialized' } else { 'healthy' }
+  if (-not [string]::IsNullOrWhiteSpace([string]$State.health.lastError)) { $engine = 'degraded' }
+  if (-not [string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) {
+    try { if ($Now -lt (ConvertTo-UtcTimestamp ([string]$State.health.backoffUntilUtc) 'heartbeat_state_invalid')) { $engine = 'backoff' } } catch { $engine = 'degraded' }
+  }
+  $coverage = Get-CoverageSummary $State
   $lastCycle = if ([string]::IsNullOrWhiteSpace([string]$State.health.lastCycleUtc)) { 'never' } else { [string]$State.health.lastCycleUtc }
   $activeInterventions = @($State.interventions | Where-Object { -not (Test-InterventionTerminal ([string]$_.state)) })
   $deliveryUnknown = @($activeInterventions | Where-Object { [string]$_.state -eq 'delivery_unknown' }).Count
   $outboxExhausted = @($State.outbox | Where-Object { [int]$_.attempts -ge $script:OutboxMaxAttempts }).Count
   $backoffUntil = if ([string]::IsNullOrWhiteSpace([string]$State.health.backoffUntilUtc)) { 'none' } else { [string]$State.health.backoffUntilUtc }
-  Write-Output ('CHRONOS HEARTBEATS engine={0} evaluation={1} activeTypes={2} statusMode=prior_state open={3} outboxPending={4} outboxExhausted={5} interventionsActive={6} deliveryUnknown={7} coverageObserved={8} coveragePartial={9} coverageUnsupported={10} coverageByFamily={11} suppressed={12} routesEmitted={13} deliveryAttempts={14} lastCycle={15} durationMs={16} stateStoreMode={17} stateStoreWriteReady={18} stateStoreProtection={19} stateStoreMigration={20} priorStateDisposition={21} priorStateWriteAttempted={22} completedCycles={23} stateChanges={24} acknowledgedEvents={25} failedCycles={26} duplicateRuns={27} runtimeBudgetMs={28} runtimeObservedMs={29} runtimeOverrunMs={30} runtimeOverrunPercent={31} runtimeBaselineMs={32} runtimeClassification={33} runtimeOverrunStreak={34} runtimeBackoffApplied={35} backoffUntil={36} codexHomeSource={37} codexHomeIdentity={38}' -f $engine, $evaluation, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverageCounts.observed, $coverageCounts.partial, $coverageCounts.unsupported, ($coverageLabels -join ','), $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil, $script:CodexHomeSource, $script:CodexHomeIdentity)
+  Write-Output ('CHRONOS HEARTBEATS engine={0} evaluation={1} activeTypes={2} statusMode=prior_state open={3} outboxPending={4} outboxExhausted={5} interventionsActive={6} deliveryUnknown={7} coverageObserved={8} coveragePartial={9} coverageUnsupported={10} coverageByFamily={11} suppressed={12} routesEmitted={13} deliveryAttempts={14} lastCycle={15} durationMs={16} stateStoreMode={17} stateStoreWriteReady={18} stateStoreProtection={19} stateStoreMigration={20} priorStateDisposition={21} priorStateWriteAttempted={22} completedCycles={23} stateChanges={24} acknowledgedEvents={25} failedCycles={26} duplicateRuns={27} runtimeBudgetMs={28} runtimeObservedMs={29} runtimeOverrunMs={30} runtimeOverrunPercent={31} runtimeBaselineMs={32} runtimeClassification={33} runtimeOverrunStreak={34} runtimeBackoffApplied={35} backoffUntil={36} codexHomeSource={37} codexHomeIdentity={38} collectorEpochHash={39} collectorReservedSequence={40} collectorLastAcceptedSequence={41}' -f $engine, $coverage.Evaluation, $script:PublicFamilyCount, $open.Count, @($State.outbox).Count, $outboxExhausted, $activeInterventions.Count, $deliveryUnknown, $coverage.Observed, $coverage.Partial, $coverage.Unsupported, $coverage.Labels, $State.health.suppressedDuplicates, $State.health.routesEmitted, $State.health.deliveryAttempts, $lastCycle, $State.health.lastDurationMs, $script:StateStoreMode, $script:StateStoreWriteReady.ToString().ToLowerInvariant(), $script:StateStoreProtection, $script:StateStoreMigration, $script:PriorStateDisposition, $script:PriorStateWriteAttempted.ToString().ToLowerInvariant(), $State.health.runs, $State.revision, $State.health.acknowledgedEvents, $State.health.failedCycles, $State.health.duplicateRuns, (Format-Number $State.health.runtimeBudgetMs), (Format-Number $State.health.runtimeObservedMs), (Format-Number $State.health.runtimeOverrunMs), (Format-Number $State.health.runtimeOverrunPercent), (Format-Number $State.health.runtimeBaselineMs), $State.health.runtimeClassification, $State.health.runtimeOverrunStreak, ([bool]$State.health.runtimeBackoffApplied).ToString().ToLowerInvariant(), $backoffUntil, $script:CodexHomeSource, $script:CodexHomeIdentity, ([string]$State.health.governorSourceEpochHash).Substring(0, 16), [int64]$State.health.governorSourceSequence, $(if ($null -eq $State.health.lastSourceSequence) { 'none' } else { [string]$State.health.lastSourceSequence }))
   foreach ($condition in @($open | Sort-Object @{Expression={ $script:SeverityRank[[string]$_.severity] };Descending=$true}, lastObserved | Select-Object -First 8)) {
     Write-Output ('CHRONOS HEARTBEAT CONDITION severity={0} type={1} subjectHash={2} route={3} firstObserved={4} lastObserved={5}' -f $condition.severity, $condition.type, ([string]$condition.subjectHash).Substring(0, 16), $condition.routeClass, $condition.firstObserved, $condition.lastObserved)
   }
@@ -2957,7 +2989,7 @@ $acquired = $false
 $state = $null
 $resolved = $null
 try {
-  if ($Action -notin @('cycle', 'status', 'acknowledge', 'intervention-list', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-reclaim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
+  if ($Action -notin @('cycle', 'status', 'collector-reserve', 'acknowledge', 'intervention-list', 'intervention-plan', 'intervention-fail-closed', 'intervention-claim', 'intervention-reclaim', 'intervention-transport', 'intervention-response', 'intervention-verify')) { throw 'heartbeat_action_invalid' }
   $resolved = Resolve-StatePath $StatePath $Scope
   Initialize-StateStore $resolved.Path
   $input = $null
@@ -2986,6 +3018,21 @@ try {
   # mandatory after an abandoned mutex because the prior owner may have died.
   Import-LegacyStateIfPresent $resolved
   $state = Read-State $resolved.Path $resolved.ScopeHash
+  if ($Action -eq 'collector-reserve') {
+    if ([int64]$state.health.governorSourceSequence -ge [int64]::MaxValue) { throw 'heartbeat_collector_sequence_exhausted' }
+    $state.health.governorSourceSequence = [int64]$state.health.governorSourceSequence + 1
+    $state.revision = [int64]$state.revision + 1
+    Write-State $state $resolved.Path
+    $reservation = [ordered]@{
+      ok = $true
+      action = 'collector-reserve'
+      sourceEpoch = [string]$state.health.governorSourceEpochHash
+      sourceSequence = [int64]$state.health.governorSourceSequence
+      lastAcceptedSourceSequence = $state.health.lastSourceSequence
+    }
+    Write-Output ('CHRONOS HEARTBEATS ' + ($reservation | ConvertTo-Json -Compress))
+    exit 0
+  }
   if ($Action -eq 'status') {
     Write-Status $state ([DateTimeOffset]::UtcNow)
     exit 0
@@ -3030,10 +3077,22 @@ try {
   }
   $events = @(Invoke-Cycle $input $state $resolved.Path $evidenceNow $deliveryNow)
   if ($events.Count -gt 0) {
-    $payload = [ordered]@{ ok = $true; eventCount = $events.Count; events = $events }
-    Write-Output ('CHRONOS HEARTBEATS ' + ($payload | ConvertTo-Json -Compress -Depth 10))
     Mark-OutboxAttempts $state @($events | ForEach-Object { [string]$_.EventId }) $resolved.Path $deliveryNow
   }
+  $coverage = Get-CoverageSummary $state
+  $payload = [ordered]@{
+    ok = $true
+    action = 'cycle'
+    acceptedSourceEpochHash = if (Has-Value $input 'sourceEpoch') { (Get-StableHash ([string]$input.sourceEpoch)).Substring(0, 16) } else { $null }
+    acceptedSourceSequence = if (Has-Value $input 'sourceSequence') { [int64]$input.sourceSequence } else { $null }
+    evaluation = [string]$coverage.Evaluation
+    coverageObserved = [int]$coverage.Observed
+    coveragePartial = [int]$coverage.Partial
+    coverageUnsupported = [int]$coverage.Unsupported
+    eventCount = $events.Count
+    events = $events
+  }
+  Write-Output ('CHRONOS HEARTBEATS ' + ($payload | ConvertTo-Json -Compress -Depth 10))
   exit 0
 } catch {
   $code = [string]$_.Exception.Message

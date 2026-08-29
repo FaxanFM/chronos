@@ -10,8 +10,11 @@ description: Fully set up Chronos supervision and Heartbeats in one local Govern
 Run this lightweight check once when Chronos is first used in a task:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action install-status
+& "<skill-root>\scripts\chronos.cmd" -Action install-status
 ```
+
+The launcher is not guaranteed to be on `PATH`. Invoke every Chronos command by
+the installed skill-root path shown here.
 
 `sourceObservation=cache_inventory_not_enabled_state` means the result shows
 valid cached package sources; cache presence alone does not prove that a source
@@ -116,12 +119,16 @@ one repeat the installation-scoped host convergence check; normal cycles do not 
 automations.
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action supervise -SupervisionAction status
+& "<skill-root>\scripts\chronos.cmd" -Action supervise -SupervisionAction status
 ```
 
 Only the Governor task runs `-SupervisionAction initialize`, `cycle`,
 `reconcile-host`, and `discover`. Every Governor recurrence must use `cycle`
-with one fresh complete host inventory. Schema v1 requires the Governor in the
+with one fresh, host-proven complete inventory. A capped task list without an
+explicit completeness result or terminal cursor is incomplete; write
+`complete=false`, use `reconcile-host` only, and fail closed for recurrence
+creation, absence-based closure, and task sends. Preserve `notLoaded`; native
+normalization treats it as unknown, not live or ended. Schema v1 requires the Governor in the
 raw list. Schema v2 may declare `callerVisibility=excluded_by_host`, omit only
 the current Governor, and let the same cycle account for that registry-verified
 caller without a second host query. Passive `discover` does not increment
@@ -147,8 +154,10 @@ starts another task. The Codex-host Governor may use `send_message_to_thread`
 for one fixed-template intervention after it verifies exactly one live affected
 task. It never broadcasts or gives monitored tasks a recurrence. The host supplies collector coverage
 and chooses when to invoke the action. The engine enforces its registered
-minimum cadence for each observed family. Supply a stable
-`sourceEpoch` and increasing `sourceSequence`; without continuity proof, Chronos
+minimum cadence for each observed family. First run `-HeartbeatCollectorAction
+reserve`, then copy its native, restart-persistent `sourceEpoch` and
+`sourceSequence` into one snapshot. Never invent or locally increment them;
+without continuity proof, Chronos
 can open a condition but will not resolve one. Governor-generated snapshots use
 schema v2 and include all eight public family coverage labels. Every accepted
 schema-v2 snapshot advances the source watermark before family cadence is
@@ -156,7 +165,7 @@ checked, including partial, unsupported, and cadence-skipped snapshots. Host inv
 the liveness authority, but it is not a substitute for this collector snapshot.
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
+& "<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
 ```
 
 Use `-HeartbeatStatePath` only for controlled test or host-managed state. The
@@ -208,7 +217,7 @@ Before running Chronos, resolve `<skill-root>` to the directory containing this 
 Inspect only when lag is reported, before extending an already long-running session, or when long-running parallel work finishes:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action inspect
+& "<skill-root>\scripts\chronos.cmd" -Action inspect
 ```
 
 Return only the compact `CHRONOS` summary unless details are requested. Do not paste raw process tables into the conversation.
@@ -426,7 +435,7 @@ Older Chronos versions exposed `plan` and `cleanup` actions. They remain
 accepted for command compatibility, but they are advisory-only:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action plan
+& "<skill-root>\scripts\chronos.cmd" -Action plan
 ```
 
 `plan` reports only a candidate count. `cleanup`, including `cleanup -Force`,

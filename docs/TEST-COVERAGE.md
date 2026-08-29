@@ -70,7 +70,7 @@ counter rollback, missing-entity and missing-source non-resolution, same-run
 outbox retry, replayed-evidence wall-clock retry, acknowledgement,
 reparse-point containment, out-of-order
 timestamps, due replay after a newer evidence cycle, compact Inspector-field
-adaptation, persisted-state privacy, legacy-to-schema-7 migration, denied
+adaptation, persisted-state privacy, legacy-to-schema-8 migration, denied
 prior-state recovery when the Windows host enforces the simulated ACL even when
 an older LocalAppData fallback is readable, prior-scope junction rejection,
 read-only import when the ACL denial is not enforced, explicit no-prior-write

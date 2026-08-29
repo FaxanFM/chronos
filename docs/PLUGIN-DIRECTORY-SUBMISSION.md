@@ -47,7 +47,7 @@ validates, receipts, merges, and removes each accepted event. The Governor
 assignment, result, verification, lifecycle, and exclusion contracts are
 self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`accb552dbe12835daf7f0396cfe4ca16cce501f1b03631c93f2461cb6fcb5f6f`.
+`ad54bd26803837f8c6997c086ad7bbe505e72856b1bc9dffd1ee9fe3fe13f699`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

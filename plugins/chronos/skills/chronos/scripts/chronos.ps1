@@ -11,6 +11,8 @@ param(
   [switch]$HeartbeatInspectorAuthorized,
   [string]$HeartbeatStatePath,
   [string]$HeartbeatScope,
+  [ValidateSet("", "reserve")]
+  [string]$HeartbeatCollectorAction = "",
   [string]$HeartbeatAcknowledgeEventId,
   [string]$HeartbeatEventId,
   [string]$HeartbeatCorroboratingEventId,
@@ -53,9 +55,13 @@ if ($Action -eq 'heartbeat') {
   $heartbeatScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
   if (-not (Test-Path -LiteralPath $heartbeatScript)) { throw 'heartbeat_module_missing' }
   if ($HeartbeatInterventionAction -and $HeartbeatAcknowledgeEventId) { throw 'heartbeat_arguments_conflict' }
+  if ($HeartbeatCollectorAction -and ($HeartbeatInterventionAction -or $HeartbeatAcknowledgeEventId -or $HeartbeatInputPath -or $HeartbeatInspectorOutputPath)) { throw 'heartbeat_arguments_conflict' }
   $heartbeatCommon = @{ Scope = $HeartbeatScope }
   if ($PSBoundParameters.ContainsKey('CodexHome')) { $heartbeatCommon.CodexHome = $CodexHome }
-  if ($HeartbeatInterventionAction) {
+  if ($HeartbeatCollectorAction -eq 'reserve') {
+    if ($HeartbeatStatePath) { & $heartbeatScript @heartbeatCommon -Action collector-reserve -StatePath $HeartbeatStatePath }
+    else { & $heartbeatScript @heartbeatCommon -Action collector-reserve }
+  } elseif ($HeartbeatInterventionAction) {
     $heartbeatArguments = @{
       Action = 'intervention-' + $HeartbeatInterventionAction
       Scope = $HeartbeatScope

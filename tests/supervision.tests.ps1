@@ -869,6 +869,16 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $hostClose = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
   Assert-True ($hostClose.hostTasksEnded -eq 1 -and $hostClose.activeTasks -eq 0) 'Complete host inventory did not close an absent task.'
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
+    tasks = @(
+      [ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' },
+      [ordered]@{ id = 'thread-host-not-loaded'; status = 'notLoaded'; generation = $null }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $unknownHost = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
+  Assert-True ($unknownHost.hostTasksUnknown -eq 1 -and $unknownHost.hostTasksAdded -eq 0 -and $unknownHost.activeTasks -eq 0) '`notLoaded` was not preserved as a non-live, non-creating unknown state.'
+  Assert-True (@($unknownHost.hostTaskStatuses | Where-Object status -eq 'unknown').Count -eq 1) 'Unknown host status was not explicit in compact output.'
   [IO.File]::WriteAllText($hostInventoryPath, '{"schemaVersion":1,"capturedAtUtc":"2000-01-01T00:00:00Z","complete":true,"tasks":[]}', [Text.UTF8Encoding]::new($false))
   $staleInventory = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
   Assert-True (-not $staleInventory.ok -and $staleInventory.error -eq 'supervision_host_inventory_invalid') 'Stale host inventory did not fail closed.'
@@ -903,6 +913,12 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $callerVisibilityMismatch = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $callerExcludedInventory)
   Assert-True (-not $callerVisibilityMismatch.ok -and $callerVisibilityMismatch.error -eq 'supervision_host_inventory_invalid') 'A caller-visibility contradiction advanced the cycle.'
+  [IO.File]::WriteAllText($callerExcludedInventory, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true; callerVisibility = 'included'
+    tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = $null })
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $schemaOneCallerVisibility = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $callerExcludedInventory)
+  Assert-True (-not $schemaOneCallerVisibility.ok -and $schemaOneCallerVisibility.error -eq 'supervision_host_inventory_invalid') 'Schema-v1 validation accepted a schema-v2 callerVisibility field.'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $false
     tasks = @([ordered]@{ id = $cycleGovernor; status = 'running'; generation = 'cycle-governor-generation' })
@@ -922,6 +938,9 @@ try {
   Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'A verified complete inventory cycle did not authorize the one Governor recurrence.'
   Assert-True (@($cycle.hostTaskStatuses).Count -eq 3 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'ended').Count -eq 1) 'The cycle did not return one normalized status per host task.'
   Assert-True (($cycle.hostTaskStatuses | ConvertTo-Json -Compress) -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Compact host statuses exposed a raw task ID or generation.'
+  $cycleJson = $cycle | ConvertTo-Json -Compress -Depth 8
+  Assert-True ($cycle.resultShape -eq 'compact_hash_only' -and $cycleJson -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Cycle output was not compact and privacy-safe.'
+  Assert-True ($cycle.PSObject.Properties.Name -notcontains 'governorTaskId' -and $cycle.PSObject.Properties.Name -notcontains 'tasks' -and $cycle.PSObject.Properties.Name -notcontains 'agents' -and $cycle.PSObject.Properties.Name -notcontains 'changes') 'Cycle output retained a raw or unbounded registry array.'
   Assert-True ($cycle.taskWakePolicy -eq 'intervention_claim_required' -and $cycle.routineUserAction -eq 'none') 'A normal cycle did not prohibit unclaimed task wakes.'
 
   $monotonicState = Join-Path $root 'host-monotonic.json'
@@ -1221,9 +1240,11 @@ try {
   [void](Invoke-Hook $fairState @{ session_id = $fairGovernor; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-luna' })
   [void](Invoke-Supervision $fairState 'initialize' $fairGovernor)
   $expectedFairIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  $expectedFairHashes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
   for ($index = 1; $index -le 17; $index++) {
     $fairId = 'thread-fair-{0:d2}' -f $index
     [void]$expectedFairIds.Add($fairId)
+    [void]$expectedFairHashes.Add((Get-TestHash $fairId).Substring(0, 16))
     [void](Invoke-Hook $fairState @{ session_id = $fairId; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
   }
   $seenFairIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -1238,9 +1259,9 @@ try {
     } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
     $fair = Get-Payload (Invoke-Supervision -State $fairState -Action 'cycle' -Session $fairGovernor -HostInventory $hostInventoryPath)
     Assert-True (@($fair.checkBatch).Count -le 8) 'Governor check batch exceeded the bounded size.'
-    foreach ($entry in @($fair.checkBatch)) { [void]$seenFairIds.Add([string]$entry.taskId) }
+    foreach ($entry in @($fair.checkBatch)) { [void]$seenFairIds.Add([string]$entry.idHash) }
   }
-  Assert-True ($seenFairIds.Count -eq 17) 'Rotating batches did not cover all 17 active tasks in three cycles.'
+  Assert-True ($seenFairIds.Count -eq 17 -and @($seenFairIds | Where-Object { -not $expectedFairHashes.Contains($_) }).Count -eq 0) 'Rotating hash-only batches did not cover all 17 active tasks in three cycles.'
 
   $capacityState = Join-Path $root 'capacity.json'
   Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue

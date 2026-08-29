@@ -160,8 +160,11 @@ Directory package does not remove the Git source or rewrite an already loaded
 task catalog. Check the bounded cache inventory with:
 
 ```powershell
-chronos.cmd -Action install-status
+$chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
+& $chronos -Action install-status
 ```
+
+The launcher is not guaranteed to be on `PATH`; keep using this rooted path.
 
 When Chronos confirms that the Directory package is running and the legacy Git
 source remains enabled, remove
@@ -196,7 +199,7 @@ reuse a claimed Governor after the same check, or create one fresh task without
 inherited history. Do not automatically fork a working task. Elect one contender,
 fence current-key recurrences to zero, initialize, require readable status and a
 complete Governor-bearing inventory, then reconcile one current-key automation.
-Use `chronos.cmd -Action supervise -SupervisionAction status` for compact registry
+Use `& $chronos -Action supervise -SupervisionAction status` for compact registry
 health.
 
 `supervision_governor_conflict` means another record owns the role. It enters the
@@ -271,7 +274,7 @@ Chronos emits only to the Governor inbox. `Owner` and `Subject` are routing
 evidence, not authority. The Governor can use the host task transport for one
 fixed-template intervention to one exact verified affected task.
 
-Run `chronos.cmd -Action heartbeat` without an input path to inspect compact
+Run `& $chronos -Action heartbeat` without an input path to inspect compact
 Heartbeat health. `outboxPending` counts transitions that the host has not yet
 acknowledged. `outboxExhausted` counts records that used the initial attempt and
 one retry. Deduplicate each event by `EventId`. Use `plan` or `fail-closed` for

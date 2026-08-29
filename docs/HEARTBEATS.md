@@ -50,19 +50,36 @@ price, quota impact, or efficiency from a model name.
 Run a normalized cycle:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json
+$chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
+& $chronos -Action heartbeat -HeartbeatInputPath snapshot.json
 ```
+
+`chronos.cmd` is not guaranteed to be on `PATH`. Use the rooted installed
+launcher. A successful cycle always returns a compact JSON receipt containing
+the accepted epoch hash and sequence, evaluation, coverage counts, and any
+events, including when the event count is zero.
+
+Reserve the next installation-scoped collector watermark before writing a
+schema-v2 snapshot:
+
+```powershell
+& $chronos -Action heartbeat -HeartbeatCollectorAction reserve
+```
+
+Use the returned `sourceEpoch` and `sourceSequence` exactly once. Reservation is
+mutex-protected and persists across Governor restarts. Sequence gaps from an
+abandoned reservation are valid; reuse or local sequence invention is not.
 
 Add a captured compact Inspector result when available:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt -HeartbeatInspectorAuthorized
+& $chronos -Action heartbeat -HeartbeatInputPath snapshot.json -HeartbeatInspectorOutputPath inspector.txt -HeartbeatInspectorAuthorized
 ```
 
 Show local Heartbeat status without running a collector:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat
+& $chronos -Action heartbeat
 ```
 
 This command reads prior state. It does not evaluate the eight families. A new
@@ -77,7 +94,7 @@ After the host successfully deduplicates and delivers an event, acknowledge its
 stable `EventId`:
 
 ```powershell
-"<skill-root>\scripts\chronos.cmd" -Action heartbeat -HeartbeatAcknowledgeEventId <sha256-event-id>
+& $chronos -Action heartbeat -HeartbeatAcknowledgeEventId <sha256-event-id>
 ```
 
 The authorization flag records the Governor's policy decision. Use it only after
@@ -142,8 +159,8 @@ input paths fail closed.
 | --- | --- | --- |
 | `schemaVersion` | integer | `2` is the current Governor contract. It requires timestamp, epoch, sequence, and all eight coverage labels. Schema `1` remains a compatibility input. |
 | `capturedAtUtc` | ISO 8601 string | Collector timestamp. Out-of-order evidence is not evaluated and cannot block a due outbox retry. |
-| `sourceEpoch` | opaque ID | Stable collector-process or source epoch. Required to prove continuity for resolution. |
-| `sourceSequence` | integer | Monotonic sequence within `sourceEpoch`. Every accepted schema-v2 snapshot advances the source-level high-water mark before family cadence is checked. Reuse or rollback fails closed. |
+| `sourceEpoch` | opaque ID | Stable native Governor collector epoch returned by `-HeartbeatCollectorAction reserve`. Required to prove continuity for resolution. |
+| `sourceSequence` | integer | Monotonic sequence reserved by the native Heartbeat state within `sourceEpoch`. Every accepted schema-v2 snapshot advances the source-level high-water mark before family cadence is checked. Reuse or rollback fails closed. |
 | `runId` | opaque ID | Optional. Repeated IDs are suppressed across processes. |
 | `origin` | enum | `host`, `inspector`, `test`, `heartbeat`, or `heartbeat_notification`. Heartbeat-generated origins are ignored. |
 | `collectorCoverage` | object | Per-family `observed`, `partial`, or `unsupported` labels. |
@@ -237,8 +254,8 @@ events count as progress even when the repository did not change. Missing or
 non-comparable Governor counters remain unsupported instead of producing a
 false high-usage diagnosis.
 
-The Governor obtains those counters from compact `chronos.cmd -Action
-heartbeat` status: `completedCycles`, `stateChanges`, `acknowledgedEvents`,
+The Governor obtains those counters from compact `& $chronos -Action heartbeat`
+status: `completedCycles`, `stateChanges`, `acknowledgedEvents`,
 `failedCycles`, and `duplicateRuns`. It copies them exactly into the normalized
 usage record and combines them with the current compact Inspector usage fields.
 It does not maintain a separate counter ledger or substitute zero for a missing
@@ -452,7 +469,7 @@ intervention version, target hash, and target-generation hash.
 List recoverable work after a Governor restart:
 
 ```powershell
-chronos.cmd -Action heartbeat -HeartbeatInterventionAction list `
+& $chronos -Action heartbeat -HeartbeatInterventionAction list `
   -HeartbeatGovernorId <governor-task-id>
 ```
 
@@ -470,7 +487,7 @@ A legacy claimed send becomes visible `delivery_unknown` and is never retried.
 Plan an event:
 
 ```powershell
-chronos.cmd -Action heartbeat -HeartbeatInterventionAction plan `
+& $chronos -Action heartbeat -HeartbeatInterventionAction plan `
   -HeartbeatEventId <event-id> -HeartbeatTargetId <live-task-id> `
   -HeartbeatTargetGeneration <host-generation> `
   -HeartbeatGovernorId <governor-task-id>
@@ -484,7 +501,7 @@ Claim only after all events for the cycle are planned and the target is checked
 again:
 
 ```powershell
-chronos.cmd -Action heartbeat -HeartbeatInterventionAction claim `
+& $chronos -Action heartbeat -HeartbeatInterventionAction claim `
   -HeartbeatInterventionId <intervention-id> `
   -HeartbeatInterventionVersion <version> `
   -HeartbeatTargetId <live-task-id> `

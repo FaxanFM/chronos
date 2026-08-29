@@ -70,6 +70,13 @@ function Get-TestStableHash {
   finally { $sha.Dispose() }
 }
 
+function Get-TestTextHash {
+  param([string]$Value)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
+}
+
 function New-Case {
   param([string]$Name)
   $path = Join-Path $root $Name
@@ -215,7 +222,14 @@ function Get-InterventionPayload {
 function Assert-Silent {
   param($Result, [string]$Message)
   Assert-Equal $Result.ExitCode 0 ($Message + ' exit code.')
-  Assert-True ([string]::IsNullOrWhiteSpace($Result.Text)) ($Message + " Expected no output, got: $($Result.Text)")
+  $payload = Get-Payload $Result
+  Assert-Equal $payload.action 'cycle' ($Message + ' action.')
+  Assert-Equal $payload.eventCount 0 ($Message + ' event count.')
+  Assert-True ($payload.evaluation -in @('observed', 'partial', 'unsupported')) ($Message + ' omitted normalized evaluation.')
+  Assert-Equal ([int]$payload.coverageObserved + [int]$payload.coveragePartial + [int]$payload.coverageUnsupported) 8 ($Message + ' coverage count.')
+  if ($null -ne $payload.acceptedSourceSequence) {
+    Assert-True ([int64]$payload.acceptedSourceSequence -ge 0 -and [string]$payload.acceptedSourceEpochHash -match '^[a-f0-9]{16}$') ($Message + ' omitted the accepted source watermark.')
+  }
 }
 
 function Assert-FailedSafely {
@@ -327,6 +341,18 @@ try {
   )) {
     Assert-True ($compactGovernorSkill.Contains($required)) "Governor autonomy contract omitted: $required"
   }
+
+  # Native Governor collector reservations survive separate PowerShell processes.
+  $reservationCase = New-Case 'collector-reservation'
+  $reserve1Output = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatCollectorAction reserve -HeartbeatStatePath $reservationCase.State 2>&1)
+  $reserve1 = Get-Payload ([pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $reserve1Output; Text = ($reserve1Output -join "`n") })
+  $reserve2Output = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatCollectorAction reserve -HeartbeatStatePath $reservationCase.State 2>&1)
+  $reserve2 = Get-Payload ([pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $reserve2Output; Text = ($reserve2Output -join "`n") })
+  Assert-True ($reserve1.action -eq 'collector-reserve' -and $reserve1.sourceEpoch -match '^[a-f0-9]{64}$' -and $reserve1.sourceSequence -eq 1) 'First native collector reservation was invalid.'
+  Assert-True ($reserve2.sourceEpoch -eq $reserve1.sourceEpoch -and $reserve2.sourceSequence -eq 2) 'Collector watermark did not persist across processes.'
+  $reservedCycle = Invoke-Heartbeat $reservationCase @{ schemaVersion = 2; sourceEpoch = $reserve1.sourceEpoch; sourceSequence = $reserve1.sourceSequence; collectorCoverage = (Get-StrictCoverage @{ tasks = 'partial' }); tasks = @(@{ id = 'reserved-live-task'; status = 'active' }) }
+  $reservedReceipt = Get-Payload $reservedCycle
+  Assert-True ($reservedReceipt.action -eq 'cycle' -and $reservedReceipt.acceptedSourceSequence -eq 1 -and $reservedReceipt.acceptedSourceEpochHash -eq (Get-TestStableHash $reserve1.sourceEpoch).Substring(0, 16)) 'Cycle receipt did not confirm its accepted native reservation.'
 
   # Agent stall: baseline, transition, dedupe, escalation, coverage, resolution, and canonical worker IDs.
   $case = New-Case 'agent'
@@ -707,7 +733,7 @@ try {
     $process.Dispose()
   }
   Assert-Equal ([regex]::Matches($raceText, 'AGENT_STALL').Count) 1 'Concurrent cycles must emit one stall event.'
-  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 7) 'Concurrent cycles corrupted state.'
+  Assert-True ((Get-Content -Raw $race.State | ConvertFrom-Json).schema -eq 8) 'Concurrent cycles corrupted state.'
 
   $busy = New-Case 'cycle-busy'
   $busyInput = Join-Path $busy.Path 'busy.json'
@@ -1009,7 +1035,7 @@ try {
   [IO.File]::WriteAllText($migration.State, ($legacyState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   Assert-Silent (Invoke-Heartbeat $migration @{ agents = @() }) 'Schema 4 migration cycle.'
   $migratedState = Get-Content -Raw $migration.State | ConvertFrom-Json
-  Assert-Equal $migratedState.schema 7 'Schema 4 state did not migrate to schema 7.'
+  Assert-Equal $migratedState.schema 8 'Schema 4 state did not migrate to schema 8.'
   Assert-True ($migratedState.health.acknowledgedEvents -eq 0 -and $migratedState.health.failedCycles -eq 0) 'Schema 4 migration omitted Governor progress counters.'
 
   $schemaFive = New-Case 'schema-five-migration'
@@ -1020,7 +1046,7 @@ try {
   $schemaFiveState.health.PSObject.Properties.Remove('failedCycles')
   [IO.File]::WriteAllText($schemaFive.State, ($schemaFiveState | ConvertTo-Json -Compress -Depth 16), [Text.UTF8Encoding]::new($false))
   Assert-Silent (Invoke-Heartbeat $schemaFive @{ agents = @() }) 'Schema 6 migration cycle.'
-  Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 7 'Schema 6 state did not migrate to schema 7.'
+  Assert-Equal (Get-Content -Raw $schemaFive.State | ConvertFrom-Json).schema 8 'Schema 6 state did not migrate to schema 8.'
 
   $legacyQueued = New-Case 'schema-six-queued-intervention'
   $legacyQueuedCycle = Invoke-Heartbeat $legacyQueued @{ tasks = @(@{ id = 'legacy-queued-target'; owner = 'legacy-queued-target'; status = 'todo'; dependencyStatus = 'unknown'; ageHours = 48; assigned = $false }) } -NoAcknowledge
@@ -1053,7 +1079,7 @@ try {
   Assert-Equal $legacyClaimedList.count 1 'A schema-6 claimed intervention disappeared during migration.'
   Assert-Equal $legacyClaimedList.interventions[0].state 'delivery_unknown' 'A legacy claimed send was incorrectly made retryable.'
   Assert-Equal $legacyClaimedList.interventions[0].permittedNextAction 'reconcile_delivery_without_retry' 'A legacy ambiguous delivery did not remain visible for reconciliation.'
-  Assert-Equal (Get-Content -Raw $legacyClaimed.State | ConvertFrom-Json).schema 7 'Intervention-list did not persist schema-6 migration.'
+  Assert-Equal (Get-Content -Raw $legacyClaimed.State | ConvertFrom-Json).schema 8 'Intervention-list did not persist schema-6 migration.'
 
   $legacyUsage = New-Case 'legacy-usage-migration'
   Assert-Silent (Invoke-Heartbeat $legacyUsage @{ usage = @{ owner = 'governor'; role = 'governor'; dominantThread = 'legacy-usage-task'; totalTokens = 10000; ratePerMinute = 5000; baselineRatePerMinute = 5000; meaningfulProgress = $false; progressHash = 'same'; completedCycles = 1; stateChanges = 0; acknowledgedEvents = 0; failedCycles = 0; duplicateRuns = 0 } }) 'Legacy usage baseline.'
@@ -1138,7 +1164,7 @@ try {
     Assert-True ($defaultUpgradeStatus.Text -match 'stateStoreMigration=prior_v2_default_state_imported') 'Default v0.8.6 namespace was not discovered.'
     Assert-True (Test-Path -LiteralPath $currentDefaultState -PathType Leaf) 'Stable default state was not created.'
     Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).scopeHash $currentDefaultHash 'Imported state did not rebind only in the new namespace.'
-    Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).schema 7 'Imported state was not upgraded in the destination.'
+    Assert-Equal (Get-Content -Raw $currentDefaultState | ConvertFrom-Json).schema 8 'Imported state was not upgraded in the destination.'
     Assert-Equal (Get-Content -Raw $priorDefaultState | ConvertFrom-Json).schema 6 'Prior state was upgraded in place.'
     Assert-Equal (Get-FileHash -LiteralPath $priorDefaultState -Algorithm SHA256).Hash $priorDefaultHashBefore 'Prior state content changed during import.'
     Assert-Equal (Get-Item -LiteralPath $priorDefaultState).LastWriteTimeUtc $priorDefaultTimestampBefore 'Prior state timestamp changed during import.'
@@ -1186,7 +1212,7 @@ try {
     Assert-Equal $homeACycle.ExitCode 0 'Heartbeat rejected a valid CODEX_HOME environment.'
     Assert-True (Test-Path -LiteralPath $heartbeatHomeAState -PathType Leaf) 'Heartbeat did not persist beneath the CODEX_HOME-derived scope.'
     $homeAStatus = Invoke-RawModule @('-Action', 'status')
-    $homeAIdentityToken = (Get-TestStableHash $heartbeatHomeAIdentity).Substring(0, 16)
+    $homeAIdentityToken = (Get-TestTextHash $heartbeatHomeAIdentity).Substring(0, 16)
     Assert-True ($homeAStatus.Text -match ('codexHomeSource=environment') -and $homeAStatus.Text -match ('codexHomeIdentity=' + $homeAIdentityToken)) 'Heartbeat did not report its privacy-safe CODEX_HOME identity.'
 
     $env:HOME = $heartbeatSandboxB
