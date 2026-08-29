@@ -2,6 +2,16 @@
 
 ## v0.9.2
 
+- Add a non-claiming host-inventory capability preflight before Governor task
+  creation, contender convergence, registry claim, or recurrence mutation.
+- Treat a capped task-list surface without an explicit completeness flag,
+  terminal cursor pagination under one stable snapshot identity, or a fully
+  enumerated total count under one stable snapshot identity as
+  `host_inventory_completeness_unsupported`.
+- Keep unsupported bootstrap terminal and compact: zero current-key
+  recurrences, no fabricated partial reconciliation, no Governor claim, and no
+  scheduled retry until the host contract changes. Retain `reconcile-host` only
+  for bounded diagnostic use with an independently supplied partial inventory.
 - Mitigate one Windows lifecycle-hook non-execution path caused by Codex
   wrapping commands that contain embedded quotes at its `cmd.exe /C` boundary.
 - Replace every Windows hook command with one constant quote-free

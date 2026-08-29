@@ -1,9 +1,11 @@
 param(
-  [ValidateSet('hook', 'status', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'cycle', 'release')]
+  [ValidateSet('hook', 'status', 'preflight', 'initialize', 'confirm-active', 'reconcile-host', 'discover', 'cycle', 'release')]
   [string]$Action = 'status',
   [string]$StatePath,
   [string]$CodexHome,
   [string]$HostInventoryPath,
+  [ValidateSet('unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+  [string]$HostInventoryCompleteness = 'unsupported',
   [string]$SessionId = $env:CODEX_THREAD_ID,
   [string]$SubjectId,
   [string]$ObservedAtUtc,
@@ -1740,6 +1742,9 @@ try {
       workerModelTurns = 0
       recurrenceEligible = ($null -ne $state.governor -and [long]$state.governor.cycleCount -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$state.governor.lastCycleUtc))
       recurrenceCreationPolicy = 'after_successful_complete_host_inventory_cycle'
+      hostInventoryCapabilityPreflightRequired = $true
+      hostInventoryCompletenessRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      hostInventoryUnsupportedError = 'host_inventory_completeness_unsupported'
       recommendedGovernorModel = 'gpt-5.6-terra'
       recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
@@ -1751,9 +1756,53 @@ try {
     exit 0
   }
 
+  if ($Action -eq 'preflight') {
+    $supported = $HostInventoryCompleteness -in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')
+    if (-not $supported) {
+      Write-SafeOutput ([ordered]@{
+        ok = $false
+        error = 'host_inventory_completeness_unsupported'
+        action = 'preflight'
+        governorClaimed = ($null -ne $state.governor)
+        recurrenceEligible = $false
+        hostInventoryCompleteness = 'unsupported'
+        requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
+        retryPolicy = 'none_until_host_contract_changes'
+        inventoryReconcile = 'skipped'
+        supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      })
+      exit 0
+    }
+    Write-SafeOutput ([ordered]@{
+      ok = $true
+      action = 'preflight'
+      governorClaimed = ($null -ne $state.governor)
+      recurrenceEligible = $false
+      hostInventoryCompleteness = $HostInventoryCompleteness
+      requiredHostAction = 'continue_bootstrap_without_claim'
+      supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+    })
+    exit 0
+  }
+
   $current = Normalize-OpaqueId $SessionId
   $currentHash = Get-TextHash $current
   if ($Action -eq 'initialize') {
+    if ($HostInventoryCompleteness -eq 'unsupported') {
+      Write-SafeOutput ([ordered]@{
+        ok = $false
+        error = 'host_inventory_completeness_unsupported'
+        action = 'initialize'
+        governorClaimed = ($null -ne $state.governor)
+        recurrenceEligible = $false
+        hostInventoryCompleteness = 'unsupported'
+        requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
+        retryPolicy = 'none_until_host_contract_changes'
+        inventoryReconcile = 'skipped'
+        supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      })
+      exit 0
+    }
     $sameGovernor = $null -ne $state.governor -and [string]$state.governor.idHash -eq $currentHash
     if ($null -ne $state.governor -and [string]$state.governor.idHash -ne $currentHash) {
       if (-not $Force) { throw 'supervision_governor_conflict' }

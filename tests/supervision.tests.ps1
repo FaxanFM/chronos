@@ -65,6 +65,8 @@ function Invoke-Supervision {
     [long]$SinceRevision = 0,
     [string]$Subject = '',
     [string]$HostInventory = '',
+    [ValidateSet('', 'unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+    [string]$HostInventoryCompleteness = '',
     [switch]$ConfirmRecurrenceStopped,
     [switch]$Force
   )
@@ -76,6 +78,8 @@ function Invoke-Supervision {
   if ($Session) { $arguments += @('-SupervisionSessionId', $Session) }
   if ($Subject) { $arguments += @('-SupervisionSubjectId', $Subject) }
   if ($HostInventory) { $arguments += @('-SupervisionHostInventoryPath', $HostInventory) }
+  if (-not $HostInventoryCompleteness -and $Action -eq 'initialize') { $HostInventoryCompleteness = 'complete_flag' }
+  if ($HostInventoryCompleteness) { $arguments += @('-SupervisionHostInventoryCompleteness', $HostInventoryCompleteness) }
   if ($ConfirmRecurrenceStopped) { $arguments += '-SupervisionConfirmRecurrenceStopped' }
   if ($Force) { $arguments += '-Force' }
   $output = @(& powershell.exe @arguments 2>&1)
@@ -216,6 +220,7 @@ function Invoke-SupervisionInTempRoot {
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
+  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag' }
   if ($State) { $info.Arguments += ' -SupervisionStatePath "{0}"' -f $State }
   if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
@@ -256,6 +261,7 @@ function Start-SupervisionInTempRoot {
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
+  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag' }
   if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
@@ -839,6 +845,22 @@ try {
   $otherState = Join-Path $otherStateDirectory 'registry.json'
   $otherEmptyData = Get-Payload (Invoke-Supervision $otherState)
   Assert-True ($otherEmptyData.hostEquivalenceKey -ne $emptyData.hostEquivalenceKey) 'Independent installation roots shared a Governor equivalence key.'
+
+  $capabilityState = Join-Path $root 'host-capability-registry.json'
+  $unsupportedPreflight = Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness 'unsupported'
+  $unsupportedPreflightData = Get-Payload $unsupportedPreflight
+  Assert-True ($unsupportedPreflight.ExitCode -eq 0 -and -not $unsupportedPreflightData.ok -and $unsupportedPreflightData.error -eq 'host_inventory_completeness_unsupported') 'Unsupported host completeness did not return the exact compact integration blocker.'
+  Assert-True (-not $unsupportedPreflightData.governorClaimed -and -not $unsupportedPreflightData.recurrenceEligible -and $unsupportedPreflightData.inventoryReconcile -eq 'skipped') 'Unsupported host completeness mutated or authorized Governor bootstrap state.'
+  Assert-True ($unsupportedPreflightData.requiredHostAction -eq 'pause_current_key_recurrences_verify_zero_then_stop' -and $unsupportedPreflightData.retryPolicy -eq 'none_until_host_contract_changes') 'Unsupported host completeness did not require a zero-recurrence terminal setup result.'
+  $unsupportedInitialize = Invoke-Supervision -State $capabilityState -Action 'initialize' -Session 'unsupported-governor' -HostInventoryCompleteness 'unsupported'
+  $unsupportedInitializeData = Get-Payload $unsupportedInitialize
+  Assert-True (-not $unsupportedInitializeData.ok -and $unsupportedInitializeData.error -eq 'host_inventory_completeness_unsupported' -and -not $unsupportedInitializeData.governorClaimed) 'Initialize claimed a Governor without a supported host inventory contract.'
+  $capabilityStatus = Get-Payload (Invoke-Supervision $capabilityState)
+  Assert-True (-not $capabilityStatus.governorClaimed -and $capabilityStatus.hostInventoryCapabilityPreflightRequired -and $capabilityStatus.hostInventoryUnsupportedError -eq 'host_inventory_completeness_unsupported') 'Capability preflight failure left an active-but-unschedulable Governor claim.'
+  foreach ($supportedCompleteness in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
+    $supportedPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness)
+    Assert-True ($supportedPreflight.ok -and $supportedPreflight.hostInventoryCompleteness -eq $supportedCompleteness -and -not $supportedPreflight.governorClaimed) "Supported host completeness mode $supportedCompleteness did not remain a non-claiming preflight."
+  }
 
   $hostState = Join-Path $root 'host-reconcile-registry.json'
   $hostGovernor = 'thread-host-governor'

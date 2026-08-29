@@ -23,8 +23,19 @@ fresh Governor or pauses after 336 cycles or 14 days, whichever comes first.
 Codex requires a one-time review before a non-managed plugin hook can run. Use
 `/hooks` to inspect and trust the exact Chronos lifecycle definition. Chronos
 does not bypass this review. If hooks remain disabled or untrusted, the
-Governor uses one compact host inventory as the deterministic fallback. It
+Governor uses one compact complete host inventory as the deterministic fallback
+only when capability preflight proves that the host can enumerate it. It
 does not ask the user to register tasks or relay routine findings.
+
+Automatic setup requires an authoritative host inventory contract before it
+creates or claims a Governor. The host must expose an explicit completeness
+flag, terminal cursor pagination under one stable snapshot identity, or a total
+count that can be fully enumerated under one stable snapshot identity. A capped
+`list_threads` response with none of those fields is not a usable bootstrap
+inventory. Chronos returns `host_inventory_completeness_unsupported`, leaves
+zero active current-key recurrences, skips partial reconciliation, and does not
+retry until the host contract changes. This is an expected integration blocker,
+not a healthy or partially completed setup.
 
 The `/hooks` installed, active, and trusted labels describe host configuration.
 They do not prove that Windows launched the command. Native status reports
@@ -34,9 +45,9 @@ inventory as the liveness authority. Hooks are an optional accelerator, not an
 autonomy dependency. Current Windows Codex surfaces can show trusted hooks
 without dispatching them, and `codex exec` can omit hook dispatch. A release
 canary must record observed execution when the host provides it. When it does
-not, the canary must identify the host limitation and prove that one complete
-host inventory still discovers every live task without user registration,
-routine wakes, or worker model turns.
+not, the canary must identify the host limitation. Complete-inventory fallback
+is valid only when the host also exposes the required completeness contract;
+otherwise setup returns the explicit capability blocker.
 
 Setup is complete only after Codex reports the active source, native status,
 one live dedicated Governor, one active matching Governor recurrence, readable
@@ -92,11 +103,16 @@ complete host inventory remains authoritative if intake cannot persist a hint.
 
 The host uses this reconciliation order:
 
-1. Build an all-same-name observation set from every host automation named
+1. Inspect the host task-list contract and run the non-claiming native
+   capability preflight. On unsupported completeness, perform only current-key
+   recurrence cleanup, release any stale claim after zero recurrence is proved,
+   and stop with `host_inventory_completeness_unsupported`. Do not create a
+   task, initialize, reconcile a partial list, or schedule a retry.
+2. Build an all-same-name observation set from every host automation named
    exactly `Chronos Governor pulse`, its
    immutable ID, creation time when available, target task, equivalence key,
    and compact local supervision status. Observation does not authorize mutation.
-2. Read `hostEquivalenceKey` from status. Derive a separate current-key mutation
+3. Read `hostEquivalenceKey` from status. Derive a separate current-key mutation
    set containing only automations whose task assignment carries that complete
    value and verifies the dedicated role. A different or unverified key is never
    mutated or counted in this installation's postcondition. Sort existing
@@ -104,14 +120,14 @@ The host uses this reconciliation order:
    ID and target task ID using ordinal comparison. Missing creation times sort
    after present times. Every installer selects the first candidate. With no
    valid automation, apply the same order to role-verified claimed tasks.
-3. Otherwise create one fresh `Chronos Governor` task with no inherited chat
+4. Otherwise create one fresh `Chronos Governor` task with no inherited chat
    history and include the complete returned equivalence key in its compact
    assignment. Re-list all live, role-verified current-key Governor tasks after
    any creation and apply the same stable ordering. Only the first deterministic
    setup contender can proceed to recurrence mutation or initialization. Other
    fresh contenders perform no local or recurrence mutation, prove no recurrence
    targets them, and stand down. Without stable IDs, no contender proceeds.
-4. Before initialization, pause or remove every active recurrence in the
+5. Before initialization, pause or remove every active recurrence in the
    current-key mutation set, including a winner retained from an earlier setup.
    Immediately before the first mutation, rebuild the all-same-name observation,
    current-key mutation set, and role-verified task list, then repeat the
@@ -122,7 +138,8 @@ The host uses this reconciliation order:
    the mutation set after each host read or mutation for at most three attempts.
    Leave foreign and unverified keys unchanged. If zero cannot be proven, stop
    before initialization and schedule no recovery turn.
-5. Let only the elected task claim the mutex-protected registry. This mutex fences
+6. Let only the elected task pass the same supported completeness mode accepted
+   by preflight and claim the mutex-protected registry. This mutex fences
    one machine and state root only. Native `error=supervision_governor_conflict`
    is the other entry to the no-mutation loser-verification branch; it is not a
    generic initialization failure and must not run current-key cleanup. The loser
@@ -132,11 +149,11 @@ The host uses this reconciliation order:
    verified within three bounded reads, the loser stops with no recurrence
    mutation and no recovery turn. The winning setup owns convergence to exactly
    one current-key Governor recurrence and zero worker recurrences.
-6. Require readable supervision and Heartbeat
+7. Require readable supervision and Heartbeat
    status, then run one complete caller-aware host inventory that accounts for
    that Governor exactly once. Continue only when the cycle returns
    `recurrenceEligible=true`.
-7. Only after that gate succeeds, update or create the deterministic winning
+8. Only after that gate succeeds, update or create the deterministic winning
    automation, pause or remove every non-winner, and re-list host state. Setup is
    complete only when exactly one active recurrence carrying the complete
    equivalence key targets exactly one claimed, live Governor and zero active
@@ -145,14 +162,14 @@ The host uses this reconciliation order:
    current-key mutation set, re-list it, and prove zero active current-key
    recurrences. Schedule no recovery turn and never mutate a foreign or
    unverified key. Routine convergence failure must not become a user chore.
-8. Repeat the same host-global winner and postcondition check before discovery
+9. Repeat the same host-global winner and postcondition check before discovery
    on Governor cycles zero and one. This catches concurrently created state that
    was not yet visible during setup. A loser stops its own recurrence and stands
    down. A losing task clears only its own local claim, and only through
    two-phase release after its recurrence is proven absent. It never clears a
    winner's claim. Normal cycles after that do not rescan all automations unless claim
    loss, rotation, or recovery requires it.
-9. Use the current task only when task creation is unavailable and the user
+10. Use the current task only when task creation is unavailable and the user
    explicitly requested setup.
 
 Chronos never automatically forks a working task. A fork can duplicate a large
@@ -211,8 +228,13 @@ $chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
 # Compact state only
 & $chronos -Action supervise -SupervisionAction status
 
+# Host integration gate; this action never claims a Governor
+& $chronos -Action supervise -SupervisionAction preflight `
+  -SupervisionHostInventoryCompleteness <unsupported|complete_flag|cursor_snapshot|total_count_snapshot>
+
 # Run only inside the selected Governor task
-& $chronos -Action supervise -SupervisionAction initialize
+& $chronos -Action supervise -SupervisionAction initialize `
+  -SupervisionHostInventoryCompleteness <complete_flag|cursor_snapshot|total_count_snapshot>
 
 # Passive registry read; this does not advance the Governor cycle
 & $chronos -Action supervise -SupervisionAction discover
@@ -239,8 +261,10 @@ task IDs, safe status categories, optional opaque generations, a capture time,
 and a completeness flag to a bounded temporary JSON file. `complete=true` is
 valid only when the host explicitly asserts completeness or documented cursor
 pagination reaches its terminal cursor under one stable snapshot identity. A
-capped task-list response without usable complete/cursor semantics is incomplete.
-Chronos never treats a one-call snapshot as complete by assumption.
+capped task-list response without usable completeness, enumeration, and stable
+snapshot semantics is `host_inventory_completeness_unsupported`. Chronos never
+treats a one-call snapshot as complete by assumption and does not repeatedly
+reconcile the same fabricated partial window during bootstrap.
 Schema v1 means the host list includes its caller and therefore requires the
 Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
 `callerVisibility=included` under the same rule, or
@@ -249,9 +273,12 @@ caller; in that case `tasks` must omit the Governor and Chronos adds only the
 registry-verified cycle caller during normalization. It never infers omission or
 makes a second unrelated status call. `notLoaded` normalizes to `unknown`, not
 `idle`: it is neither live nor ended and cannot create, revive, or close a task.
-With `complete=false`, use `reconcile-host` for partial freshness; do not advance
-a cycle, close absent tasks, enable a recurrence, or send an intervention. The
-result reports `hostInventoryRawObserved`,
+Outside automatic bootstrap, `complete=false` may be used with `reconcile-host`
+only for bounded diagnostic freshness from an independently supplied partial
+inventory; it cannot advance a cycle, close absent tasks, enable a recurrence,
+or send an intervention. Automatic bootstrap never constructs or repeatedly
+reconciles a partial list after capability preflight fails. The result reports
+`hostInventoryRawObserved`,
 `hostInventoryObserved`, `hostInventoryCallerVisibility`, and
 `hostInventoryGovernorSource` so the one-call boundary is auditable.
 Missing or incomplete inventory fails closed and does not advance the cycle.

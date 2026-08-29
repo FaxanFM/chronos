@@ -16,9 +16,15 @@ One complete caller-aware host inventory per Governor cycle is the task-discover
 and liveness authority. It is not a health report. Heartbeat evaluation uses a
 separate normalized collector snapshot with explicit coverage for all eight
 families. Missing evidence stays `partial` or `unsupported`.
+Automatic Governor setup first requires the host to prove that it can enumerate
+that complete inventory. A capped task-list contract without completeness,
+pagination, a total count, and stable snapshot semantics returns
+`host_inventory_completeness_unsupported` with zero Governor recurrences; it is
+not silently converted into a partial or healthy setup.
 Lifecycle hooks are an optional accelerator: a Windows host may show them as
 active and trusted without dispatching them. Missing hook execution never
-disables autonomous discovery or asks the user to register tasks.
+asks the user to register tasks and, on hosts with provably complete inventory,
+does not disable autonomous discovery.
 
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
@@ -122,7 +128,8 @@ paths, identifiers, prompts, commands, credentials, or private source.
 - Reconciles every task from one complete bounded host inventory inside each
   Governor cycle. If the host list omits its caller, schema v2 accounts for the
   known Governor inside that same call. The native result returns hash-only
-  normalized task statuses; routine cycles do not wake monitored tasks.
+  normalized task statuses; routine cycles do not wake monitored tasks. Setup
+  stops before task creation or claim when the host cannot prove completeness.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
@@ -189,6 +196,11 @@ Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, reports whether the eight Heartbeat families are observed,
 partial, or unsupported, and proves that worker tasks have no recurrence. It
 does not call prior-state status a new evaluation. Before initialization, it
+checks the host task-list capability. A capped `list_threads` response without
+an explicit completeness flag, terminal cursor under a stable snapshot, or
+fully enumerated total count under a stable snapshot stops with
+`host_inventory_completeness_unsupported`. Chronos creates no Governor task,
+claim, or retry recurrence for that unsupported contract. It then
 pauses or removes
 only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
@@ -256,13 +268,14 @@ output, or credentials. They store only bounded local coordination data such as
 protected task identifiers, workspace and generation hashes, a model label,
 lifecycle state, and timestamps. They do not create worker turns or recurrences.
 
-Hooks are an optional accelerator, not the source of truth. The Governor still
-uses one complete host task inventory per cycle for discovery and liveness. The
+Hooks are an optional accelerator, not the source of truth. On a supported host,
+the Governor still uses one complete host task inventory per cycle for discovery and liveness. The
 user controls hook trust through Codex `/hooks`; Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
 run. If a bounded hook cannot persist an event, it stays silent and the next
-complete inventory remains authoritative.
+complete inventory remains authoritative. Hooks cannot repair a host contract
+that cannot enumerate that inventory.
 
 Heartbeats use the same Governor and recurrence created by full setup. The
 Codex host owns the recurring schedule and model choice. Chronos does not

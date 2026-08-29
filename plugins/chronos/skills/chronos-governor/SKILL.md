@@ -41,6 +41,21 @@ makes no second host-status call. Any other result requires zero active
 current-key recurrences, verified from fresh host state. Never use a recurrence
 to retry, recover, or finish a failed setup.
 
+**Host-capability gate:** Before task creation, contender election, native
+`initialize`, or bootstrap convergence, inspect the host task-list contract.
+The host must expose at least one authoritative completion proof: an explicit
+response-level completeness flag; cursor pagination that reaches a terminal
+cursor under one stable snapshot identity; or a total count that is fully
+enumerated under one stable snapshot identity. A capped `list_threads` surface
+with none of those fields is unsupported. Call native `preflight` with
+`unsupported`, return the exact compact blocker
+`host_inventory_completeness_unsupported`, skip inventory reconciliation, and
+enforce zero active current-key recurrences. Do not create a Governor task,
+claim the registry, schedule a retry, or repeatedly re-read the same capped
+window. If an older failed setup left a claim, stop its current-key recurrence
+first, verify zero, then use the normal two-phase release. Retry only after the
+host contract changes.
+
 Read `hostEquivalenceKey` from supervision status. It is
 `chronos-supervision-v1:<opaque-installation-id>` and scopes the dedicated task,
 its compact assignment, and the matching automation to one local Chronos
@@ -59,7 +74,11 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    state fails closed before host mutation. Cached copies alone are not proof
    of a conflict. Do not run the broad Inspector or packaged validation suites
    during normal first-use setup; use Inspector only when compact status reports
-   a health problem or the user separately asks for diagnostics.
+   a health problem or the user separately asks for diagnostics. Inspect the
+   task-list tool contract now. Run non-claiming native `preflight` with
+   `complete_flag`, `cursor_snapshot`, `total_count_snapshot`, or `unsupported`
+   according to the actual host evidence. On `unsupported`, perform only the
+   zero-current-key cleanup described above and stop.
 2. Reconcile host state before trusting local state or running initialization.
    Collect one all-same-name observation set containing every host
    automation named exactly `Chronos Governor pulse`, its immutable automation
@@ -105,7 +124,10 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    verification attempts. Leave foreign-key and unverified-key observations
    unchanged. If zero cannot be proven, stop before initialization and create no
    additional task, recurrence, or recovery turn.
-6. Have only the elected selected task run `-SupervisionAction initialize`. The
+6. Have only the elected selected task run `-SupervisionAction initialize` and
+   pass the same supported completeness mode accepted by preflight. Native
+   initialization returns `host_inventory_completeness_unsupported` without a
+   claim when the mode is omitted or unsupported. The
    registry mutex fences only one machine and state root. If native initialization
    returns `error=supervision_governor_conflict`, do not execute the generic
    initialization-failure cleanup in step 7 and do not retry initialization.
@@ -237,8 +259,9 @@ turn. Non-terminal handlers request asynchronous execution where the host
 supports it; `SessionEnd` is synchronous. When Codex dispatches them, they run
 headless, return no model context, and create no model turn. Hook trust is
 optional acceleration and must never block setup. If hooks are disabled,
-untrusted, or not dispatched, continue with one complete compact host task-list inventory and reconcile
-it through `-SupervisionAction cycle`; do not ask the user to register
+untrusted, or not dispatched, continue with one complete compact host task-list
+inventory only after capability preflight proves that the host can enumerate it,
+and reconcile it through `-SupervisionAction cycle`; do not ask the user to register
 or relay tasks. Brief registry contention uses a bounded protected fallback event;
 `status` and `discover` reconcile and remove it under the registry lock. Never
 bypass hook trust.
@@ -250,9 +273,11 @@ expired claimed send; native state changes it to `delivery_unknown`, never a
 blind retry.
 
 Then apply the bounded cycle-zero/one host convergence check when required and
-collect one logical host inventory. The inventory is complete only when the host
+collect one logical host inventory, but only after capability preflight proves
+that full enumeration is possible. The inventory is complete only when the host
 explicitly says the response is complete, or when documented cursor pagination
-reaches its terminal cursor under one stable snapshot identity. A capped
+reaches its terminal cursor under one stable snapshot identity, or when a
+documented total count is fully enumerated under one stable snapshot identity. A capped
 `list_threads` response with no completeness or pagination contract is not
 complete, even when it returned fewer than its visible limit. Never infer
 `complete=true` from a one-call snapshot. Write only opaque task
@@ -266,13 +291,13 @@ or write titles, paths, or transcript content. Preserve the host's `notLoaded`
 status; native normalization maps it to `unknown`, which is neither live nor
 ended and cannot create, revive, or close a task. Do not map it to `idle`.
 
-Run `-SupervisionAction cycle` only with proven complete inventory. With
-unproven completeness, write `complete=false`, run `-SupervisionAction
-reconcile-host` for partial freshness, remove the file, and fail closed for
-recurrence creation, absence-based task closure, and task-directed sends. Do not
-advance the Governor cycle. For a pre-existing recurrence, preserve pending
-native state and make no liveness transition or intervention send until a later
-host response proves completeness. Verify
+Run `-SupervisionAction cycle` only with proven complete inventory. When the
+host contract cannot prove completeness, do not fabricate a partial inventory,
+do not call `reconcile-host`, and do not keep polling the same capped window.
+Return `host_inventory_completeness_unsupported`, enforce zero current-key
+recurrences, and stop until the host capability changes. `reconcile-host`
+remains a bounded diagnostic action only for an independently supplied partial
+inventory outside automatic bootstrap. Verify
 that `hostInventoryCycle` advanced once, `hostInventoryRawObserved` matches the
 one raw list, and `hostTaskStatuses` contains one hash-only normalized entry for
 every listed task plus exactly one intrinsic Governor only in caller-excluded

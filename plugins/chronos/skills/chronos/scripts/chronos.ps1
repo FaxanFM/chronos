@@ -35,10 +35,12 @@ param(
   [string]$HeartbeatVerificationResult = "",
   [ValidateSet("", "ambiguous_target", "target_not_live", "transport_unavailable", "user_authority_required", "unsupported_action")]
   [string]$HeartbeatFailureReason = "",
-  [ValidateSet("status", "initialize", "confirm-active", "reconcile-host", "discover", "cycle", "release")]
+  [ValidateSet("status", "preflight", "initialize", "confirm-active", "reconcile-host", "discover", "cycle", "release")]
   [string]$SupervisionAction = "status",
   [string]$SupervisionStatePath,
   [string]$SupervisionHostInventoryPath,
+  [ValidateSet("unsupported", "complete_flag", "cursor_snapshot", "total_count_snapshot")]
+  [string]$SupervisionHostInventoryCompleteness = "unsupported",
   [string]$SupervisionSessionId,
   [string]$SupervisionSubjectId,
   [ValidateRange(0, [long]::MaxValue)]
@@ -108,6 +110,7 @@ if ($Action -eq 'supervise') {
   if ($SupervisionStatePath) { $arguments.StatePath = $SupervisionStatePath }
   if ($PSBoundParameters.ContainsKey('CodexHome')) { $arguments.CodexHome = $CodexHome }
   if ($SupervisionHostInventoryPath) { $arguments.HostInventoryPath = $SupervisionHostInventoryPath }
+  $arguments.HostInventoryCompleteness = $SupervisionHostInventoryCompleteness
   if ($SupervisionSessionId) { $arguments.SessionId = $SupervisionSessionId }
   if ($SupervisionSubjectId) { $arguments.SubjectId = $SupervisionSubjectId }
   if ($SupervisionConfirmRecurrenceStopped) { $arguments.ConfirmRecurrenceStopped = $true }

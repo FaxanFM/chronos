@@ -22,6 +22,15 @@ of the eight public Heartbeat families. Missing evidence stays `partial` or
 `unsupported`; it cannot become a clean result. Inspector aggregates are
 accepted only after an authorized, compatible Inspector run produced them.
 
+Governor bootstrap now starts with a non-claiming host-capability preflight.
+The host must expose an explicit completeness flag, terminal cursor pagination
+under one stable snapshot identity, or a fully enumerated total count under one
+stable snapshot identity. A capped `list_threads` contract without that proof
+returns `host_inventory_completeness_unsupported`, leaves zero active current-key
+recurrences, skips fabricated partial reconciliation, and does not retry until
+the host contract changes. This is reported as an expected integration blocker,
+not a healthy or partially completed setup.
+
 The Governor resumes native intervention state before it evaluates new
 transitions. Only native plan, claim, send, and record actions can wake one
 verified task with the fixed message template. The scheduler stays at one
@@ -47,7 +56,7 @@ validates, receipts, merges, and removes each accepted event. The Governor
 assignment, result, verification, lifecycle, and exclusion contracts are
 self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`ad54bd26803837f8c6997c086ad7bbe505e72856b1bc9dffd1ee9fe3fe13f699`.
+`e5312d2071ae5a693b7a9c6229f1aa8db40fecfbf8f3dafa8ce3f2f159fca9f4`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

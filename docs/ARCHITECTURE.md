@@ -79,8 +79,8 @@ remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
 It does not infer cost or quota impact from a model name.
 
-The Governor uses two different inputs. One complete host task inventory is the
-liveness authority. A separate schema-v2 collector snapshot is the Heartbeat
+The Governor uses two different inputs. On a supported host, one complete host
+task inventory is the liveness authority. A separate schema-v2 collector snapshot is the Heartbeat
 evidence authority. The collector uses one stable opaque source epoch, a
 monotonic source sequence, and an explicit coverage label for every public
 family. A status read without the collector file reports prior state only. It
@@ -224,14 +224,20 @@ Unscoped legacy state is eligible only for the default `.codex` home. Custom
 homes can use only state that was already scoped to that same home, so one old
 identity or outbox cannot be cloned into several installations.
 
-The rooted installed `chronos.cmd` launcher with `-Action supervise` exposes status, single-Governor claim,
+The rooted installed `chronos.cmd` launcher with `-Action supervise` exposes
+status, a non-claiming host-capability preflight, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
 and two-phase release. Registry liveness
 is advisory; one complete caller-aware host inventory per Governor cycle is
 authoritative.
 Hooks are optional acceleration and are not required for autonomy. Terminal lifecycle state has
 precedence over delayed start events. Bootstrap reconciles matching host
-automations first, reuses a role-verified Governor, otherwise creates one fresh
+automations only after capability preflight proves complete enumeration. A
+capped host task list without a response-level completeness flag, terminal
+cursor or total-count enumeration under a stable snapshot identity returns
+`host_inventory_completeness_unsupported`, performs only zero-recurrence
+cleanup, and stops without creating or claiming a Governor. On a supported host,
+bootstrap reuses a role-verified Governor or creates one fresh
 task without inherited history, and uses a mutex-protected claim as the
 same-machine ownership fence. A scoped host equivalence key, stable host-ID
 ordering, a three-attempt budget, an exact postcondition, and two initial
@@ -254,7 +260,8 @@ recurrence is bounded to 336 cycles or 14 days. See
 [Supervision](SUPERVISION.md).
 
 Recurrence creation is gated by native postconditions. Initialization must
-succeed, supervision and Heartbeat status must be readable, and one complete
+succeed with the same supported completeness mode accepted by preflight,
+supervision and Heartbeat status must be readable, and one complete
 host-inventory cycle must contain the selected Governor exactly once before the
 registry returns `recurrenceEligible=true`. The host observes all same-name
 recurrences but mutates only those carrying the complete current installation
