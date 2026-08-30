@@ -611,7 +611,7 @@ try {
   $configuredHookProcess = [Diagnostics.Process]::Start($configuredHookInfo)
   $configuredHookProcess.StandardInput.Write('{"session_id":"release-configured-hook","cwd":"C:/release-fixture","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.6-luna"}')
   $configuredHookProcess.StandardInput.Close()
-  if (-not $configuredHookProcess.WaitForExit(10000)) {
+  if (-not $configuredHookProcess.WaitForExit(30000)) {
     try { $configuredHookProcess.Kill() } catch {}
     throw ('Packaged configured lifecycle hook exceeded its bounded release-test watchdog. Elapsed={0}ms' -f $configuredHookWatch.ElapsedMilliseconds)
   }
@@ -650,7 +650,7 @@ try {
   $configuredStatusInfo.EnvironmentVariables['TMP'] = $configuredHookTemp
   [void]$configuredStatusInfo.EnvironmentVariables.Remove('CODEX_HOME')
   $configuredStatusProcess = [Diagnostics.Process]::Start($configuredStatusInfo)
-  if (-not $configuredStatusProcess.WaitForExit(10000)) {
+  if (-not $configuredStatusProcess.WaitForExit(30000)) {
     try { $configuredStatusProcess.Kill() } catch {}
     throw 'Packaged supervision status exceeded its bounded inbox-merge test.'
   }

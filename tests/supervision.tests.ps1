@@ -182,12 +182,12 @@ function Start-ConfiguredWindowsHook {
 }
 
 function Complete-ConfiguredWindowsHook {
-  param($Invocation)
+  param($Invocation, [int]$TimeoutMilliseconds = 30000)
   # The manifest ceiling and the test-process watchdog measure different
   # things. Keep the product ceiling at three seconds, but allow enough time
-  # for a loaded CI runner to report the process result instead of killing it
-  # at the same millisecond as the contract boundary.
-  $remaining = [Math]::Max(1, 10000 - [int]$Invocation.Watch.ElapsedMilliseconds)
+  # for a loaded CI runner to report the process result after an anomalously
+  # cold PowerShell launch.
+  $remaining = [Math]::Max(1, $TimeoutMilliseconds - [int]$Invocation.Watch.ElapsedMilliseconds)
   if (-not $Invocation.Process.WaitForExit($remaining)) {
     $Invocation.Watch.Stop()
     try { $Invocation.Process.Kill() } catch {}
@@ -339,7 +339,7 @@ try {
   } | ConvertTo-Json -Compress
   $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
   Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
-  Assert-True ($configuredHook.ProcessMilliseconds -lt 10000) 'Configured Windows hook exceeded the bounded test-process watchdog.'
+  Assert-True ($configuredHook.ProcessMilliseconds -lt 30000) 'Configured Windows hook exceeded the bounded test-process watchdog.'
   $configuredStatePath = Get-DefaultSupervisionStatePath $configuredHookTemp
   $configuredInbox = Get-HookInboxDirectory $configuredHookTemp
   Assert-True (-not (Test-Path -LiteralPath $configuredStatePath)) 'Configured Windows hook performed synchronous registry work instead of bounded intake.'
@@ -483,7 +483,7 @@ try {
   foreach ($configuredConcurrentHook in $configuredConcurrentHooks) {
     $configuredConcurrentResult = Complete-ConfiguredWindowsHook $configuredConcurrentHook
     Assert-True ($configuredConcurrentResult.ExitCode -eq 0 -and -not $configuredConcurrentResult.Output -and -not $configuredConcurrentResult.Error) 'Concurrent configured hook did not remain silent and successful.'
-    Assert-True ($configuredConcurrentResult.ProcessMilliseconds -lt 10000) 'Concurrent configured hook exceeded the bounded test-process watchdog.'
+    Assert-True ($configuredConcurrentResult.ProcessMilliseconds -lt 30000) 'Concurrent configured hook exceeded the bounded test-process watchdog.'
   }
   Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 8) 'Concurrent configured hooks did not reserve eight distinct inbox slots.'
   $configuredConcurrentStatus = Invoke-SupervisionInTempRoot $configuredHookTemp

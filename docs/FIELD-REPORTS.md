@@ -206,7 +206,7 @@ successfully exercises the candidate release from a fresh task.
   The next status or Governor cycle merges the event exactly once under the
   registry mutex. Direct diagnostic hooks retain their full-engine path.
 - Regression: invoke the exact encoded command through `cmd.exe` from a plugin
-  path and TEMP path containing spaces. Use a scheduler-tolerant ten-second test
+  path and TEMP path containing spaces. Use a scheduler-tolerant thirty-second test
   watchdog, and separately require the manifest's three-second host ceiling.
   Require exit 0, zero output, no synchronous registry creation, one protected
   inbox event, no event for case-duplicate JSON keys, exactly one merged hook
@@ -224,7 +224,7 @@ the configured process at 3001 ms because its `WaitForExit` watchdog was set to
 the same 3000 ms as the manifest contract. A watchdog set at the contract
 boundary cannot report the real process result reliably on a loaded runner. The
 correction separates those assertions: the manifest must still say three
-seconds, while the test permits ten seconds to collect exit status, silence,
+seconds, while the test permits thirty seconds to collect exit status, silence,
 protected persistence, concurrency, and exactly-once merge evidence.
 
 The same independent audit found two receipt-boundary defects in the first
