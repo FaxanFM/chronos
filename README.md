@@ -200,8 +200,12 @@ checks the host task-list capability. A capped `list_threads` response without
 an explicit completeness flag, terminal cursor under a stable snapshot, or
 fully enumerated total count under a stable snapshot stops with
 `host_inventory_completeness_unsupported`. Chronos creates no Governor task,
-claim, or retry recurrence for that unsupported contract. It then
-pauses or removes
+claim, or retry recurrence for that unsupported contract. Chronos also requires
+every normalized status to come from the current host runtime.
+A separately spawned `codex app-server` can paginate the local task store, but
+its process-local statuses are `notLoaded`; identity completeness alone stops
+with `host_inventory_liveness_unsupported` and is never accepted as a healthy
+or recurrence-eligible inventory. Chronos pauses or removes
 only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor

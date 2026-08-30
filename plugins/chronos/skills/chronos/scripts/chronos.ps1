@@ -41,6 +41,8 @@ param(
   [string]$SupervisionHostInventoryPath,
   [ValidateSet("unsupported", "complete_flag", "cursor_snapshot", "total_count_snapshot")]
   [string]$SupervisionHostInventoryCompleteness = "unsupported",
+  [ValidateSet("unsupported", "current_host_runtime")]
+  [string]$SupervisionHostInventoryStatusAuthority = "unsupported",
   [string]$SupervisionSessionId,
   [string]$SupervisionSubjectId,
   [ValidateRange(0, [long]::MaxValue)]
@@ -111,6 +113,7 @@ if ($Action -eq 'supervise') {
   if ($PSBoundParameters.ContainsKey('CodexHome')) { $arguments.CodexHome = $CodexHome }
   if ($SupervisionHostInventoryPath) { $arguments.HostInventoryPath = $SupervisionHostInventoryPath }
   $arguments.HostInventoryCompleteness = $SupervisionHostInventoryCompleteness
+  $arguments.HostInventoryStatusAuthority = $SupervisionHostInventoryStatusAuthority
   if ($SupervisionSessionId) { $arguments.SessionId = $SupervisionSessionId }
   if ($SupervisionSubjectId) { $arguments.SubjectId = $SupervisionSubjectId }
   if ($SupervisionConfirmRecurrenceStopped) { $arguments.ConfirmRecurrenceStopped = $true }

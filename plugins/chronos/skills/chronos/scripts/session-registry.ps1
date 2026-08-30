@@ -6,6 +6,8 @@ param(
   [string]$HostInventoryPath,
   [ValidateSet('unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
   [string]$HostInventoryCompleteness = 'unsupported',
+  [ValidateSet('unsupported', 'current_host_runtime')]
+  [string]$HostInventoryStatusAuthority = 'unsupported',
   [string]$SessionId = $env:CODEX_THREAD_ID,
   [string]$SubjectId,
   [string]$ObservedAtUtc,
@@ -1745,6 +1747,8 @@ try {
       hostInventoryCapabilityPreflightRequired = $true
       hostInventoryCompletenessRequirement = 'complete_flag_or_enumerable_stable_snapshot'
       hostInventoryUnsupportedError = 'host_inventory_completeness_unsupported'
+      hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
+      hostInventoryLivenessUnsupportedError = 'host_inventory_liveness_unsupported'
       recommendedGovernorModel = 'gpt-5.6-terra'
       recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
@@ -1757,8 +1761,8 @@ try {
   }
 
   if ($Action -eq 'preflight') {
-    $supported = $HostInventoryCompleteness -in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')
-    if (-not $supported) {
+    $supportedCompleteness = $HostInventoryCompleteness -in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')
+    if (-not $supportedCompleteness) {
       Write-SafeOutput ([ordered]@{
         ok = $false
         error = 'host_inventory_completeness_unsupported'
@@ -1770,6 +1774,23 @@ try {
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
         supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+        hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
+      })
+      exit 0
+    }
+    if ($HostInventoryStatusAuthority -ne 'current_host_runtime') {
+      Write-SafeOutput ([ordered]@{
+        ok = $false
+        error = 'host_inventory_liveness_unsupported'
+        action = 'preflight'
+        governorClaimed = ($null -ne $state.governor)
+        recurrenceEligible = $false
+        hostInventoryCompleteness = $HostInventoryCompleteness
+        hostInventoryStatusAuthority = 'unsupported'
+        requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
+        retryPolicy = 'none_until_host_contract_changes'
+        inventoryReconcile = 'skipped'
+        supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
       })
       exit 0
     }
@@ -1779,8 +1800,9 @@ try {
       governorClaimed = ($null -ne $state.governor)
       recurrenceEligible = $false
       hostInventoryCompleteness = $HostInventoryCompleteness
+      hostInventoryStatusAuthority = $HostInventoryStatusAuthority
       requiredHostAction = 'continue_bootstrap_without_claim'
-      supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
     })
     exit 0
   }
@@ -1800,6 +1822,22 @@ try {
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
         supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      })
+      exit 0
+    }
+    if ($HostInventoryStatusAuthority -ne 'current_host_runtime') {
+      Write-SafeOutput ([ordered]@{
+        ok = $false
+        error = 'host_inventory_liveness_unsupported'
+        action = 'initialize'
+        governorClaimed = ($null -ne $state.governor)
+        recurrenceEligible = $false
+        hostInventoryCompleteness = $HostInventoryCompleteness
+        hostInventoryStatusAuthority = 'unsupported'
+        requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
+        retryPolicy = 'none_until_host_contract_changes'
+        inventoryReconcile = 'skipped'
+        supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
       })
       exit 0
     }
@@ -1837,6 +1875,8 @@ try {
     $initializePayload['recurrenceEligible'] = $false
     $initializePayload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
     $initializePayload['requiredHostAction'] = 'run_complete_host_inventory_cycle_before_recurrence'
+    $initializePayload['hostInventoryCompleteness'] = $HostInventoryCompleteness
+    $initializePayload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
     Write-SafeOutput $initializePayload
     exit 0
   }
@@ -1852,6 +1892,22 @@ try {
     Write-SafeOutput ([ordered]@{ ok = $true; action = 'confirm-active'; revision = [long]$state.revision; subjectHash = $subjectHash.Substring(0, 16); state = 'active' })
     exit 0
   }
+  if ($Action -in @('reconcile-host', 'cycle') -and -not [string]::IsNullOrWhiteSpace($HostInventoryPath) -and $HostInventoryStatusAuthority -ne 'current_host_runtime') {
+    Write-SafeOutput ([ordered]@{
+      ok = $false
+      error = 'host_inventory_liveness_unsupported'
+      action = $Action
+      governorClaimed = ($null -ne $state.governor)
+      recurrenceEligible = $false
+      hostInventoryCompleteness = $HostInventoryCompleteness
+      hostInventoryStatusAuthority = 'unsupported'
+      requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
+      retryPolicy = 'none_until_host_contract_changes'
+      inventoryReconcile = 'skipped'
+      supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
+    })
+    exit 0
+  }
   if ($Action -eq 'reconcile-host') {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
     $inventory = Complete-HostInventoryForGovernor (Read-HostInventory $HostInventoryPath $now) $current
@@ -1861,6 +1917,7 @@ try {
     $payload['hostInventoryObserved'] = [int]$reconciled.Observed
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
+    $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostTasksAdded'] = [int]$reconciled.Added
@@ -1910,6 +1967,7 @@ try {
     $payload['hostInventoryObserved'] = [int]$reconciled.Observed
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = $true
+    $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostInventoryCycle'] = [long]$state.governor.cycleCount

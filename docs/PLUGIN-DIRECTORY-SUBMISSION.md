@@ -31,6 +31,12 @@ recurrences, skips fabricated partial reconciliation, and does not retry until
 the host contract changes. This is reported as an expected integration blocker,
 not a healthy or partially completed setup.
 
+The candidate also separates stored identity enumeration from current-host
+liveness. Terminal cursor pagination from a separately spawned app-server is
+not sufficient because that process reports its own `notLoaded` state even for
+Desktop-active tasks. Without current-host runtime status, native preflight
+returns `host_inventory_liveness_unsupported` and remains recurrence-ineligible.
+
 The Governor resumes native intervention state before it evaluates new
 transitions. Only native plan, claim, send, and record actions can wake one
 verified task with the fixed message template. The scheduler stays at one
@@ -56,7 +62,7 @@ validates, receipts, merges, and removes each accepted event. The Governor
 assignment, result, verification, lifecycle, and exclusion contracts are
 self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`e5312d2071ae5a693b7a9c6229f1aa8db40fecfbf8f3dafa8ce3f2f159fca9f4`.
+`6d0887b8b6e1cbc112aef5ef0f062d429b8daf8f80a654b388d81482b6ee09cb`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 

@@ -37,6 +37,14 @@ zero active current-key recurrences, skips partial reconciliation, and does not
 retry until the host contract changes. This is an expected integration blocker,
 not a healthy or partially completed setup.
 
+Identity completeness and liveness authority are independent requirements.
+Every task status must come from the current host runtime. A separately spawned
+`codex app-server` can paginate the local state store, but it reports
+process-local `notLoaded` status even for a task that the Desktop host reports
+as active. Chronos therefore rejects that identity-only composition with
+`host_inventory_liveness_unsupported`; targeted status reads across the entire
+store are not a bounded fallback.
+
 The `/hooks` installed, active, and trusted labels describe host configuration.
 They do not prove that Windows launched the command. Native status reports
 `hookExecutionObservation=observed` only after `hookRuns` and `lastHookUtc`
@@ -230,18 +238,21 @@ $chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
 
 # Host integration gate; this action never claims a Governor
 & $chronos -Action supervise -SupervisionAction preflight `
-  -SupervisionHostInventoryCompleteness <unsupported|complete_flag|cursor_snapshot|total_count_snapshot>
+  -SupervisionHostInventoryCompleteness <unsupported|complete_flag|cursor_snapshot|total_count_snapshot> `
+  -SupervisionHostInventoryStatusAuthority <unsupported|current_host_runtime>
 
 # Run only inside the selected Governor task
 & $chronos -Action supervise -SupervisionAction initialize `
-  -SupervisionHostInventoryCompleteness <complete_flag|cursor_snapshot|total_count_snapshot>
+  -SupervisionHostInventoryCompleteness <complete_flag|cursor_snapshot|total_count_snapshot> `
+  -SupervisionHostInventoryStatusAuthority current_host_runtime
 
 # Passive registry read; this does not advance the Governor cycle
 & $chronos -Action supervise -SupervisionAction discover
 
 # After one compact complete host task-list call, run one Governor cycle
 & $chronos -Action supervise -SupervisionAction cycle `
-  -SupervisionHostInventoryPath <temporary-inventory.json>
+  -SupervisionHostInventoryPath <temporary-inventory.json> `
+  -SupervisionHostInventoryStatusAuthority current_host_runtime
 
 # Only after host liveness verifies an ended entry is active again
 & $chronos -Action supervise -SupervisionAction confirm-active `
@@ -265,6 +276,9 @@ capped task-list response without usable completeness, enumeration, and stable
 snapshot semantics is `host_inventory_completeness_unsupported`. Chronos never
 treats a one-call snapshot as complete by assumption and does not repeatedly
 reconcile the same fabricated partial window during bootstrap.
+Terminal cursor enumeration of stored identities is still unsupported when the
+provider cannot observe current-host status; that case is
+`host_inventory_liveness_unsupported`.
 Schema v1 means the host list includes its caller and therefore requires the
 Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
 `callerVisibility=included` under the same rule, or

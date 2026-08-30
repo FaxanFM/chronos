@@ -236,8 +236,12 @@ automations only after capability preflight proves complete enumeration. A
 capped host task list without a response-level completeness flag, terminal
 cursor or total-count enumeration under a stable snapshot identity returns
 `host_inventory_completeness_unsupported`, performs only zero-recurrence
-cleanup, and stops without creating or claiming a Governor. On a supported host,
-bootstrap reuses a role-verified Governor or creates one fresh
+cleanup, and stops without creating or claiming a Governor. The same inventory
+must carry status from the current host runtime. A separate
+app-server's terminal cursor can prove stored identity enumeration, but its
+process-local `notLoaded` statuses cannot prove host liveness; that path returns
+`host_inventory_liveness_unsupported` and remains recurrence-ineligible. On a
+supported host, bootstrap reuses a role-verified Governor or creates one fresh
 task without inherited history, and uses a mutex-protected claim as the
 same-machine ownership fence. A scoped host equivalence key, stable host-ID
 ordering, a three-attempt budget, an exact postcondition, and two initial

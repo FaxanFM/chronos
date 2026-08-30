@@ -67,6 +67,8 @@ function Invoke-Supervision {
     [string]$HostInventory = '',
     [ValidateSet('', 'unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
     [string]$HostInventoryCompleteness = '',
+    [ValidateSet('', 'unsupported', 'current_host_runtime')]
+    [string]$HostInventoryStatusAuthority = '',
     [switch]$ConfirmRecurrenceStopped,
     [switch]$Force
   )
@@ -80,6 +82,8 @@ function Invoke-Supervision {
   if ($HostInventory) { $arguments += @('-SupervisionHostInventoryPath', $HostInventory) }
   if (-not $HostInventoryCompleteness -and $Action -eq 'initialize') { $HostInventoryCompleteness = 'complete_flag' }
   if ($HostInventoryCompleteness) { $arguments += @('-SupervisionHostInventoryCompleteness', $HostInventoryCompleteness) }
+  if (-not $HostInventoryStatusAuthority -and ($Action -eq 'initialize' -or $HostInventory)) { $HostInventoryStatusAuthority = 'current_host_runtime' }
+  if ($HostInventoryStatusAuthority) { $arguments += @('-SupervisionHostInventoryStatusAuthority', $HostInventoryStatusAuthority) }
   if ($ConfirmRecurrenceStopped) { $arguments += '-SupervisionConfirmRecurrenceStopped' }
   if ($Force) { $arguments += '-Force' }
   $output = @(& powershell.exe @arguments 2>&1)
@@ -220,7 +224,7 @@ function Invoke-SupervisionInTempRoot {
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
-  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag' }
+  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag -SupervisionHostInventoryStatusAuthority current_host_runtime' }
   if ($State) { $info.Arguments += ' -SupervisionStatePath "{0}"' -f $State }
   if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
@@ -261,7 +265,7 @@ function Start-SupervisionInTempRoot {
   $info = New-Object Diagnostics.ProcessStartInfo
   $info.FileName = 'powershell.exe'
   $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action supervise -SupervisionAction {1}' -f $wrapper, $Action
-  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag' }
+  if ($Action -eq 'initialize') { $info.Arguments += ' -SupervisionHostInventoryCompleteness complete_flag -SupervisionHostInventoryStatusAuthority current_host_runtime' }
   if ($Session) { $info.Arguments += ' -SupervisionSessionId "{0}"' -f $Session }
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
@@ -855,11 +859,15 @@ try {
   $unsupportedInitialize = Invoke-Supervision -State $capabilityState -Action 'initialize' -Session 'unsupported-governor' -HostInventoryCompleteness 'unsupported'
   $unsupportedInitializeData = Get-Payload $unsupportedInitialize
   Assert-True (-not $unsupportedInitializeData.ok -and $unsupportedInitializeData.error -eq 'host_inventory_completeness_unsupported' -and -not $unsupportedInitializeData.governorClaimed) 'Initialize claimed a Governor without a supported host inventory contract.'
+  $identityOnlyInitialize = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'initialize' -Session 'identity-only-governor' -HostInventoryCompleteness 'cursor_snapshot' -HostInventoryStatusAuthority 'unsupported')
+  Assert-True (-not $identityOnlyInitialize.ok -and $identityOnlyInitialize.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyInitialize.governorClaimed) 'Initialize claimed a Governor from identity enumeration without current-host liveness authority.'
   $capabilityStatus = Get-Payload (Invoke-Supervision $capabilityState)
   Assert-True (-not $capabilityStatus.governorClaimed -and $capabilityStatus.hostInventoryCapabilityPreflightRequired -and $capabilityStatus.hostInventoryUnsupportedError -eq 'host_inventory_completeness_unsupported') 'Capability preflight failure left an active-but-unschedulable Governor claim.'
   foreach ($supportedCompleteness in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
-    $supportedPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness)
-    Assert-True ($supportedPreflight.ok -and $supportedPreflight.hostInventoryCompleteness -eq $supportedCompleteness -and -not $supportedPreflight.governorClaimed) "Supported host completeness mode $supportedCompleteness did not remain a non-claiming preflight."
+    $identityOnlyPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness)
+    Assert-True (-not $identityOnlyPreflight.ok -and $identityOnlyPreflight.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyPreflight.recurrenceEligible) "Identity-only completeness mode $supportedCompleteness was incorrectly accepted as current-host liveness."
+    $supportedPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness -HostInventoryStatusAuthority 'current_host_runtime')
+    Assert-True ($supportedPreflight.ok -and $supportedPreflight.hostInventoryCompleteness -eq $supportedCompleteness -and $supportedPreflight.hostInventoryStatusAuthority -eq 'current_host_runtime' -and -not $supportedPreflight.governorClaimed) "Supported host completeness mode $supportedCompleteness did not remain a non-claiming preflight."
   }
 
   $hostState = Join-Path $root 'host-reconcile-registry.json'
@@ -878,6 +886,8 @@ try {
       [ordered]@{ id = 'thread-missed-hook'; status = 'waiting'; generation = 'generation-missed' }
     )
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $identityOnlyReconcile = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath -HostInventoryStatusAuthority 'unsupported')
+  Assert-True (-not $identityOnlyReconcile.ok -and $identityOnlyReconcile.error -eq 'host_inventory_liveness_unsupported' -and $identityOnlyReconcile.inventoryReconcile -eq 'skipped') 'Identity-only inventory reached host reconciliation without current-host liveness authority.'
   $hostReconcile = Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath
   Assert-True ($hostReconcile.ExitCode -eq 0) "Host inventory reconciliation failed: $($hostReconcile.Text)"
   $hostReconcileData = Get-Payload $hostReconcile
@@ -917,6 +927,8 @@ try {
     schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
     tasks = @([ordered]@{ id = 'thread-other-live'; status = 'running'; generation = 'generation-other' })
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $identityOnlyCycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $governorOmittedInventory -HostInventoryStatusAuthority 'unsupported')
+  Assert-True (-not $identityOnlyCycle.ok -and $identityOnlyCycle.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyCycle.recurrenceEligible) 'Identity-only inventory reached a Governor cycle without current-host liveness authority.'
   $governorOmitted = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $governorOmittedInventory)
   Assert-True (-not $governorOmitted.ok -and $governorOmitted.error -eq 'supervision_governor_not_in_host_inventory') 'A complete inventory that omitted its Governor advanced the cycle.'
   $callerExcludedInventory = Join-Path $root 'caller-excluded-inventory.json'

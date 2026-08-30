@@ -75,6 +75,10 @@ count under a stable snapshot identity. A capped `list_threads` contract without
 those fields is unsupported. Return exactly
 `host_inventory_completeness_unsupported`, skip partial reconciliation, enforce
 zero current-key recurrences, and do not retry until the host contract changes.
+Full identity enumeration is not sufficient by itself. Every status must come
+from the current host runtime. A separate `codex app-server` process reports
+process-local `notLoaded` states and must return
+`host_inventory_liveness_unsupported`, not a supported `cursor_snapshot`.
 Do not stop after an inspection or return setup instructions for the user to
 relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
 complete setup through authoritative host inventory without asking the user to
@@ -138,7 +142,9 @@ explicit completeness result, terminal cursor plus stable snapshot identity, or
 fully enumerated total count plus stable snapshot identity is an unsupported
 bootstrap capability. Do not create a fabricated partial inventory or repeatedly
 call `reconcile-host`; stop with `host_inventory_completeness_unsupported` and
-zero current-key recurrences. `reconcile-host` is retained only for bounded
+zero current-key recurrences. A complete identity list without current-host
+runtime status stops with `host_inventory_liveness_unsupported` under the same
+zero-recurrence rule. `reconcile-host` is retained only for bounded
 diagnostic use with an independently supplied partial inventory. Preserve `notLoaded`; native
 normalization treats it as unknown, not live or ended. Schema v1 requires the Governor in the
 raw list. Schema v2 may declare `callerVisibility=excluded_by_host`, omit only

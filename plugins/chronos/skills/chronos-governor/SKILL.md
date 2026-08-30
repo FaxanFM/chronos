@@ -56,6 +56,16 @@ window. If an older failed setup left a claim, stop its current-key recurrence
 first, verify zero, then use the normal two-phase release. Retry only after the
 host contract changes.
 
+Completion proof and liveness authority are separate. A supported preflight
+must also pass `current_host_runtime` as the status authority, and only when
+every task status came from the current Codex host runtime. A second
+`codex app-server` process may provide terminal cursor pagination over stored
+task identities, but its `notLoaded` values describe that new process, not the
+live Desktop host. Never use that identity-only snapshot as
+`current_host_runtime`. Native preflight returns
+`host_inventory_liveness_unsupported`, remains non-claiming, and requires zero
+current-key recurrences when status authority is absent.
+
 Read `hostEquivalenceKey` from supervision status. It is
 `chronos-supervision-v1:<opaque-installation-id>` and scopes the dedicated task,
 its compact assignment, and the matching automation to one local Chronos
@@ -77,7 +87,10 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    a health problem or the user separately asks for diagnostics. Inspect the
    task-list tool contract now. Run non-claiming native `preflight` with
    `complete_flag`, `cursor_snapshot`, `total_count_snapshot`, or `unsupported`
-   according to the actual host evidence. On `unsupported`, perform only the
+   according to the actual host evidence, and pass
+   `-SupervisionHostInventoryStatusAuthority current_host_runtime` only when
+   the same current host supplies authoritative status for every task. On
+   either unsupported completeness or liveness, perform only the
    zero-current-key cleanup described above and stop.
 2. Reconcile host state before trusting local state or running initialization.
    Collect one all-same-name observation set containing every host
@@ -125,7 +138,8 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    unchanged. If zero cannot be proven, stop before initialization and create no
    additional task, recurrence, or recovery turn.
 6. Have only the elected selected task run `-SupervisionAction initialize` and
-   pass the same supported completeness mode accepted by preflight. Native
+   pass the same supported completeness mode and current-host status authority
+   accepted by preflight. Native
    initialization returns `host_inventory_completeness_unsupported` without a
    claim when the mode is omitted or unsupported. The
    registry mutex fences only one machine and state root. If native initialization
@@ -290,6 +304,9 @@ Never infer caller exclusion, supplement it from a second unrelated snapshot,
 or write titles, paths, or transcript content. Preserve the host's `notLoaded`
 status; native normalization maps it to `unknown`, which is neither live nor
 ended and cannot create, revive, or close a task. Do not map it to `idle`.
+Do not accept terminal pagination from a separately spawned app-server as
+liveness evidence: it enumerates stored identities but cannot observe the
+current host runtime's active or idle state.
 
 Run `-SupervisionAction cycle` only with proven complete inventory. When the
 host contract cannot prove completeness, do not fabricate a partial inventory,
