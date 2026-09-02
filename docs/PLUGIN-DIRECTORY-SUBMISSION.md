@@ -14,8 +14,9 @@ v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
-v0.9.2 is the candidate Directory update. It keeps one complete host inventory
-as the liveness authority for each Governor cycle. It now treats health evidence
+v0.9.2 is the candidate Directory update. It keeps one complete current-host
+active inventory as the liveness authority for each Governor cycle. It does not
+enumerate inactive task history. It treats health evidence
 as a separate contract. A schema-v2 collector snapshot carries a stable source
 epoch, an increasing source sequence, and an explicit coverage label for each
 of the eight public Heartbeat families. Missing evidence stays `partial` or
@@ -31,11 +32,13 @@ recurrences, skips fabricated partial reconciliation, and does not retry until
 the host contract changes. This is reported as an expected integration blocker,
 not a healthy or partially completed setup.
 
-The candidate also separates stored identity enumeration from current-host
-liveness. Terminal cursor pagination from a separately spawned app-server is
-not sufficient because that process reports its own `notLoaded` state even for
-Desktop-active tasks. Without current-host runtime status, native preflight
-returns `host_inventory_liveness_unsupported` and remains recurrence-ineligible.
+The candidate also separates active-set coverage from stored identity
+enumeration. A direct same-host `thread/loaded/list`-equivalent snapshot with
+authoritative runtime status is sufficient. Terminal cursor pagination from a separately spawned
+app-server is not sufficient because that process reports its own `notLoaded`
+state even for Desktop-active tasks. Without current-host runtime status, native
+preflight returns `host_inventory_liveness_unsupported` and remains
+recurrence-ineligible.
 
 The Governor resumes native intervention state before it evaluates new
 transitions. Only native plan, claim, send, and record actions can wake one
@@ -62,7 +65,7 @@ validates, receipts, merges, and removes each accepted event. The Governor
 assignment, result, verification, lifecycle, and exclusion contracts are
 self-contained in the installed skill. The candidate
 `chronos-v0.9.2.zip` SHA-256 is
-`6d0887b8b6e1cbc112aef5ef0f062d429b8daf8f80a654b388d81482b6ee09cb`.
+`c9091cce87c3fef01254a5f1a8235920272d7fb03e0e1439ac33bf32f4b6589c`.
 Candidate release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
 
@@ -175,8 +178,8 @@ mention.
   one live Governor, one active Governor recurrence, Heartbeat evaluation as
   observed, partial, or unsupported, and zero worker recurrences. Unsupported
   families are named and never summarized as healthy. If hook trust remains
-  pending, host inventory is used as the safe discovery fallback and the
-  limitation is named.
+  pending, current-host active inventory is used as the safe discovery fallback
+  and the limitation is named.
 - Fixture: Windows Codex with host task and automation tools. Task creation
   unavailability must use the documented current-task fallback without a fork.
 
@@ -298,8 +301,9 @@ Do not infer worldwide availability from publication.
 > path inside PowerShell. Exact source and extracted-package tests execute that
 > launcher through the Codex-style `cmd.exe` boundary. Some current Windows
 > Codex and `codex exec` paths still do not dispatch trusted hooks; Chronos now
-> labels hooks as optional acceleration and makes complete host inventory the
-> autonomous task-discovery authority on every Governor cycle. Install or
+> labels hooks as optional acceleration and makes complete current-host active
+> inventory the autonomous task-discovery authority on every Governor cycle.
+> Install or
 > upgrade requires a full Codex quit and reopen before a fresh task so the host
 > does not retain a removed versioned skill catalog. v0.9.2 uses the revised
 > first starter prompt, which completes the real

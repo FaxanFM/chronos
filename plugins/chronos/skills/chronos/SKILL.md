@@ -64,35 +64,40 @@ reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
 This is a hard gate, not a best-effort sequence: the host must create or enable
 no recurrence until initialization succeeds, supervision and Heartbeat status
-are readable, one complete caller-aware inventory accounts for the selected
-Governor exactly once, and the cycle returns `recurrenceEligible=true`. Any
+are readable, one complete caller-aware inventory of current-host active tasks
+accounts for the selected Governor exactly once, and the cycle returns
+`recurrenceEligible=true`. Any
 earlier failure must end with zero active current-key recurrences and no recovery
 recurrence.
 Before any Governor task creation, claim, or convergence attempt, inspect the
-host task-list contract. It must provide an explicit completeness flag, terminal
-cursor pagination under a stable snapshot identity, or a fully enumerated total
-count under a stable snapshot identity. A capped `list_threads` contract without
-those fields is unsupported. Return exactly
+host task contract. It must return the complete current-host active set directly,
+or expose a broader same-runtime snapshot with a proof that every active task is
+included. A same-host `thread/loaded/list`-equivalent snapshot with authoritative
+runtime status is sufficient. Chronos does not require enumeration of inactive or historical
+tasks. A capped `list_threads` contract that does not guarantee all active tasks
+is unsupported. Return exactly
 `host_inventory_completeness_unsupported`, skip partial reconciliation, enforce
 zero current-key recurrences, and do not retry until the host contract changes.
-Full identity enumeration is not sufficient by itself. Every status must come
-from the current host runtime. A separate `codex app-server` process reports
-process-local `notLoaded` states and must return
+Stored identity enumeration is neither required nor sufficient. Every status
+must come from the current host runtime. A separate `codex app-server` process
+reports process-local `notLoaded` states and must return
 `host_inventory_liveness_unsupported`, not a supported `cursor_snapshot`.
 Do not stop after an inspection or return setup instructions for the user to
 relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
 complete setup through authoritative host inventory without asking the user to
-register tasks only when host capability preflight proves full enumeration.
+register tasks only when host capability preflight proves complete active-set
+coverage.
 Otherwise return `host_inventory_completeness_unsupported` with zero recurrence.
 On a supported host, state only that optional hook acceleration is pending trust. An installed, active, or
 trusted `/hooks` entry is configuration evidence, not proof that the command
 executed. Read `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` from
 native supervision status. Report `not_observed` until a fresh post-trust
-lifecycle or completed-turn event advances those fields. Keep one complete host
-inventory per Governor cycle as the task-discovery and liveness authority on a
-supported host whether hooks execute or not. Hooks are an optional accelerator only.
+lifecycle or completed-turn event advances those fields. Keep one complete
+current-host active inventory per Governor cycle as the task-discovery and
+liveness authority on a supported host whether hooks execute or not. Hooks are
+an optional accelerator only.
 `hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
-must not make setup fail after complete inventory and topology postconditions
+must not make setup fail after complete active inventory and topology postconditions
 pass.
 
 Treat a nonempty `CODEX_HOME` as the installation boundary. Otherwise use the
@@ -137,16 +142,19 @@ automations.
 
 Only the Governor task runs `-SupervisionAction initialize`, `cycle`,
 `reconcile-host`, and `discover`. Every Governor recurrence must use `cycle`
-with one fresh, host-proven complete inventory. A capped task list without an
-explicit completeness result, terminal cursor plus stable snapshot identity, or
-fully enumerated total count plus stable snapshot identity is an unsupported
-bootstrap capability. Do not create a fabricated partial inventory or repeatedly
-call `reconcile-host`; stop with `host_inventory_completeness_unsupported` and
-zero current-key recurrences. A complete identity list without current-host
+with one fresh, host-proven complete current-host active inventory. Use
+`active_snapshot` when the same host directly returns every active task and its
+runtime status. A capped task list that does not guarantee the full active set is
+an unsupported bootstrap capability. Do not create a fabricated partial
+inventory or repeatedly call `reconcile-host`; stop with
+`host_inventory_completeness_unsupported` and
+zero current-key recurrences. A stored identity list without current-host
 runtime status stops with `host_inventory_liveness_unsupported` under the same
 zero-recurrence rule. `reconcile-host` is retained only for bounded
-diagnostic use with an independently supplied partial inventory. Preserve `notLoaded`; native
-normalization treats it as unknown, not live or ended. Schema v1 requires the Governor in the
+diagnostic use with an independently supplied partial inventory. From the
+authoritative current host, `idle`, `ready`, and `notLoaded` normalize to
+`inactive` and are not governed. `systemError` is also non-active and normalizes
+to `inactive`. Schema v1 requires the Governor in the
 raw list. Schema v2 may declare `callerVisibility=excluded_by_host`, omit only
 the current Governor, and let the same cycle account for that registry-verified
 caller without a second host query. Passive `discover` does not increment

@@ -45,8 +45,9 @@ sources: Codex treats `chronos@chronos` and
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
-- Uses one complete caller-aware host inventory per Governor cycle as task-discovery
-  and liveness authority. A separate normalized collector snapshot carries
+- Uses one complete caller-aware current-host active inventory per Governor
+  cycle as task-discovery and liveness authority. It does not enumerate stored
+  task history. A separate normalized collector snapshot carries
   explicit evidence coverage for all eight Heartbeat families. Five reviewed
   headless hooks optionally accelerate task and
   subagent lifecycle hints with no model-visible output or worker recurrence.
@@ -118,15 +119,16 @@ only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
-complete caller-aware host inventory accounts for the verified Governor exactly
-once. Any failed or partial
+complete caller-aware current-host active inventory accounts for the verified
+Governor exactly once. Any failed or partial
 setup pauses or removes every current-key recurrence, including one that existed
 before the attempt, and verifies zero current-key Chronos recurrences. A verified
 concurrent loser leaves the winner unchanged and stands down. Normal Codex
 hook trust is optional for autonomous discovery. If Codex presents a trust
 request, only the user can approve it; Chronos proceeds through one complete
-host inventory per Governor cycle whether hooks are trusted or dispatched.
-That complete inventory is the authority. Hooks are an optional accelerator.
+current-host active inventory per Governor cycle whether hooks are trusted or
+dispatched. That complete active inventory is the authority. Hooks are an
+optional accelerator.
 
 For an on-demand diagnostic without enabling supervision, ask:
 
@@ -182,7 +184,7 @@ user controls hook trust through Codex `/hooks`; Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
 run. If a bounded hook cannot persist an event, it stays silent and the next
-complete inventory remains authoritative.
+complete active inventory remains authoritative.
 
 Heartbeats use the same Governor and recurrence created by full setup. See the
 public [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)

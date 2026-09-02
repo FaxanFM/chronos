@@ -227,14 +227,15 @@ identity or outbox cannot be cloned into several installations.
 The rooted installed `chronos.cmd` launcher with `-Action supervise` exposes
 status, a non-claiming host-capability preflight, single-Governor claim,
 discovery, bounded host-inventory reconciliation, host-confirmed reactivation,
-and two-phase release. Registry liveness
-is advisory; one complete caller-aware host inventory per Governor cycle is
-authoritative.
+and two-phase release. Registry liveness is advisory; one complete caller-aware
+current-host active inventory per Governor cycle is authoritative. Historical
+task enumeration is not required.
 Hooks are optional acceleration and are not required for autonomy. Terminal lifecycle state has
 precedence over delayed start events. Bootstrap reconciles matching host
-automations only after capability preflight proves complete enumeration. A
-capped host task list without a response-level completeness flag, terminal
-cursor or total-count enumeration under a stable snapshot identity returns
+automations only after capability preflight proves complete active-set coverage.
+A direct same-host `thread/loaded/list`-equivalent snapshot with authoritative
+runtime status is sufficient. A capped host task list that does not guarantee every active task
+returns
 `host_inventory_completeness_unsupported`, performs only zero-recurrence
 cleanup, and stops without creating or claiming a Governor. The same inventory
 must carry status from the current host runtime. A separate
@@ -246,8 +247,8 @@ task without inherited history, and uses a mutex-protected claim as the
 same-machine ownership fence. A scoped host equivalence key, stable host-ID
 ordering, a three-attempt budget, an exact postcondition, and two initial
 convergence rechecks handle competing setup tasks. It does not automatically
-fork a working task. Each Governor cycle supplies one bounded host inventory so
-missed or disabled hooks do not require manual task registration. The host owns
+fork a working task. Each Governor cycle supplies one bounded current-host active
+inventory so missed or disabled hooks do not require manual task registration. The host owns
 task creation, Terra Medium selection, one optional recurrence, compact rotating
 task batches, and delivery. Worker tasks run no Chronos model cycle. The
 configured hook path writes one protected lifecycle event to a small

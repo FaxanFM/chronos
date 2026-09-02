@@ -146,13 +146,13 @@ separate registry, installation-key, and mutex identity for separate Codex
 homes, invalid override rejection before state creation, custom-home prior-v2
 read-only migration, ancestor-junction rejection, and sequential plus
 concurrent custom-home isolation from one unscoped legacy registry and anchor,
-ineligibility before a complete Governor-bearing
-host inventory, rejection of schema v1 omission, schema v2 caller-exclusion
+ineligibility before a complete Governor-bearing current-host active inventory,
+rejection of schema v1 omission, schema v2 caller-exclusion
 normalization and contradiction rejection,
-cycle and age limits, mandatory complete per-cycle host inventory
+cycle and age limits, mandatory complete per-cycle active-inventory
 reconciliation, raw-versus-normalized inventory counts, one hash-only normalized
 status per inventory task, passive non-advancing discovery, missed-hook task
-recovery, absent-task closure, stale inventory
+recovery, active-to-idle transition, absent-task closure, stale inventory
 rejection, optional-hook and inventory-authority status fields, full-restart
 catalog guidance, state-store preflight, current-user protected identifiers, transcript
 and workspace-path non-persistence, malformed and oversized hook input,

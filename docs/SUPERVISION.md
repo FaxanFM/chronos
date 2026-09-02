@@ -23,21 +23,25 @@ fresh Governor or pauses after 336 cycles or 14 days, whichever comes first.
 Codex requires a one-time review before a non-managed plugin hook can run. Use
 `/hooks` to inspect and trust the exact Chronos lifecycle definition. Chronos
 does not bypass this review. If hooks remain disabled or untrusted, the
-Governor uses one compact complete host inventory as the deterministic fallback
-only when capability preflight proves that the host can enumerate it. It
+Governor uses one compact complete current-host active inventory as the
+deterministic fallback only when capability preflight proves complete active-set
+coverage. It
 does not ask the user to register tasks or relay routine findings.
 
-Automatic setup requires an authoritative host inventory contract before it
-creates or claims a Governor. The host must expose an explicit completeness
-flag, terminal cursor pagination under one stable snapshot identity, or a total
-count that can be fully enumerated under one stable snapshot identity. A capped
-`list_threads` response with none of those fields is not a usable bootstrap
-inventory. Chronos returns `host_inventory_completeness_unsupported`, leaves
+Automatic setup requires an authoritative current-host active-inventory contract
+before it creates or claims a Governor. A direct same-host active/loaded
+snapshot, equivalent to `thread/loaded/list` plus authoritative runtime status,
+is sufficient. Chronos does not need
+inactive or historical task enumeration. A broader snapshot is also valid when
+its completeness flag, terminal cursor, or total count proves that every active
+task is included. A capped `list_threads` response that does not guarantee every
+active task is not a usable bootstrap inventory. Chronos returns
+`host_inventory_completeness_unsupported`, leaves
 zero active current-key recurrences, skips partial reconciliation, and does not
 retry until the host contract changes. This is an expected integration blocker,
 not a healthy or partially completed setup.
 
-Identity completeness and liveness authority are independent requirements.
+Active-set completeness and liveness authority are independent requirements.
 Every task status must come from the current host runtime. A separately spawned
 `codex app-server` can paginate the local state store, but it reports
 process-local `notLoaded` status even for a task that the Desktop host reports
@@ -48,8 +52,8 @@ store are not a bounded fallback.
 The `/hooks` installed, active, and trusted labels describe host configuration.
 They do not prove that Windows launched the command. Native status reports
 `hookExecutionObservation=observed` only after `hookRuns` and `lastHookUtc`
-advance. Until then it reports `not_observed` and keeps the complete host
-inventory as the liveness authority. Hooks are an optional accelerator, not an
+advance. Until then it reports `not_observed` and keeps the complete current-host
+active inventory as the liveness authority. Hooks are an optional accelerator, not an
 autonomy dependency. Current Windows Codex surfaces can show trusted hooks
 without dispatching them, and `codex exec` can omit hook dispatch. A release
 canary must record observed execution when the host provides it. When it does
@@ -105,13 +109,14 @@ asynchronous acquisition is capped at 100 ms. If the registry is busy or direct
 persistence fails before commit, that path makes at most two bounded attempts
 to write the same protected pending-event format. Diagnostic mode exposes a
 failure when neither path is durable. Configured production hooks stay silent;
-complete host inventory remains authoritative if intake cannot persist a hint.
+complete current-host active inventory remains authoritative if intake cannot
+persist a hint.
 
 ## Governor Selection
 
 The host uses this reconciliation order:
 
-1. Inspect the host task-list contract and run the non-claiming native
+1. Inspect the host active-task contract and run the non-claiming native
    capability preflight. On unsupported completeness, perform only current-key
    recurrence cleanup, release any stale claim after zero recurrence is proved,
    and stop with `host_inventory_completeness_unsupported`. Do not create a
@@ -158,8 +163,8 @@ The host uses this reconciliation order:
    mutation and no recovery turn. The winning setup owns convergence to exactly
    one current-key Governor recurrence and zero worker recurrences.
 7. Require readable supervision and Heartbeat
-   status, then run one complete caller-aware host inventory that accounts for
-   that Governor exactly once. Continue only when the cycle returns
+   status, then run one complete caller-aware current-host active inventory that
+   accounts for that Governor exactly once. Continue only when the cycle returns
    `recurrenceEligible=true`.
 8. Only after that gate succeeds, update or create the deterministic winning
    automation, pause or remove every non-winner, and re-list host state. Setup is
@@ -238,18 +243,18 @@ $chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
 
 # Host integration gate; this action never claims a Governor
 & $chronos -Action supervise -SupervisionAction preflight `
-  -SupervisionHostInventoryCompleteness <unsupported|complete_flag|cursor_snapshot|total_count_snapshot> `
+  -SupervisionHostInventoryCompleteness <unsupported|active_snapshot|complete_flag|cursor_snapshot|total_count_snapshot> `
   -SupervisionHostInventoryStatusAuthority <unsupported|current_host_runtime>
 
 # Run only inside the selected Governor task
 & $chronos -Action supervise -SupervisionAction initialize `
-  -SupervisionHostInventoryCompleteness <complete_flag|cursor_snapshot|total_count_snapshot> `
+  -SupervisionHostInventoryCompleteness <active_snapshot|complete_flag|cursor_snapshot|total_count_snapshot> `
   -SupervisionHostInventoryStatusAuthority current_host_runtime
 
 # Passive registry read; this does not advance the Governor cycle
 & $chronos -Action supervise -SupervisionAction discover
 
-# After one compact complete host task-list call, run one Governor cycle
+# After one compact complete current-host active-list call, run one Governor cycle
 & $chronos -Action supervise -SupervisionAction cycle `
   -SupervisionHostInventoryPath <temporary-inventory.json> `
   -SupervisionHostInventoryStatusAuthority current_host_runtime
@@ -267,17 +272,19 @@ $chronos = Join-Path '<skill-root>' 'scripts\chronos.cmd'
 ```
 
 `chronos.cmd` is not guaranteed to be on `PATH`; use the installed rooted
-launcher. The Governor writes one logical host inventory containing only opaque
-task IDs, safe status categories, optional opaque generations, a capture time,
-and a completeness flag to a bounded temporary JSON file. `complete=true` is
-valid only when the host explicitly asserts completeness or documented cursor
-pagination reaches its terminal cursor under one stable snapshot identity. A
-capped task-list response without usable completeness, enumeration, and stable
-snapshot semantics is `host_inventory_completeness_unsupported`. Chronos never
-treats a one-call snapshot as complete by assumption and does not repeatedly
-reconcile the same fabricated partial window during bootstrap.
-Terminal cursor enumeration of stored identities is still unsupported when the
-provider cannot observe current-host status; that case is
+launcher. The Governor writes one logical current-host active inventory
+containing only opaque task IDs, safe status categories, optional opaque
+generations, a capture time, and a completeness flag to a bounded temporary JSON
+file. `complete=true` is valid when the same host guarantees that every active
+task is included and supplies authoritative runtime status. This can be a direct
+`thread/loaded/list`-equivalent snapshot. A broader response can use an explicit completeness
+flag, terminal cursor, or fully enumerated total as its proof. A capped task-list
+response without an all-active guarantee is
+`host_inventory_completeness_unsupported`. Chronos never treats an undocumented
+one-call snapshot as complete and does not repeatedly reconcile a fabricated
+partial window during bootstrap. Enumeration of stored identities is neither
+required nor sufficient when the provider cannot observe current-host status;
+that case is
 `host_inventory_liveness_unsupported`.
 Schema v1 means the host list includes its caller and therefore requires the
 Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
@@ -285,8 +292,11 @@ Governor exactly once in `tasks`. Schema v2 adds `callerVisibility`. Use
 `callerVisibility=excluded_by_host` only when the host list omits the current
 caller; in that case `tasks` must omit the Governor and Chronos adds only the
 registry-verified cycle caller during normalization. It never infers omission or
-makes a second unrelated status call. `notLoaded` normalizes to `unknown`, not
-`idle`: it is neither live nor ended and cannot create, revive, or close a task.
+makes a second unrelated status call. From the authoritative current host,
+`idle`, `ready`, and `notLoaded` normalize to `inactive`. They cannot create or
+revive a governed task and close a previously active record. `systemError` also
+normalizes to non-active `inactive`. A separately
+spawned app-server's `notLoaded` value is not current-host authority.
 Outside automatic bootstrap, `complete=false` may be used with `reconcile-host`
 only for bounded diagnostic freshness from an independently supplied partial
 inventory; it cannot advance a cycle, close absent tasks, enable a recurrence,
@@ -295,9 +305,9 @@ reconciles a partial list after capability preflight fails. The result reports
 `hostInventoryRawObserved`,
 `hostInventoryObserved`, `hostInventoryCallerVisibility`, and
 `hostInventoryGovernorSource` so the one-call boundary is auditable.
-Missing or incomplete inventory fails closed and does not advance the cycle.
-Host task state is the liveness authority only for entries whose normalized
-state is live or ended. The native action
+Missing or incomplete active inventory fails closed and does not advance the
+cycle. Host task state is the liveness authority only for entries whose
+normalized state is live, inactive, ended, or unknown. The native action
 adds tasks missed by hooks, reactivates verified live tasks, and closes absent
 tasks. It returns one hash-only normalized status for every inventory task and the rotating
 `checkBatch`, which contains at most eight entries and covers larger registries
@@ -305,6 +315,9 @@ tasks. It returns one hash-only normalized status for every inventory task and t
 full task arrays, and change arrays; only counts and hash-only compact entries
 leave the native registry. Inventory or transport failure remains
 Governor-local; the routine user action is none.
+Previously active tasks absent from a complete active snapshot become ended and
+remain in bounded registry memory for 24 hours. This is race and restart
+containment, not a requirement to enumerate task history.
 Terminal hook state has precedence: a delayed start event cannot revive
 an ended task or agent. A terminal event received before its asynchronous start
 creates a bounded ended tombstone, and a subagent start received after its
@@ -394,7 +407,7 @@ state without changing the v2, fixed-TEMP, or LocalAppData source. This preserve
 the existing Governor equivalence key for the eligible default home. Custom
 homes do not claim these unscoped sources. An inaccessible prior root is left unchanged
 and reported as `prior_state_unavailable_new_root` with
-`priorStateWriteAttempted=false`; authoritative host inventory rebuilds the
+`priorStateWriteAttempted=false`; authoritative current-host active inventory rebuilds the
 advisory registry. Chronos reports only the selected slot number, a short state
 identity hash, anchor persistence and provenance category, write preflight,
 protection mode, migration result, and prior-state disposition. It does not
@@ -420,11 +433,11 @@ The deterministic setup regression matrix is:
 | initialization failure | 0 | 0 | no |
 | supervision status unreadable | 0 | 0 | no |
 | Heartbeat status unreadable | 0 | 0 | no |
-| incomplete inventory | 0 | 0 | no |
+| incomplete active inventory | 0 | 0 | no |
 | inventory missing Governor | 0 | 0 | no |
 | inventory contains Governor more than once | 0 | 0 | no |
 | post-eligibility recurrence reconciliation failure | 0 | 0 | no |
-| complete inventory and `recurrenceEligible=true` | 1 | 0 | no |
+| complete active inventory and `recurrenceEligible=true` | 1 | 0 | no |
 
 The isolation and concurrency regression matrix is:
 
@@ -475,15 +488,15 @@ infer it from local registry data. A disabled, untrusted, or non-executing hook
 produces no registry event and does not block host inventory reconciliation.
 Native status reports `hookRole=optional_acceleration`,
 `hookRequiredForAutonomy=false`, and
-`taskDiscoveryAuthority=complete_host_inventory_each_governor_cycle`.
+`taskDiscoveryAuthority=complete_current_host_active_inventory_each_governor_cycle`.
 
 Chronos intentionally does not register `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PermissionRequest`, `PreCompact`, or `PostCompact`. This avoids
 prompt inspection, model steering, and a process launch for every tool call.
-The completed-turn signal improves discovery and recent-activity evidence; one
-a proven complete host inventory per Governor cycle remains the task-liveness
-authority and includes both explicitly targeted and automatically discovered
-live tasks. It supplies no Heartbeat coverage outside task liveness.
+The completed-turn signal improves discovery and recent-activity evidence. One
+proven complete current-host active inventory per Governor cycle remains the
+task-liveness authority. It supplies no Heartbeat coverage outside task
+liveness.
 
 Official Codex hook behavior, plugin hook discovery, trust review, asynchronous
 execution, and event fields are documented in [OpenAI Hooks](https://learn.chatgpt.com/docs/hooks).

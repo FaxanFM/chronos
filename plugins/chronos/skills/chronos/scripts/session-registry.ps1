@@ -4,7 +4,7 @@ param(
   [string]$StatePath,
   [string]$CodexHome,
   [string]$HostInventoryPath,
-  [ValidateSet('unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+  [ValidateSet('unsupported', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
   [string]$HostInventoryCompleteness = 'unsupported',
   [ValidateSet('unsupported', 'current_host_runtime')]
   [string]$HostInventoryStatusAuthority = 'unsupported',
@@ -1137,15 +1137,16 @@ function Read-HostInventory {
     if ($tasks.Count -gt $script:SessionLimit) { throw 'invalid' }
     $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $normalized = [Collections.Generic.List[object]]::new()
-    $activeStates = @('active', 'running', 'waiting', 'blocked', 'needs_attention', 'pending', 'idle', 'ready')
+    $activeStates = @('active', 'running', 'waiting', 'blocked', 'needs_attention', 'pending')
+    $inactiveStates = @('idle', 'ready', 'notloaded', 'not_loaded', 'systemerror', 'system_error')
     $endedStates = @('completed', 'failed', 'cancelled', 'archived', 'ended')
-    $unknownStates = @('notloaded', 'not_loaded', 'unknown', 'unavailable')
+    $unknownStates = @('unknown', 'unavailable')
     foreach ($task in $tasks) {
       Assert-ExactKeys $task @('id', 'status', 'generation')
       $id = Normalize-OpaqueId (Get-Value $task 'id') 'supervision_host_inventory_invalid'
       if (-not $seen.Add($id)) { throw 'invalid' }
       $status = ([string](Get-Value $task 'status' '')).Trim().ToLowerInvariant()
-      if ($status -notin @($activeStates + $endedStates + $unknownStates)) { throw 'invalid' }
+      if ($status -notin @($activeStates + $inactiveStates + $endedStates + $unknownStates)) { throw 'invalid' }
       $generation = $null
       if ($task.Contains('generation') -and $null -ne $task.generation) {
         $generation = Normalize-OpaqueId $task.generation 'supervision_host_inventory_invalid'
@@ -1153,7 +1154,7 @@ function Read-HostInventory {
       $normalized.Add([pscustomobject]@{
         Id = $id
         Active = ($status -in $activeStates)
-        Status = if ($status -in $activeStates) { 'live' } elseif ($status -in $endedStates) { 'ended' } else { 'unknown' }
+        Status = if ($status -in $activeStates) { 'live' } elseif ($status -in $inactiveStates) { 'inactive' } elseif ($status -in $endedStates) { 'ended' } else { 'unknown' }
         Generation = $generation
       }) | Out-Null
     }
@@ -1526,9 +1527,9 @@ function Get-DiscoveryPayload {
     nextBatchOffset = $nextBatchOffset
     changes = @($changes)
     resultTruncated = ($activeCount -gt ($activeTasks.Count + $activeAgents.Count))
-    registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
-    monitoringMode = 'complete_host_inventory_plus_optional_hooks'
-    monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
+    registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_active_inventory_required' }
+    monitoringMode = 'complete_current_host_active_inventory_plus_optional_hooks'
+    monitoredTaskPolicy = 'current_host_active_tasks_only'
     turnSignals = [long]$State.health.turnSignals
     duplicateSignals = [long]$State.health.duplicateSignals
     hookModelContext = 'none'
@@ -1538,12 +1539,12 @@ function Get-DiscoveryPayload {
     hookRole = 'optional_acceleration'
     hookRequiredForAutonomy = $false
     lastHookUtc = $State.health.lastHookUtc
-    livenessAuthority = 'complete_host_inventory'
-    taskDiscoveryAuthority = 'complete_host_inventory_each_governor_cycle'
+    livenessAuthority = 'complete_current_host_active_inventory'
+    taskDiscoveryAuthority = 'complete_current_host_active_inventory_each_governor_cycle'
     catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
     loadedTaskCatalogHotSwap = 'unsupported_by_host'
     taskTransport = 'host_required'
-    requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
+    requiredHostAction = 'reconcile_host_active_inventory_then_wait_compact_batch'
     routineUserAction = 'none'
     hostEquivalenceKey = $script:HostEquivalenceKey
     equivalenceScope = 'installation'
@@ -1703,18 +1704,18 @@ try {
       droppedEntries = [long]$state.health.droppedEntries
       ignoredStaleEvents = [long]$state.health.ignoredStaleEvents
       registryCapacity = if ([long]$state.health.droppedEntries -gt 0) { 'exhausted' } else { 'available' }
-      registryCoverage = if ([long]$state.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_inventory_required' }
+      registryCoverage = if ([long]$state.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_active_inventory_required' }
       hookExecutionObservation = if ([long]$state.health.hookRuns -gt 0) { 'observed' } else { 'not_observed' }
       hookTrustObservation = 'host_verification_required'
       hookRole = 'optional_acceleration'
       hookRequiredForAutonomy = $false
       lastHookUtc = $state.health.lastHookUtc
-      livenessAuthority = 'complete_host_inventory'
-      taskDiscoveryAuthority = 'complete_host_inventory_each_governor_cycle'
+      livenessAuthority = 'complete_current_host_active_inventory'
+      taskDiscoveryAuthority = 'complete_current_host_active_inventory_each_governor_cycle'
       catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
       loadedTaskCatalogHotSwap = 'unsupported_by_host'
       taskTransport = 'host_required'
-      requiredHostAction = 'reconcile_host_inventory_then_wait_compact_batch'
+      requiredHostAction = 'reconcile_host_active_inventory_then_wait_compact_batch'
       routineUserAction = 'none'
       hostEquivalenceKey = $script:HostEquivalenceKey
       equivalenceScope = 'installation'
@@ -1738,14 +1739,15 @@ try {
       localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
-      monitoringMode = 'complete_host_inventory_plus_optional_hooks'
-      monitoredTaskPolicy = 'all_live_host_tasks_including_explicit_targets'
+      monitoringMode = 'complete_current_host_active_inventory_plus_optional_hooks'
+      monitoredTaskPolicy = 'current_host_active_tasks_only'
       hookModelContext = 'none'
       workerModelTurns = 0
       recurrenceEligible = ($null -ne $state.governor -and [long]$state.governor.cycleCount -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$state.governor.lastCycleUtc))
-      recurrenceCreationPolicy = 'after_successful_complete_host_inventory_cycle'
+      recurrenceCreationPolicy = 'after_successful_complete_active_inventory_cycle'
       hostInventoryCapabilityPreflightRequired = $true
-      hostInventoryCompletenessRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+      hostInventoryScope = 'active_current_host'
+      hostInventoryCompletenessRequirement = 'complete_active_flag_or_enumerable_active_snapshot'
       hostInventoryUnsupportedError = 'host_inventory_completeness_unsupported'
       hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
       hostInventoryLivenessUnsupportedError = 'host_inventory_liveness_unsupported'
@@ -1761,7 +1763,7 @@ try {
   }
 
   if ($Action -eq 'preflight') {
-    $supportedCompleteness = $HostInventoryCompleteness -in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')
+    $supportedCompleteness = $HostInventoryCompleteness -in @('active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')
     if (-not $supportedCompleteness) {
       Write-SafeOutput ([ordered]@{
         ok = $false
@@ -1773,7 +1775,7 @@ try {
         requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
-        supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+        supportedHostRequirement = 'complete_current_host_active_set'
         hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
       })
       exit 0
@@ -1790,7 +1792,7 @@ try {
         requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
-        supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
+        supportedHostRequirement = 'complete_active_set_and_current_host_runtime_status'
       })
       exit 0
     }
@@ -1801,8 +1803,9 @@ try {
       recurrenceEligible = $false
       hostInventoryCompleteness = $HostInventoryCompleteness
       hostInventoryStatusAuthority = $HostInventoryStatusAuthority
+      hostInventoryScope = 'active_current_host'
       requiredHostAction = 'continue_bootstrap_without_claim'
-      supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
+      supportedHostRequirement = 'complete_active_set_and_current_host_runtime_status'
     })
     exit 0
   }
@@ -1821,7 +1824,7 @@ try {
         requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
-        supportedHostRequirement = 'complete_flag_or_enumerable_stable_snapshot'
+        supportedHostRequirement = 'complete_current_host_active_set'
       })
       exit 0
     }
@@ -1837,7 +1840,7 @@ try {
         requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
         retryPolicy = 'none_until_host_contract_changes'
         inventoryReconcile = 'skipped'
-        supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
+        supportedHostRequirement = 'complete_active_set_and_current_host_runtime_status'
       })
       exit 0
     }
@@ -1873,10 +1876,11 @@ try {
     Write-State $state $resolved
     $initializePayload = Get-DiscoveryPayload $state 'initialize' $current $SinceRevision $now
     $initializePayload['recurrenceEligible'] = $false
-    $initializePayload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
-    $initializePayload['requiredHostAction'] = 'run_complete_host_inventory_cycle_before_recurrence'
+    $initializePayload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
+    $initializePayload['requiredHostAction'] = 'run_complete_host_active_inventory_cycle_before_recurrence'
     $initializePayload['hostInventoryCompleteness'] = $HostInventoryCompleteness
     $initializePayload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
+    $initializePayload['hostInventoryScope'] = 'active_current_host'
     Write-SafeOutput $initializePayload
     exit 0
   }
@@ -1904,7 +1908,7 @@ try {
       requiredHostAction = 'pause_current_key_recurrences_verify_zero_then_stop'
       retryPolicy = 'none_until_host_contract_changes'
       inventoryReconcile = 'skipped'
-      supportedHostRequirement = 'complete_identity_and_current_host_runtime_liveness'
+      supportedHostRequirement = 'complete_active_set_and_current_host_runtime_status'
     })
     exit 0
   }
@@ -1918,6 +1922,7 @@ try {
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
     $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
+    $payload['hostInventoryScope'] = 'active_current_host'
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostTasksAdded'] = [int]$reconciled.Added
@@ -1929,7 +1934,7 @@ try {
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     $payload['recurrenceEligible'] = $false
-    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
+    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
     Write-State $state $resolved
     Write-SafeOutput $payload
     exit 0
@@ -1968,6 +1973,7 @@ try {
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = $true
     $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
+    $payload['hostInventoryScope'] = 'active_current_host'
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostInventoryCycle'] = [long]$state.governor.cycleCount
@@ -1980,7 +1986,7 @@ try {
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     $payload['recurrenceEligible'] = $true
-    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_host_inventory_cycle'
+    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
     $state.health.scanOffset = [long]$payload.nextBatchOffset
     Write-State $state $resolved
     Write-SafeOutput $payload
@@ -1991,7 +1997,7 @@ try {
     $payload = Get-DiscoveryPayload $state 'discover' $current $SinceRevision $now
     $payload['cycleAdvanced'] = $false
     $payload['taskWakePolicy'] = 'intervention_claim_required'
-    $payload['requiredHostAction'] = 'run_cycle_with_complete_host_inventory'
+    $payload['requiredHostAction'] = 'run_cycle_with_complete_host_active_inventory'
     Write-SafeOutput $payload
     exit 0
   }

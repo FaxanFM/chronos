@@ -152,9 +152,9 @@ successfully exercises the candidate release from a fresh task.
   that omit hook dispatch. A plugin command cannot run when the host does not
   invoke it. The quote-free launcher only mitigates the separate embedded-quote
   command-runner defect; it cannot repair host dispatch.
-- v0.9.2 correction: make complete host inventory the explicit discovery and
-  liveness authority on every Governor cycle. Report hooks as optional
-  acceleration, keep `hookRequiredForAutonomy=false`, and never fail setup when
+- v0.9.2 correction: make the complete current-host active inventory the
+  explicit discovery and liveness authority on every Governor cycle. Report
+  hooks as optional acceleration, keep `hookRequiredForAutonomy=false`, and never fail setup when
   inventory and topology postconditions pass on a non-dispatching host.
 - Regression: native status and public contracts expose the authority, optional
   hook role, restart action, and zero-user-registration behavior. Deterministic

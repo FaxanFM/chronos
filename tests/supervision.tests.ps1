@@ -65,7 +65,7 @@ function Invoke-Supervision {
     [long]$SinceRevision = 0,
     [string]$Subject = '',
     [string]$HostInventory = '',
-    [ValidateSet('', 'unsupported', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+    [ValidateSet('', 'unsupported', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
     [string]$HostInventoryCompleteness = '',
     [ValidateSet('', 'unsupported', 'current_host_runtime')]
     [string]$HostInventoryStatusAuthority = '',
@@ -834,8 +834,8 @@ try {
   Assert-True ($emptyData.hostPostcondition -eq 'one_live_governor_one_active_recurrence_zero_duplicates' -and $emptyData.localMutexScope -eq 'machine_state_root') 'Host postcondition or local-lock scope regressed.'
   Assert-True ($emptyData.equivalenceScope -eq 'installation' -and $emptyData.installationScopePersistence -eq 'state_root_anchor') 'Installation equivalence scope or persistence boundary regressed.'
   Assert-True ($emptyData.stateStoreMode -eq 'explicit' -and $emptyData.stateStoreWriteReady -and $emptyData.routineUserAction -eq 'none') 'State-store preflight or autonomous routine-failure contract regressed.'
-  Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
-  Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'complete_host_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
+  Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_active_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
+  Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'complete_current_host_active_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
   Assert-True ($emptyData.catalogRefreshAction -eq 'fully_restart_codex_then_start_fresh_task' -and $emptyData.loadedTaskCatalogHotSwap -eq 'unsupported_by_host') 'Install refresh guidance did not preserve the host catalog boundary.'
   Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-5.6-terra' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select Terra Medium.'
   $scopePath = Join-Path (Split-Path -Parent $state) 'installation-scope.json'
@@ -863,7 +863,7 @@ try {
   Assert-True (-not $identityOnlyInitialize.ok -and $identityOnlyInitialize.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyInitialize.governorClaimed) 'Initialize claimed a Governor from identity enumeration without current-host liveness authority.'
   $capabilityStatus = Get-Payload (Invoke-Supervision $capabilityState)
   Assert-True (-not $capabilityStatus.governorClaimed -and $capabilityStatus.hostInventoryCapabilityPreflightRequired -and $capabilityStatus.hostInventoryUnsupportedError -eq 'host_inventory_completeness_unsupported') 'Capability preflight failure left an active-but-unschedulable Governor claim.'
-  foreach ($supportedCompleteness in @('complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
+  foreach ($supportedCompleteness in @('active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
     $identityOnlyPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness)
     Assert-True (-not $identityOnlyPreflight.ok -and $identityOnlyPreflight.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyPreflight.recurrenceEligible) "Identity-only completeness mode $supportedCompleteness was incorrectly accepted as current-host liveness."
     $supportedPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness -HostInventoryStatusAuthority 'current_host_runtime')
@@ -875,7 +875,7 @@ try {
   $hostInitialize = Invoke-Supervision $hostState 'initialize' $hostGovernor
   Assert-True ($hostInitialize.ExitCode -eq 0) 'Host reconciliation fixture could not claim its Governor.'
   $hostInitializeData = Get-Payload $hostInitialize
-  Assert-True (-not $hostInitializeData.recurrenceEligible -and $hostInitializeData.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'Initialization incorrectly authorized a recurrence before a complete host inventory cycle.'
+  Assert-True (-not $hostInitializeData.recurrenceEligible -and $hostInitializeData.recurrenceCreationPolicy -eq 'after_successful_complete_active_inventory_cycle') 'Initialization incorrectly authorized a recurrence before a complete active inventory cycle.'
   $hostInventoryPath = Join-Path $root 'host-inventory.json'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1
@@ -900,17 +900,37 @@ try {
     tasks = @([ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' })
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $hostClose = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
-  Assert-True ($hostClose.hostTasksEnded -eq 1 -and $hostClose.activeTasks -eq 0) 'Complete host inventory did not close an absent task.'
+  Assert-True ($hostClose.hostTasksEnded -eq 1 -and $hostClose.activeTasks -eq 0) 'Complete active inventory did not close an absent task.'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
     tasks = @(
       [ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' },
-      [ordered]@{ id = 'thread-host-not-loaded'; status = 'notLoaded'; generation = $null }
+      [ordered]@{ id = 'thread-host-not-loaded'; status = 'notLoaded'; generation = $null },
+      [ordered]@{ id = 'thread-host-system-error'; status = 'systemError'; generation = $null }
     )
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $unknownHost = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
-  Assert-True ($unknownHost.hostTasksUnknown -eq 1 -and $unknownHost.hostTasksAdded -eq 0 -and $unknownHost.activeTasks -eq 0) '`notLoaded` was not preserved as a non-live, non-creating unknown state.'
-  Assert-True (@($unknownHost.hostTaskStatuses | Where-Object status -eq 'unknown').Count -eq 1) 'Unknown host status was not explicit in compact output.'
+  Assert-True ($unknownHost.hostTasksUnknown -eq 0 -and $unknownHost.hostTasksAdded -eq 0 -and $unknownHost.activeTasks -eq 0) 'Non-active host runtime states were not treated as inactive.'
+  Assert-True (@($unknownHost.hostTaskStatuses | Where-Object status -eq 'inactive').Count -eq 2) 'Inactive host statuses were not explicit in compact output.'
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
+    tasks = @(
+      [ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' },
+      [ordered]@{ id = 'thread-active-to-idle'; status = 'running'; generation = 'generation-active-to-idle' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $activeBeforeIdle = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
+  Assert-True ($activeBeforeIdle.hostTasksAdded -eq 1 -and $activeBeforeIdle.activeTasks -eq 1) 'An active task was not added before the inactive-transition regression.'
+  [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
+    schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true
+    tasks = @(
+      [ordered]@{ id = $hostGovernor; status = 'running'; generation = 'generation-governor' },
+      [ordered]@{ id = 'thread-active-to-idle'; status = 'idle'; generation = 'generation-active-to-idle' }
+    )
+  } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
+  $inactiveTransition = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
+  Assert-True ($inactiveTransition.hostTasksEnded -eq 1 -and $inactiveTransition.activeTasks -eq 0) 'An idle task remained in the governed active set.'
+  Assert-True (@($inactiveTransition.hostTaskStatuses | Where-Object status -eq 'inactive').Count -eq 1) 'The idle transition was not explicit in compact output.'
   [IO.File]::WriteAllText($hostInventoryPath, '{"schemaVersion":1,"capturedAtUtc":"2000-01-01T00:00:00Z","complete":true,"tasks":[]}', [Text.UTF8Encoding]::new($false))
   $staleInventory = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
   Assert-True (-not $staleInventory.ok -and $staleInventory.error -eq 'supervision_host_inventory_invalid') 'Stale host inventory did not fail closed.'
@@ -919,7 +939,7 @@ try {
   $cycleGovernor = 'thread-cycle-governor'
   [void](Invoke-Supervision $cycleState 'initialize' $cycleGovernor)
   $passiveDiscovery = Get-Payload (Invoke-Supervision $cycleState 'discover' $cycleGovernor)
-  Assert-True (-not $passiveDiscovery.cycleAdvanced -and $passiveDiscovery.governorCycleCount -eq 0 -and $passiveDiscovery.requiredHostAction -eq 'run_cycle_with_complete_host_inventory') 'Passive discovery was incorrectly counted as a Governor cycle.'
+  Assert-True (-not $passiveDiscovery.cycleAdvanced -and $passiveDiscovery.governorCycleCount -eq 0 -and $passiveDiscovery.requiredHostAction -eq 'run_cycle_with_complete_host_active_inventory') 'Passive discovery was incorrectly counted as a Governor cycle.'
   $missingCycleInventory = Get-Payload (Invoke-Supervision $cycleState 'cycle' $cycleGovernor)
   Assert-True (-not $missingCycleInventory.ok -and $missingCycleInventory.error -eq 'supervision_host_inventory_required') 'A Governor cycle without host inventory did not fail closed.'
   $governorOmittedInventory = Join-Path $root 'governor-omitted-inventory.json'
@@ -969,7 +989,7 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $cycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $hostInventoryPath)
   Assert-True ($cycle.ok -and $cycle.governorCycleCount -eq 2 -and $cycle.hostInventoryCycle -eq 2 -and $cycle.hostInventoryComplete -and $cycle.hostInventoryObserved -eq 3 -and $cycle.hostInventoryRawObserved -eq 3) 'A complete host inventory did not advance exactly one additional Governor cycle.'
-  Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_host_inventory_cycle') 'A verified complete inventory cycle did not authorize the one Governor recurrence.'
+  Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_active_inventory_cycle' -and $cycle.hostInventoryScope -eq 'active_current_host') 'A verified complete active inventory cycle did not authorize the one Governor recurrence.'
   Assert-True (@($cycle.hostTaskStatuses).Count -eq 3 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'ended').Count -eq 1) 'The cycle did not return one normalized status per host task.'
   Assert-True (($cycle.hostTaskStatuses | ConvertTo-Json -Compress) -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Compact host statuses exposed a raw task ID or generation.'
   $cycleJson = $cycle | ConvertTo-Json -Compress -Depth 8
@@ -1087,7 +1107,7 @@ try {
   }
   Assert-True ($turnSignal.ExitCode -eq 0 -and -not $turnSignal.Output -and -not $turnSignal.Error) 'Stop activity hook must be silent and non-blocking.'
   $turnStatus = Get-Payload (Invoke-Supervision $state)
-  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'complete_host_inventory_plus_optional_hooks' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
+  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'complete_current_host_active_inventory_plus_optional_hooks' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
   $rawAfterTurn = [IO.File]::ReadAllText($state)
   foreach ($private in @('turn-private-identifier', 'private assistant response that must not persist')) {
     Assert-True (-not $rawAfterTurn.Contains($private)) "Registry persisted private Stop input: $private"

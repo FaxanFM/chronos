@@ -112,7 +112,7 @@ try {
     'four bounded direct TEMP child slots',
     'deterministic host-and-Codex-home hash',
     'recurrenceEligible=true',
-    'one compact complete host task-list call',
+    'one compact complete current-host active-list call',
     'callerVisibility=excluded_by_host',
     'hostInventoryRawObserved',
     'gpt-5.6-terra',
@@ -120,7 +120,7 @@ try {
     'hookExecutionObservation=observed',
     'optional accelerator',
     'hookRequiredForAutonomy=false',
-    'complete host inventory',
+    'complete current-host active inventory',
     'before initialization',
     'pre-existing active recurrence',
     'prove zero active current-key recurrences',
@@ -236,7 +236,7 @@ try {
     'initialization failure',
     'supervision status unreadable',
     'Heartbeat status unreadable',
-    'incomplete inventory',
+    'incomplete active inventory',
     'inventory missing Governor',
     'inventory contains Governor more than once',
     'post-eligibility recurrence reconciliation failure'
@@ -247,7 +247,7 @@ try {
       throw "Supervision failure matrix does not fail closed for: $failureRow"
     }
   }
-  if (-not $supervisionContract.Contains('| complete inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
+  if (-not $supervisionContract.Contains('| complete active inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
     throw 'Supervision success matrix does not activate exactly one Governor recurrence after eligibility.'
   }
   foreach ($required in @(

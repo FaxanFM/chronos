@@ -12,18 +12,21 @@ loops, quota and context pressure, broken permission rules, rollout duplication,
 diagnostic SQLite churn, and Windows process degradation. Routine worker tasks
 stay passive. Chronos sends no publisher telemetry.
 
-One complete caller-aware host inventory per Governor cycle is the task-discovery
-and liveness authority. It is not a health report. Heartbeat evaluation uses a
+One complete caller-aware inventory of current-host active tasks per Governor
+cycle is the task-discovery and liveness authority. It does not enumerate task
+history and it is not a health report. Heartbeat evaluation uses a
 separate normalized collector snapshot with explicit coverage for all eight
 families. Missing evidence stays `partial` or `unsupported`.
-Automatic Governor setup first requires the host to prove that it can enumerate
-that complete inventory. A capped task-list contract without completeness,
-pagination, a total count, and stable snapshot semantics returns
+Automatic Governor setup first requires the host to prove that it can return
+the complete active set. A capped history list that does not guarantee every
+active task returns
 `host_inventory_completeness_unsupported` with zero Governor recurrences; it is
-not silently converted into a partial or healthy setup.
+not silently converted into a partial or healthy setup. A complete set whose
+statuses are not authoritative for the current host returns
+`host_inventory_liveness_unsupported` under the same zero-recurrence rule.
 Lifecycle hooks are an optional accelerator: a Windows host may show them as
 active and trusted without dispatching them. Missing hook execution never
-asks the user to register tasks and, on hosts with provably complete inventory,
+asks the user to register tasks and, on hosts with a provably complete active set,
 does not disable autonomous discovery.
 
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
@@ -125,9 +128,10 @@ paths, identifiers, prompts, commands, credentials, or private source.
   monitored tasks. When action is required, the Governor sends one fixed,
   bounded instruction to the exact verified affected task. Stable event IDs,
   one active intervention per target generation, and bounded retries prevent wake storms.
-- Reconciles every task from one complete bounded host inventory inside each
-  Governor cycle. If the host list omits its caller, schema v2 accounts for the
-  known Governor inside that same call. The native result returns hash-only
+- Reconciles every current-host active task from one complete bounded active-set
+  inventory inside each Governor cycle. If the host list omits its caller,
+  schema v2 accounts for the known Governor inside that same call. The native
+  result returns hash-only
   normalized task statuses; routine cycles do not wake monitored tasks. Setup
   stops before task creation or claim when the host cannot prove completeness.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
@@ -196,9 +200,12 @@ Chronos verifies the package source and native status, reuses or creates one
 dedicated Governor, reports whether the eight Heartbeat families are observed,
 partial, or unsupported, and proves that worker tasks have no recurrence. It
 does not call prior-state status a new evaluation. Before initialization, it
-checks the host task-list capability. A capped `list_threads` response without
-an explicit completeness flag, terminal cursor under a stable snapshot, or
-fully enumerated total count under a stable snapshot stops with
+checks whether the host can return every current active task with authoritative
+runtime status. A complete active snapshot from the same host is enough;
+`thread/loaded/list` is the relevant underlying host concept, not stored task
+history. A capped
+`list_threads` response that does not guarantee inclusion of every active task
+stops with
 `host_inventory_completeness_unsupported`. Chronos creates no Governor task,
 claim, or retry recurrence for that unsupported contract. Chronos also requires
 every normalized status to come from the current host runtime.
@@ -210,14 +217,15 @@ only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
-complete caller-aware host inventory accounts for the verified Governor exactly
-once. Any failed or partial
+complete caller-aware current-host active inventory accounts for the verified
+Governor exactly once. Any failed or partial
 setup pauses or removes every current-key recurrence, including one that existed
 before the attempt, and verifies zero current-key Chronos recurrences. A verified
 concurrent loser leaves the winner unchanged and stands down. Normal Codex
 hook trust is optional for autonomous discovery. If Codex presents a trust
 request, only the user can approve it; Chronos proceeds through one complete
-host inventory per Governor cycle whether the hooks are trusted or dispatched.
+current-host active inventory per Governor cycle whether the hooks are trusted
+or dispatched.
 
 For an on-demand diagnostic without enabling supervision, ask:
 
@@ -278,8 +286,8 @@ user controls hook trust through Codex `/hooks`; Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
 run. If a bounded hook cannot persist an event, it stays silent and the next
-complete inventory remains authoritative. Hooks cannot repair a host contract
-that cannot enumerate that inventory.
+complete active inventory remains authoritative. Hooks cannot repair a host
+contract that cannot return the full active set.
 
 Heartbeats use the same Governor and recurrence created by full setup. The
 Codex host owns the recurring schedule and model choice. Chronos does not

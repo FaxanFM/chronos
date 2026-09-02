@@ -188,8 +188,9 @@ Check `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` in supervision
 status. Where the host dispatches hooks, capture the baseline and prove those
 values advance. Some current Windows Codex and `codex exec` paths can omit hook
 dispatch even while `/hooks` reports active and trusted. Chronos therefore uses
-one complete host inventory per Governor cycle as its autonomous discovery
-authority. v0.9.2 keeps the Windows launcher quote-free because Codex passes it
+one complete current-host active inventory per Governor cycle as its autonomous
+discovery authority. It does not enumerate inactive task history. v0.9.2 keeps
+the Windows launcher quote-free because Codex passes it
 through an outer `cmd.exe` command boundary.
 
 First inspect all host automations named `Chronos Governor pulse`, but derive
@@ -225,8 +226,8 @@ deterministic host-and-Codex-home fallback. A slot change therefore does not
 change the installation key or authorize a second Governor. On first use, a readable v2, fixed-TEMP, or LocalAppData
 installation anchor is imported with its state, preserving the existing key
 without changing the prior source. If a prior root is inaccessible,
-Chronos preserves it, initializes the writable v3 slot, and rebuilds from
-complete host inventory. Loss of the registry disables the discovery hint but
+Chronos preserves it, initializes the writable v3 slot, and rebuilds from a
+complete current-host active inventory. Loss of the registry disables the discovery hint but
 does not affect Codex tasks. Reconcile existing host automations before
 recreating a claim so registry loss cannot justify a duplicate task or
 recurrence. `engine=degraded` with `registryCapacity=exhausted` means Chronos

@@ -32,9 +32,9 @@ one every six hours while idle. Worker tasks receive no recurring turns.
 
 **Hard gate:** Do not create or enable any Governor recurrence until native
 initialization succeeds, supervision and Heartbeat status are readable, and one
-complete host-inventory cycle accounts for the selected Governor exactly once
-and returns `recurrenceEligible=true`. The raw inventory uses schema v1 when the
-host includes its caller, or schema v2 with
+complete current-host active-inventory cycle accounts for the selected Governor
+exactly once and returns `recurrenceEligible=true`. The raw inventory uses
+schema v1 when the host includes its caller, or schema v2 with
 `callerVisibility=excluded_by_host` when the host task list omits the current
 Governor; v2 normalization adds only that registry-verified cycle caller and
 makes no second host-status call. Any other result requires zero active
@@ -42,13 +42,14 @@ current-key recurrences, verified from fresh host state. Never use a recurrence
 to retry, recover, or finish a failed setup.
 
 **Host-capability gate:** Before task creation, contender election, native
-`initialize`, or bootstrap convergence, inspect the host task-list contract.
-The host must expose at least one authoritative completion proof: an explicit
-response-level completeness flag; cursor pagination that reaches a terminal
-cursor under one stable snapshot identity; or a total count that is fully
-enumerated under one stable snapshot identity. A capped `list_threads` surface
-with none of those fields is unsupported. Call native `preflight` with
-`unsupported`, return the exact compact blocker
+`initialize`, or bootstrap convergence, inspect the host task contract. The
+host must return every current active task directly, or expose a broader
+same-runtime snapshot that proves every active task is included. A same-host
+`thread/loaded/list`-equivalent snapshot with authoritative runtime status is
+sufficient; stored
+task history is out of scope. A capped `list_threads` surface that does not
+guarantee inclusion of every active task is unsupported. Call native `preflight`
+with `unsupported`, return the exact compact blocker
 `host_inventory_completeness_unsupported`, skip inventory reconciliation, and
 enforce zero active current-key recurrences. Do not create a Governor task,
 claim the registry, schedule a retry, or repeatedly re-read the same capped
@@ -56,13 +57,12 @@ window. If an older failed setup left a claim, stop its current-key recurrence
 first, verify zero, then use the normal two-phase release. Retry only after the
 host contract changes.
 
-Completion proof and liveness authority are separate. A supported preflight
-must also pass `current_host_runtime` as the status authority, and only when
-every task status came from the current Codex host runtime. A second
-`codex app-server` process may provide terminal cursor pagination over stored
-task identities, but its `notLoaded` values describe that new process, not the
-live Desktop host. Never use that identity-only snapshot as
-`current_host_runtime`. Native preflight returns
+Active-set completeness and liveness authority are separate. A supported
+preflight must also pass `current_host_runtime` as the status authority, and
+only when every status came from the current Codex host runtime. A second
+`codex app-server` process may enumerate stored task identities, but its
+`notLoaded` values describe that new process, not the live Desktop host. Never
+use that identity-only snapshot as `current_host_runtime`. Native preflight returns
 `host_inventory_liveness_unsupported`, remains non-claiming, and requires zero
 current-key recurrences when status authority is absent.
 
@@ -85,9 +85,11 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    of a conflict. Do not run the broad Inspector or packaged validation suites
    during normal first-use setup; use Inspector only when compact status reports
    a health problem or the user separately asks for diagnostics. Inspect the
-   task-list tool contract now. Run non-claiming native `preflight` with
-   `complete_flag`, `cursor_snapshot`, `total_count_snapshot`, or `unsupported`
-   according to the actual host evidence, and pass
+   active-task tool contract now. Run non-claiming native `preflight` with
+   `active_snapshot` when the same host returns the complete active set,
+   `complete_flag`, `cursor_snapshot`, or `total_count_snapshot` only when the
+   broader same-runtime contract proves all active tasks are included, or
+   `unsupported` otherwise. Pass
    `-SupervisionHostInventoryStatusAuthority current_host_runtime` only when
    the same current host supplies authoritative status for every task. On
    either unsupported completeness or liveness, perform only the
@@ -273,8 +275,8 @@ turn. Non-terminal handlers request asynchronous execution where the host
 supports it; `SessionEnd` is synchronous. When Codex dispatches them, they run
 headless, return no model context, and create no model turn. Hook trust is
 optional acceleration and must never block setup. If hooks are disabled,
-untrusted, or not dispatched, continue with one complete compact host task-list
-inventory only after capability preflight proves that the host can enumerate it,
+untrusted, or not dispatched, continue with one complete compact current-host
+active inventory only after capability preflight proves full active-set coverage,
 and reconcile it through `-SupervisionAction cycle`; do not ask the user to register
 or relay tasks. Brief registry contention uses a bounded protected fallback event;
 `status` and `discover` reconcile and remove it under the registry lock. Never
@@ -287,30 +289,31 @@ expired claimed send; native state changes it to `delivery_unknown`, never a
 blind retry.
 
 Then apply the bounded cycle-zero/one host convergence check when required and
-collect one logical host inventory, but only after capability preflight proves
-that full enumeration is possible. The inventory is complete only when the host
-explicitly says the response is complete, or when documented cursor pagination
-reaches its terminal cursor under one stable snapshot identity, or when a
-documented total count is fully enumerated under one stable snapshot identity. A capped
-`list_threads` response with no completeness or pagination contract is not
-complete, even when it returned fewer than its visible limit. Never infer
-`complete=true` from a one-call snapshot. Write only opaque task
+collect one logical current-host active inventory, but only after capability
+preflight proves the active set is complete. A direct same-host
+`thread/loaded/list`-equivalent snapshot is complete when its contract guarantees every active task and supplies
+authoritative runtime status. A broader snapshot may also be used when an
+explicit completeness flag, terminal cursor, or fully enumerated total proves
+that every active task is included. A capped `list_threads` response without
+that guarantee is not complete, even when it returned fewer than its visible
+limit. Never infer `complete=true` from an undocumented one-call snapshot. Write only opaque task
 IDs, safe status categories, optional opaque generations, capture time, and a
 completeness flag to a bounded JSON file under `%TEMP%`; schema v1 requires the
 Governor in `tasks`. When the host list excludes its current caller, schema v2
 must declare `callerVisibility=excluded_by_host` and omit the Governor from
 `tasks`; Chronos then adds that registry-verified cycle caller intrinsically.
 Never infer caller exclusion, supplement it from a second unrelated snapshot,
-or write titles, paths, or transcript content. Preserve the host's `notLoaded`
-status; native normalization maps it to `unknown`, which is neither live nor
-ended and cannot create, revive, or close a task. Do not map it to `idle`.
+or write titles, paths, or transcript content. From the authoritative current
+host, `idle`, `ready`, and `notLoaded` normalize to `inactive`; they cannot
+create or revive a governed task and they close a previously active record.
+`systemError` also normalizes to non-active `inactive`.
 Do not accept terminal pagination from a separately spawned app-server as
 liveness evidence: it enumerates stored identities but cannot observe the
 current host runtime's active or idle state.
 
-Run `-SupervisionAction cycle` only with proven complete inventory. When the
-host contract cannot prove completeness, do not fabricate a partial inventory,
-do not call `reconcile-host`, and do not keep polling the same capped window.
+Run `-SupervisionAction cycle` only with a proven complete active inventory.
+When the host contract cannot prove complete active coverage, do not fabricate a
+partial inventory, call `reconcile-host`, or keep polling the same capped window.
 Return `host_inventory_completeness_unsupported`, enforce zero current-key
 recurrences, and stop until the host capability changes. `reconcile-host`
 remains a bounded diagnostic action only for an independently supplied partial
@@ -318,8 +321,10 @@ inventory outside automatic bootstrap. Verify
 that `hostInventoryCycle` advanced once, `hostInventoryRawObserved` matches the
 one raw list, and `hostTaskStatuses` contains one hash-only normalized entry for
 every listed task plus exactly one intrinsic Governor only in caller-excluded
-schema v2. The host inventory proves discovery and liveness only. It never
-supplies Heartbeat collector coverage for any family and does not
+schema v2. Previously active tasks absent from a complete active snapshot become
+ended and remain in bounded registry memory for 24 hours; Chronos never scans
+historical tasks to rebuild that memory. The host inventory proves discovery
+and liveness only. It never supplies Heartbeat collector coverage for any family and does not
 prove Heartbeat progress, approval health, quota state, rule health, SQLite
 churn, tests, Git state, or machine health.
 
