@@ -71,6 +71,9 @@ jobs:
       - name: Test reproducible release
         shell: powershell
         run: .\tests\release.tests.ps1
+      - name: Test skills-only Directory release
+        shell: powershell
+        run: .\tests\directory-release.tests.ps1
 
   release:
     needs: test
@@ -110,7 +113,9 @@ jobs:
           }
       - name: Build release artifacts
         shell: powershell
-        run: .\scripts\build-release.ps1 -Version $env:GITHUB_REF_NAME -OutputDirectory dist
+        run: |
+          .\scripts\build-release.ps1 -Version $env:GITHUB_REF_NAME -OutputDirectory dist
+          .\scripts\build-release.ps1 -Version $env:GITHUB_REF_NAME -Edition Directory -OutputDirectory dist
       - name: Attest release artifact
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:

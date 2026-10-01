@@ -124,7 +124,7 @@ try {
     'one compact scoped current-host list call',
     'callerVisibility=excluded_by_host',
     'hostInventoryRawObserved',
-    'gpt-5.6-terra',
+    'gpt-6-sol',
     'configuration',
     'hookExecutionObservation=observed',
     'optional accelerator',
@@ -150,6 +150,10 @@ try {
     }
   }
   $governorSkill = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'plugins\chronos\skills\chronos-governor\SKILL.md')) -replace '\s+', ' '
+  foreach ($modelContractTerm in @('`gpt-6-sol` with Medium reasoning', '`gpt-6-luna` with Medium reasoning',
+    'explicit user-selected alternative', 'governor_model_change_unverified', 'Never change monitored chats')) {
+    if (-not $governorSkill.Contains($modelContractTerm)) { throw "Governor model contract is missing: $modelContractTerm" }
+  }
   foreach ($transportPreflightTerm in @(
     'Before calling Governor `status` or `plan`',
     'fork_turns="none"',

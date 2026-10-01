@@ -74,7 +74,10 @@ an unrelated payload does not count.
 The rooted installed `chronos.cmd` launcher with `-Action heartbeat` invokes an internal deterministic transition
 engine. The Codex host supplies one bounded normalized snapshot across the
 monitored task set and chooses the recurring cadence. The recommended topology
-uses one Governor task on `gpt-5.6-terra` with Medium reasoning. Monitored tasks
+uses one Governor task on `gpt-6-sol` with Medium reasoning. An explicitly
+selected `gpt-6-luna` with Medium reasoning is an alternative only when the host
+advertises it. Recommendations do not verify the effective host model or cost.
+Monitored tasks
 remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
 It does not infer cost or quota impact from a model name.

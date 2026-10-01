@@ -136,10 +136,18 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    turn.
 4. If no valid Governor exists and the host exposes `create_thread`, create one
    fresh task titled `Chronos Governor`. Do not fork the current task or copy its
-   history. Request `gpt-5.6-terra` with Medium reasoning only when the host
+   history. Request `gpt-6-sol` with Medium reasoning only when the host
    advertises that exact task-model choice. Field validation requires reliable
    tool use and recovery judgment in the coordinator role. Never silently
-   substitute another model. After any creation, re-list all live, role-verified
+   substitute another model. Offer `gpt-6-luna` with Medium reasoning only as an
+   explicit user-selected alternative when that exact choice is advertised.
+   Native recommendation fields are preferences, not effective model evidence.
+   For an existing Governor, preserve its model unless the user authorizes a
+   change; apply an authorized change only through supported host controls and
+   verify the effective choice. If the host cannot set or verify it, report
+   `governor_model_change_unverified` and do not claim an upgrade. Never change
+   monitored chats or create a second Governor to change a model. After any
+   creation, re-list all live, role-verified
    current-key Governor tasks and apply the same stable creation-time and
    immutable-ID ordering. Only the first deterministic setup contender may
    proceed to recurrence mutation or initialization. Every other fresh-task

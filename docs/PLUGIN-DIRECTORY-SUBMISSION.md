@@ -1,15 +1,23 @@
 # OpenAI Plugin Directory Published Listing Record
 
-## v0.9.4 Onboarding Draft
+## v0.9.4 Submission Candidate
 
 Version: `0.9.4`
 
 Local full draft: `chronos-v0.9.4.zip`, SHA-256
-`8dcb909cff11a4ffb69467d831121f9e5d106331e3b92db2cae1b1b2c1efb031`.
+`8ede0807119bf2c25a6432acc80ba8137d315bd3fec3d11391a898d95c1114ae`.
 It retains 14 release files and five optional hooks. Reserved future release
 destination: https://github.com/FaxanFM/chronos/releases/tag/v0.9.4 (not published).
 
-Not submitted, installed, or published. This draft adds a packaged onboarding
+The separately labeled Directory ZIP is `chronos-v0.9.4-skills-only.zip`, SHA-256
+`c734284e71bc84da12f30566ed09af8fa8548d6deea76496a32c3d0913c17bbb`.
+It contains 12 release files, both skills, and no lifecycle hook configuration
+or hook-intake launcher. Its manifest, skill notices, and README disclose the
+skills-only edition. It does not auto-install GitHub hooks or patch managed caches.
+Both artifacts prefer GPT-6 Sol with Medium reasoning; GPT-6 Luna is an
+explicit supported choice, not a silent fallback or measured token-saving claim.
+
+Not yet submitted, installed, or published. This candidate adds a packaged onboarding
 entrypoint to the existing core skill, separate consent decisions, verified
 setup receipts, and explicit local/publisher/provider data disclosures. See
 [ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
@@ -17,8 +25,10 @@ setup receipts, and explicit local/publisher/provider data disclosures. See
 The full hook-enabled source still cannot be uploaded under the documented
 hook exclusion. Optional GitHub hooks must not be installed covertly after a
 skills-only review. The Directory-to-GitHub automation route is unverified;
-the draft reports that boundary and offers useful core setup instead. A future
-skills-only artifact needs edition-specific copy and separate validation.
+the candidate reports that boundary and offers useful core setup instead. The
+skills-only artifact has deterministic-build, edition-disclosure, hook-exclusion,
+native scoped-cycle, process-restart, and unsupported-coverage checks. These
+fixture checks do not establish live unattended scheduled execution.
 
 ## v0.9.3 Release Candidate
 

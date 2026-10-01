@@ -44,12 +44,19 @@ default selection, or silence as consent.
 | Decision | What the user gets | What is authorized |
 | --- | --- | --- |
 | Recurring Governor | Up to one Governor model turn per active hour or six idle hours; verified exact-target interventions when needed | One scoped Governor and one host recurrence after native gates pass; zero worker recurrences; model usage counts against Codex allowance |
+
 | On-demand only | Compact checks when requested; no monitoring between requests | No new Governor claim, task, or recurrence; an existing recurrence is disclosed and needs scoped pause authorization |
 | Review GitHub hooks | Explanation and inspection of five short lifecycle handlers | Review only; installation of an exact version/source change and hook trust are separate decisions |
 | Keep hooks off | Core governance without new lifecycle evidence | No hook install or auto-trust; existing trusted hooks must be disclosed and disabled through supported controls with scoped confirmation |
 | Decide later | Core setup can continue | No additional hook permission; preserve and disclose existing hook state |
 | Run briefing | Bounded Windows and compatible Codex health diagnostics | Inspector once for the requested briefing; no broad validation suite or automatic diagnostic upload |
 | Skip briefing | Core task checks without Inspector evidence | No new Inspector run; unavailable health coverage stays unsupported |
+
+The Governor prefers GPT-6 Sol (`gpt-6-sol`) with Medium reasoning when the
+current host advertises it. GPT-6 Luna (`gpt-6-luna`) with Medium reasoning is
+available only as an explicit user-selected alternative. Verify the effective
+host choice; a native recommendation is not a model-setting change or a token
+savings measurement. Existing Governor and worker models are not silently changed.
 
 The five hooks are `SessionStart`, `SessionEnd`, `Stop` (main turn completed),
 `SubagentStart`, and `SubagentStop`. They record protected identifiers, hashes,

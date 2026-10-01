@@ -320,7 +320,11 @@ separate product. A host-side collector supplies a privacy-safe normalized JSON
 snapshot; Chronos persists compact transition and dedupe state, then routes only
 meaningful changes to one Governor inbox. Monitored tasks can use any model and
 do not run Heartbeats. The recommended host configuration is one Governor task
-using `gpt-5.6-terra` with Medium reasoning. The host selects that model; Chronos
+using `gpt-6-sol` with Medium reasoning. Offer `gpt-6-luna` with Medium reasoning
+only when the user explicitly chooses it and the host advertises that exact
+choice. A model recommendation is not proof of the effective model or lower
+token use; verify the host setting and keep unsupported changes explicit.
+The host selects that model; Chronos
 cannot change a task's model setting.
 
 `OwningSolThread` is always `governor`. `Owner` and `Subject` are compact routing

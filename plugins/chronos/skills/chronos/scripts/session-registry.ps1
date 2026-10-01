@@ -1711,7 +1711,7 @@ function Get-DiscoveryPayload {
     localMutexScope = 'machine_state_root'
     workerRecurrence = 'disabled'
     modelCalls = 'governor_only'
-    recommendedGovernorModel = 'gpt-5.6-terra'
+    recommendedGovernorModel = 'gpt-6-sol'
     recommendedGovernorReasoningEffort = 'medium'
     recommendedCadenceMinutes = if ($activeCount -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
     maximumModelCallsPerDay = if ($activeCount -gt 0) { [int](1440 / $script:GovernorActiveCadenceMinutes) } else { [int](1440 / $script:GovernorIdleCadenceMinutes) }
@@ -1904,7 +1904,7 @@ try {
       hostInventoryUnsupportedError = 'host_inventory_completeness_unsupported'
       hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
       hostInventoryLivenessUnsupportedError = 'host_inventory_liveness_unsupported'
-      recommendedGovernorModel = 'gpt-5.6-terra'
+      recommendedGovernorModel = 'gpt-6-sol'
       recommendedGovernorReasoningEffort = 'medium'
       recommendedCadenceMinutes = if (($activeTasks + $activeAgents) -gt 0) { $script:GovernorActiveCadenceMinutes } else { $script:GovernorIdleCadenceMinutes }
       maximumModelCallsPerDay = if (($activeTasks + $activeAgents) -gt 0) { [int](1440 / $script:GovernorActiveCadenceMinutes) } else { [int](1440 / $script:GovernorIdleCadenceMinutes) }
