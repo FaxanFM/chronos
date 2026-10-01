@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$CodexPath,
   [Parameter(Mandatory = $true)][string]$ReleaseManifestPath,
-  [string]$Commit = '77ff0666c451e7ca6b81d4a0e9a598e057106afd'
+  [string]$Commit = 'bc97518f5b70850f56f4626c312ce536e715635f'
 )
 
 $ErrorActionPreference = 'Stop'

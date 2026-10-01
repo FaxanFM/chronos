@@ -44,7 +44,6 @@ default selection, or silence as consent.
 | Decision | What the user gets | What is authorized |
 | --- | --- | --- |
 | Recurring Governor | Up to one Governor model turn per active hour or six idle hours; verified exact-target interventions when needed | One scoped Governor and one host recurrence after native gates pass; zero worker recurrences; model usage counts against Codex allowance |
-
 | On-demand only | Compact checks when requested; no monitoring between requests | No new Governor claim, task, or recurrence; an existing recurrence is disclosed and needs scoped pause authorization |
 | Review GitHub hooks | Explanation and inspection of five short lifecycle handlers | Review only; installation of an exact version/source change and hook trust are separate decisions |
 | Keep hooks off | Core governance without new lifecycle evidence | No hook install or auto-trust; existing trusted hooks must be disclosed and disabled through supported controls with scoped confirmation |

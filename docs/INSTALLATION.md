@@ -7,9 +7,9 @@ including both skills and all five optional lifecycle hooks.
 
 The guided onboarding source is **v0.9.4 preview**, not a published production
 release or marketplace-approved update. Its signed source commit is
-[`77ff0666c451e7ca6b81d4a0e9a598e057106afd`](https://github.com/FaxanFM/chronos/commit/77ff0666c451e7ca6b81d4a0e9a598e057106afd).
+[`bc97518f5b70850f56f4626c312ce536e715635f`](https://github.com/FaxanFM/chronos/commit/bc97518f5b70850f56f4626c312ce536e715635f).
 GitHub verified that signature as valid. Its deterministic local ZIP SHA-256 is
-`8dcb909cff11a4ffb69467d831121f9e5d106331e3b92db2cae1b1b2c1efb031`.
+`8ede0807119bf2c25a6432acc80ba8137d315bd3fec3d11391a898d95c1114ae`.
 This preview has no published release attestation; a source install is not a
 release-asset install. Use it only when you explicitly choose preview testing.
 
@@ -23,7 +23,9 @@ with its Windows 2022 runner and was retried without changing the candidate.
 Do not describe either preview as a fully released, always-running product.
 
 The [OpenAI Directory listing](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)
-was last checked as v0.9.2. It does not contain this new onboarding draft. The
+still publishes v0.9.2. The separate v0.9.4 skills-only package is a new upload
+candidate, not an approved update. It contains both skills and 12 release files,
+with no hook configuration or hook-intake launcher. The
 current [submission documentation](https://developers.openai.com/plugins/deploy/submission)
 excludes lifecycle hooks from submitted ZIPs. A Directory-to-GitHub automatic
 hook installation is not established as an approved route. This guide is a
@@ -51,6 +53,13 @@ homes, install another runtime, copy credentials, or use another machine to
 make setup pass. The Governor manages active work on this local host.
 
 ## Recommended Optional Hooks
+
+The Plugin Directory edition has no hooks. A prompt can explain the full
+GitHub edition and the separate installation process; it must not apply a
+"hook patch" to the OpenAI-managed plugin. Never add files to its cache or
+trust hooks automatically. An explicit independent switch keeps only one
+enabled Chronos source and requires source verification, installation consent,
+full quit/reopen, and current-definition hook review through Codex controls.
 
 We recommend reviewing the five hooks for fresher lifecycle evidence on a
 supported host. They are **optional**, not a requirement for core governance:
@@ -84,7 +93,7 @@ For this **preview walkthrough**, use:
 Help me install the full Chronos v0.9.4 GitHub preview on this Windows Codex
 host, including the optional but recommended lifecycle hook definitions.
 Use FaxanFM/chronos at exact signed commit
-77ff0666c451e7ca6b81d4a0e9a598e057106afd, not main or latest.
+bc97518f5b70850f56f4626c312ce536e715635f, not main or latest.
 
 Explain the preview status, what core governance and the five hooks do, local
 storage, OpenAI chat processing, GitHub download requests, and that Chronos
@@ -155,7 +164,7 @@ them from a Directory skill as a covert post-review upgrade.
 4. Add the exact GitHub source and install the full plugin:
 
    ```powershell
-   $commit = '77ff0666c451e7ca6b81d4a0e9a598e057106afd'
+   $commit = 'bc97518f5b70850f56f4626c312ce536e715635f'
    & $codex plugin marketplace add FaxanFM/chronos --ref $commit --json
    if ($LASTEXITCODE -ne 0) { throw 'Pinned Chronos source installation failed.' }
    & $codex plugin add chronos@chronos --json
@@ -197,6 +206,12 @@ In a fresh chat with the installed v0.9.4 skills, send:
 
 > Set up Chronos for my active chats: explain privacy, offer optional hooks,
 > configure one Governor, and verify what is running.
+
+The preferred Governor model is GPT-6 Sol (`gpt-6-sol`) with Medium reasoning.
+GPT-6 Luna (`gpt-6-luna`) with Medium reasoning is an explicitly selected
+alternative on hosts that advertise it. Verify the effective host setting;
+neither a recommendation nor the model name proves lower token use. Model
+changes do not authorize changing worker chats or creating another Governor.
 
 The setup explains the visible-or-specified scope and asks:
 

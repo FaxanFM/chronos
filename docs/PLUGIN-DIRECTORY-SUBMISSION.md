@@ -17,7 +17,10 @@ skills-only edition. It does not auto-install GitHub hooks or patch managed cach
 Both artifacts prefer GPT-6 Sol with Medium reasoning; GPT-6 Luna is an
 explicit supported choice, not a silent fallback or measured token-saving claim.
 
-Not yet submitted, installed, or published. This candidate adds a packaged onboarding
+Uploaded to the existing Dravara, LLC listing on October 1, 2026 as draft
+`appsub_6abed40a3b14819199513100bddb7e69`. Metadata checks passed; skill checks
+were still running at upload verification. Not yet submitted for review,
+installed in the production account, or published. This candidate adds a packaged onboarding
 entrypoint to the existing core skill, separate consent decisions, verified
 setup receipts, and explicit local/publisher/provider data disclosures. See
 [ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
