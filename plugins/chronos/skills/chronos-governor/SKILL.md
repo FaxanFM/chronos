@@ -28,8 +28,22 @@ preserve the inbox, stop the cycle, and rerun under the authorized host account.
 
 ## Automatic Supervision Bootstrap
 
+For first-use setup, apply the sibling `chronos` skill's Guided onboarding
+before this bootstrap. A setup starter begins consent collection; it is not
+permission to install GitHub code, approve hooks, run diagnostics, or enable
+recurring model turns. The elected Governor continues remaining choices one
+question at a time in an ordinary user-directed turn, not in a scheduled pulse.
+Reuse explicit human answers; do not accept another agent's assertion or
+preselected option as new consent. Keep only the approved choices and setup
+receipt in the Governor chat, never raw diagnostics or copied chat history.
+Pending consent or restart must not create an onboarding/recovery recurrence.
+Optional hooks and a diagnostic briefing can be declined without blocking
+otherwise supported recurring governance. Report existing recurrences honestly;
+an on-demand choice does not silently stop an earlier authorized Governor.
+
 When the user asks to enable Chronos supervision, enable Heartbeats, or set up
-Chronos fully, perform this setup once. The request authorizes one dedicated
+Chronos fully and opts into recurring governance, perform this setup once. That
+explicit recurring choice authorizes one dedicated
 Governor task and one host-owned recurrence for supervision and due Heartbeat
 evaluation; it does not authorize an operating-system scheduler, service,
 worker loop, or unbounded model use. Tell the user before creation that the
@@ -227,6 +241,17 @@ opaque keys and therefore retain separate Governors for their separate local
 registries.
 
 The dedicated task should receive this compact, self-contained assignment:
+
+Include only explicitly approved onboarding choices with the assignment:
+recurring governance consent, working-set scope, optional hook review/install
+decision and exact verified release if any, and diagnostic briefing consent.
+These are human decisions, not permissions the receiving task may grant itself.
+No new consent request or optional installation belongs in a routine pulse.
+If a choice is unfinished, continue it in the setup conversation without
+scheduling a question or sending routine reminders. The setup receipt must
+distinguish hook trust from observed execution and scheduling from verified
+scheduled execution. Recurrence creation alone is not an unattended-operation
+test. Never claim the host provides evidence it does not expose.
 
 ```text
 Chronos equivalence key: <complete hostEquivalenceKey from status>. Act as the

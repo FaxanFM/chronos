@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective August 11, 2026
+Effective October 1, 2026 (v0.9.4 draft; not yet distributed)
 
 Chronos is a local Windows plugin. Health inspection and Heartbeat evaluation
 run on demand. Five reviewed monitoring hooks can record bounded task
@@ -48,7 +48,12 @@ hashes, command literals, environment assignments, or credential-shaped
 values. This is detection only; Chronos never edits a rule or rotates a
 credential.
 
-Chronos does not read SQLite log bodies, process arguments, live environment variables, user documents, browsing data, or unrelated file contents. A credential-shaped value embedded in a Codex rule can be pattern-matched solely to return a count; the value is never displayed, persisted, or transmitted.
+Chronos does not read SQLite log bodies, process arguments, other processes'
+environment variables, user documents, browsing data, or unrelated file
+contents. Its own process reads installation and temporary-directory settings
+such as `CODEX_HOME` to resolve the local state boundary. A credential-shaped
+value embedded in a Codex rule can be pattern-matched solely to return a count;
+the value is never displayed, persisted, or transmitted.
 
 When the user explicitly invokes Chronos Governor, it stores limited, untrusted local
 coordination metadata beneath the current user's Windows temporary
@@ -101,8 +106,9 @@ machine GUID, path, task ID, or workspace data. The complete scoped key can ente
 the Governor assignment and host automation metadata so simultaneous setup
 attempts on that installation agree.
 
-Chronos does not install prompt, permission, or tool hooks. One asynchronous
-`Stop` handler records only a SHA-256 turn hash and bounded activity counters
+Chronos does not install prompt, permission, or tool hooks. All five configured
+handlers finish synchronously with a three-second host timeout. The `Stop`
+handler records only a SHA-256 turn hash and bounded activity counters
 after each completed main-task turn. The hooks return no model-visible output,
 make no network request, and do not start a model turn. If a hook is
 disabled, untrusted, malformed, or unable to write, it exits without blocking
@@ -168,7 +174,42 @@ receive the information that the user chooses to post. The support instructions
 tell users not to post raw records, credentials, source code, identifiers, or
 local paths.
 
+Installing or updating the separate GitHub edition requires network requests
+to GitHub through the user's browser or plugin manager. GitHub can process
+request metadata under its own privacy policy. This is distribution traffic,
+not a Chronos runtime telemetry channel. A public repository does not give its
+publisher a feed of users' local installs, task identifiers, chats, or diagnostic
+records through Chronos. The publisher can see information users voluntarily
+make public, such as issues or stars, and any aggregate repository statistics
+GitHub provides. Do not interpret "no publisher telemetry" as "no provider
+processes data."
+
+## Onboarding choices
+
+The setup conversation explains scope, local storage, provider processing,
+and recurring model usage before asking for monitoring consent. Recurring
+governance, optional GitHub hooks, and a diagnostic briefing are distinct choices.
+Declining hooks or diagnostics does not prevent supported core governance.
+Choices and a compact setup receipt remain in the user's Codex conversation;
+Chronos creates no separate consent analytics log or publisher-side profile.
+Hook review is not install consent, and installation is not hook trust. Codex
+requires the user to review and trust the current hook definition. A material
+definition change can require renewed trust. Missing execution evidence remains
+unobserved. Marketplace approval for a skills-only package does not cover an
+independent GitHub hook installation; an unverified marketplace install route
+is not automated by onboarding.
+
 ## User control
+
+Users can choose on-demand checks, pause an identified Governor recurrence,
+disable optional hooks through Codex's controls, or uninstall through the plugin
+manager. Pausing a recurrence stops scheduled Governor turns, not hooks;
+disabling hooks stops new hook evidence, not a previously enabled recurrence.
+Uninstalling or disabling does not promise deletion of existing local metadata,
+Codex conversations, or GitHub activity. Local-state removal is a separate
+explicit request, performed only after relevant recurrences and hooks are stopped
+and the exact installation scope is verified. Users retain control of support
+sharing; onboarding never uploads a report automatically.
 
 Health checks are logical read-only with respect to SQLite content. Chronos does
 not create database triggers, delete rows, run checkpoints, vacuum databases,

@@ -47,8 +47,16 @@ codex.cmd plugin add chronos@chronos
 After any install or upgrade, fully quit and reopen Codex. Then open a fresh
 task and ask:
 
-> **Set up Chronos: verify source, create one Governor, explain hooks, and prove
-> Heartbeat coverage and zero worker recurrences.**
+> **Set up Chronos for my active chats: explain privacy, offer optional hooks,
+> configure one Governor, and verify what is running.**
+
+The v0.9.4 onboarding draft starts with a short explanation of scope and data
+handling. It asks separately about recurring governance, optional GitHub hooks,
+and a diagnostic briefing. Hook review does not authorize installation or grant
+trust. An unanswered choice creates no reminder or retry recurrence. Core
+governance does not require hooks, and the final receipt separates configured
+features from observed execution. See [onboarding and consent](docs/ONBOARDING.md).
+This draft is not an installed or marketplace-approved update.
 
 Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in

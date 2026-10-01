@@ -42,6 +42,14 @@ try {
   if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
     throw "Inbox Windows PowerShell 5.1 was not found at its system path."
   }
+  $onboardingSkill = [string]$manifest.extensions.'com.openai'.onboardingSkill
+  if ($onboardingSkill -ne './skills/chronos/SKILL.md') {
+    throw 'Onboarding must resolve to the included core skill, not an external installer.'
+  }
+  $onboardingPath = Join-Path (Split-Path -Parent (Split-Path -Parent $manifestPath)) $onboardingSkill.Substring(2)
+  if (-not (Test-Path -LiteralPath $onboardingPath -PathType Leaf)) {
+    throw 'The declared onboarding skill must exist in the plugin package.'
+  }
   if ([string]$manifest.interface.displayName -ne 'Chronos for Codex' -or
       [string]$manifest.interface.displayName.Length -gt 30) {
     throw "Directory display name must be specific and at most 30 characters."
@@ -65,7 +73,7 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('set up chronos', 'verify source', 'one governor', 'explain hooks', 'heartbeat coverage', 'zero worker recurrences') },
+    @{ Index = 0; Terms = @('set up chronos', 'active chats', 'privacy', 'optional hooks', 'one governor', 'verify') },
     @{ Index = 1; Terms = @('chronos health briefing', 'inspect pc', 'quota', 'reviews', 'rules', 'sqlite', 'heartbeat coverage', 'evidence', 'unknowns') },
     @{ Index = 2; Terms = @('chronos governor', 'repo review', 'bounded read tasks', 'verify each result', 'edits', 'decisions') }
   )
@@ -440,6 +448,9 @@ try {
   $archive = [System.IO.Compression.ZipFile]::OpenRead($firstArtifact)
   try {
     $names = @($archive.Entries | ForEach-Object { $_.FullName })
+    if ($names -notcontains $onboardingSkill.Substring(2)) {
+      throw 'Release does not include the declared onboarding entrypoint.'
+    }
     $sortedNames = @($names | Sort-Object)
     if (($names -join "`n") -ne ($sortedNames -join "`n")) { throw "Release entries are not deterministically ordered." }
     foreach ($entry in $archive.Entries) {

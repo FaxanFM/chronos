@@ -1,5 +1,25 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.9.4 Onboarding Draft
+
+Version: `0.9.4`
+
+Local full draft: `chronos-v0.9.4.zip`, SHA-256
+`8dcb909cff11a4ffb69467d831121f9e5d106331e3b92db2cae1b1b2c1efb031`.
+It retains 14 release files and five optional hooks. Reserved future release
+destination: https://github.com/FaxanFM/chronos/releases/tag/v0.9.4 (not published).
+
+Not submitted, installed, or published. This draft adds a packaged onboarding
+entrypoint to the existing core skill, separate consent decisions, verified
+setup receipts, and explicit local/publisher/provider data disclosures. See
+[ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
+
+The full hook-enabled source still cannot be uploaded under the documented
+hook exclusion. Optional GitHub hooks must not be installed covertly after a
+skills-only review. The Directory-to-GitHub automation route is unverified;
+the draft reports that boundary and offers useful core setup instead. A future
+skills-only artifact needs edition-specific copy and separate validation.
+
 ## v0.9.3 Release Candidate
 
 Version: `0.9.3`
