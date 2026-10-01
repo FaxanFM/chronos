@@ -58,6 +58,11 @@ governance does not require hooks, and the final receipt separates configured
 features from observed execution. See [onboarding and consent](docs/ONBOARDING.md).
 This draft is not an installed or marketplace-approved update.
 
+For the full GitHub edition with optional recommended hooks, use the
+[complete installation and uninstall guide](docs/INSTALLATION.md). It includes
+an exact signed preview identity, tested plugin-manager commands, a prompt-led
+Governor path, privacy/trust steps, and readiness limits for a recorded walkthrough.
+
 Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
 the OpenAI Plugins Directory. They are separate source identities and the

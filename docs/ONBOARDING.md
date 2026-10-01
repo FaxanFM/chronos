@@ -6,6 +6,11 @@ change its signed commit, tag, ZIP, or installed package.
 
 ## One Entry Prompt
 
+The separate [installation guide](INSTALLATION.md) covers pinned GitHub
+installation, the recommended optional hooks, restart, verification, and
+uninstall. The prompt below begins onboarding after the correct skill catalog
+has loaded; it is not a pre-install executable or an automatic trust grant.
+
 > Set up Chronos for my active chats: explain privacy, offer optional hooks,
 > configure one Governor, and verify what is running.
 
