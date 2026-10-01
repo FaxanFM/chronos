@@ -269,7 +269,7 @@ first can orphan a recurrence and is prohibited. See [Supervision](SUPERVISION.m
 ## Heartbeat Recovery
 
 Use one recurring Governor task for the monitored task set. Configure that task
-with `gpt-5.6-terra` and Medium reasoning when the host offers it. The default is
+with `gpt-6-sol` and Medium reasoning when the host offers it. The default is
 60 minutes while work is active and 360 minutes while idle, at most 24 or four
 Governor turns per day. Rotate or pause after 336 cycles or 14 days. Do not
 create a recurrence in every monitored task. Monitored tasks can use any

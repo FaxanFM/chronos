@@ -1,6 +1,7 @@
 param(
   [string]$Version = "",
-  [string]$OutputDirectory = ""
+  [string]$OutputDirectory = "",
+  [ValidateSet('Full', 'Directory')][string]$Edition = 'Full'
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,10 +19,11 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot "dist" }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
-$artifactName = "chronos-v$Version.zip"
+$artifactStem = if ($Edition -eq 'Directory') { "chronos-v$Version-skills-only" } else { "chronos-v$Version" }
+$artifactName = "$artifactStem.zip"
 $artifactPath = Join-Path $OutputDirectory $artifactName
-$checksumPath = Join-Path $OutputDirectory "chronos-v$Version.sha256"
-$releaseManifestPath = Join-Path $OutputDirectory "chronos-v$Version.release.json"
+$checksumPath = Join-Path $OutputDirectory "$artifactStem.sha256"
+$releaseManifestPath = Join-Path $OutputDirectory "$artifactStem.release.json"
 Remove-Item -LiteralPath $artifactPath, $checksumPath, $releaseManifestPath -Force -ErrorAction SilentlyContinue
 
 Add-Type -AssemblyName System.IO.Compression
@@ -36,6 +38,12 @@ $files = @($trackedPaths | Where-Object { $_ -and $_ -notmatch '/\.gitignore$' }
 } | Sort-Object {
   $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
 })
+if ($Edition -eq 'Directory') {
+  $files = @($files | Where-Object {
+    $relative = $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+    $relative -ne 'hooks/hooks.json' -and $relative -ne 'skills/chronos/scripts/hook-intake.ps1'
+  })
+}
 if ($files.Count -eq 0) { throw "Plugin package has no files." }
 $maximumFiles = 256
 $maximumFileBytes = 8MB
@@ -63,6 +71,48 @@ function Get-PackagedBytes {
   )
   if ($isText) {
     $content = [System.IO.File]::ReadAllText($File.FullName)
+    if ($Edition -eq 'Directory') {
+      $relative = $File.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+      if ($relative -eq '.codex-plugin/plugin.json') {
+        $directoryManifest = $content | ConvertFrom-Json
+        $directoryManifest.PSObject.Properties.Remove('hooks')
+        $directoryManifest.description = 'Skills-only edition: one local Codex Governor for passive supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only coordination. No lifecycle hooks.'
+        $directoryManifest.interface.longDescription = 'Skills-only Plugin Directory edition. Govern active local Codex chats in a visible window of up to 50 plus explicit selections, with one Governor, evidence-bound Heartbeats, and verified exact-target intervention. Diagnose Windows degradation, quota and context pressure, approval and review loops, rule problems, rollout duplication, and SQLite churn. Lifecycle hooks are not included or auto-installed; missing evidence stays unknown. No publisher telemetry.'
+        $directoryManifest.interface.defaultPrompt[0] = 'Set up Chronos for my active chats: explain privacy, configure one Governor, and verify scope and Heartbeat coverage.'
+        $content = ($directoryManifest | ConvertTo-Json -Depth 12) + "`n"
+      } elseif ($relative -eq 'README.md') {
+        $content = @"
+# Chronos for Codex - Skills-Only Edition
+
+Version $Version. This Plugin Directory package contains the chronos and
+chronos-governor skills and their Windows native diagnostics. It has no
+lifecycle hook definitions or hook installer. Core governance uses current
+local host statuses; missing health evidence remains partial or unsupported.
+
+Start with: Set up Chronos for my active chats: explain privacy, configure one
+Governor, and verify scope and Heartbeat coverage.
+
+Setup separately asks about recurring model usage and optional diagnostics.
+The Governor prefers GPT-6 Sol with Medium reasoning only when available.
+GPT-6 Luna is an explicit supported alternative, not a silent fallback.
+One scheduled Governor does not prove its unattended pulse has executed.
+
+Chronos sends no publisher runtime telemetry. Bounded local metadata stays on
+this host; compact chat summaries use OpenAI's account data controls. Downloads
+and voluntary public support reports reach GitHub. No signup or API key is needed.
+
+The separate GitHub full edition includes five optional reviewed hooks. This
+Directory skill does not download or install them after review. Choose that
+edition independently through supported controls; never enable both sources.
+See https://github.com/FaxanFM/chronos for source, privacy, and installation guidance.
+Fully quit and reopen Codex, then use a fresh chat after an install or upgrade.
+"@ + "`n"
+      } elseif ($relative -in @('skills/chronos/SKILL.md', 'skills/chronos-governor/SKILL.md')) {
+        $heading = if ($relative -eq 'skills/chronos/SKILL.md') { '# Chronos' } else { '# Chronos Governor' }
+        $notice = "**Installed edition: skills-only.** No lifecycle hooks or hook installer are included. Use current-host task status and compatible authorized Inspector evidence for core governance. Missing coverage stays partial or unsupported. Do not download or auto-install GitHub hooks from this Directory skill; optional hooks require a separate independent user-directed installation. Hook trust and execution are unavailable in this edition.`n"
+        $content = $content.Replace("$heading`r`n", "$heading`r`n`r`n$notice").Replace("$heading`n", "$heading`n`n$notice")
+      }
+    }
     return ,([System.Text.UTF8Encoding]::new($false).GetBytes(
       $content.Replace("`r`n", "`n").Replace("`r", "`n")
     ))
@@ -126,6 +176,8 @@ $releaseManifest = [ordered]@{
   schema_version = 3
   plugin = "chronos"
   version = $Version
+  edition = if ($Edition -eq 'Directory') { 'skills_only' } else { 'full' }
+  lifecycle_hooks_included = ($Edition -eq 'Full')
   artifact = $artifactName
   sha256 = $artifactHash
   packaged_files = $files.Count

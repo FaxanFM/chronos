@@ -103,6 +103,21 @@ catalog cannot be hot-swapped.
 
 ## Use
 
+Start with:
+
+> Set up Chronos for my active chats: explain privacy, offer optional hooks,
+> configure one Governor, and verify what is running.
+
+The guided setup explains what is available on your host before changing it.
+Choose recurring governance or on-demand checks, review or decline optional
+GitHub hooks, and choose whether to run a diagnostic briefing. No publisher
+telemetry is sent. Local metadata is retained, and compact results in your
+Codex chats are subject to your OpenAI account or workspace controls. Downloading
+a GitHub release makes ordinary requests to GitHub. Installation, hook trust,
+and observed hook execution are separate checks. See the public
+[onboarding guide](https://github.com/FaxanFM/chronos/blob/main/docs/ONBOARDING.md).
+Pending consent and required restarts are reported, not scheduled for retry.
+
 For complete setup, use the first starter prompt or ask:
 
 ```text

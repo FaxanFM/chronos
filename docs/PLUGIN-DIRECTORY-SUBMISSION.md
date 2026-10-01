@@ -1,5 +1,42 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.9.4 Submission Candidate
+
+Version: `0.9.4`
+
+Local full draft: `chronos-v0.9.4.zip`, SHA-256
+`8ede0807119bf2c25a6432acc80ba8137d315bd3fec3d11391a898d95c1114ae`.
+It retains 14 release files and five optional hooks. Reserved future release
+destination: https://github.com/FaxanFM/chronos/releases/tag/v0.9.4 (not published).
+
+The separately labeled Directory ZIP is `chronos-v0.9.4-skills-only.zip`, SHA-256
+`c734284e71bc84da12f30566ed09af8fa8548d6deea76496a32c3d0913c17bbb`.
+It contains 12 release files, both skills, and no lifecycle hook configuration
+or hook-intake launcher. Its manifest, skill notices, and README disclose the
+skills-only edition. It does not auto-install GitHub hooks or patch managed caches.
+Both artifacts prefer GPT-6 Sol with Medium reasoning; GPT-6 Luna is an
+explicit supported choice, not a silent fallback or measured token-saving claim.
+
+Uploaded to the existing Dravara, LLC listing on October 1, 2026 as draft
+`appsub_6abed40a3b14819199513100bddb7e69`. Metadata and both skill checks passed.
+The user accepted the submission terms and declarations, and the portal
+confirmed **In review** under release record
+`pluginrel_48e56ed7ffe08191be06cf0a5ab40871` on October 1, 2026.
+Review receipt: https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_48e56ed7ffe08191be06cf0a5ab40871.
+The public listing remains v0.9.2. This candidate is not installed in the
+production account or published. It adds a packaged onboarding
+entrypoint to the existing core skill, separate consent decisions, verified
+setup receipts, and explicit local/publisher/provider data disclosures. See
+[ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
+
+The full hook-enabled source still cannot be uploaded under the documented
+hook exclusion. Optional GitHub hooks must not be installed covertly after a
+skills-only review. The Directory-to-GitHub automation route is unverified;
+the candidate reports that boundary and offers useful core setup instead. The
+skills-only artifact has deterministic-build, edition-disclosure, hook-exclusion,
+native scoped-cycle, process-restart, and unsupported-coverage checks. These
+fixture checks do not establish live unattended scheduled execution.
+
 ## v0.9.3 Release Candidate
 
 Version: `0.9.3`

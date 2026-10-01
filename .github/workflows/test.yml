@@ -70,3 +70,6 @@ jobs:
       - name: Test reproducible release
         shell: powershell
         run: .\tests\release.tests.ps1
+      - name: Test skills-only Directory release
+        shell: powershell
+        run: .\tests\directory-release.tests.ps1

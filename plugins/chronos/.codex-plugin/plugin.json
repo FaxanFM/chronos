@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "Set up one local Codex Governor for passive task supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only worker coordination.",
   "author": {
     "name": "Dravara, LLC",
@@ -12,6 +12,11 @@
   "keywords": ["codex", "openai", "windows", "diagnostics", "powershell", "ai-agents", "sqlite", "approval-workflows", "resource-health", "productivity"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/chronos/SKILL.md"
+    }
+  },
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Diagnose and govern Codex",
@@ -23,7 +28,7 @@
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.",
+      "Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.",
       "Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.",
       "Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here."
     ],
