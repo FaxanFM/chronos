@@ -18,9 +18,13 @@ Both artifacts prefer GPT-6 Sol with Medium reasoning; GPT-6 Luna is an
 explicit supported choice, not a silent fallback or measured token-saving claim.
 
 Uploaded to the existing Dravara, LLC listing on October 1, 2026 as draft
-`appsub_6abed40a3b14819199513100bddb7e69`. Metadata checks passed; skill checks
-were still running at upload verification. Not yet submitted for review,
-installed in the production account, or published. This candidate adds a packaged onboarding
+`appsub_6abed40a3b14819199513100bddb7e69`. Metadata and both skill checks passed.
+The user accepted the submission terms and declarations, and the portal
+confirmed **In review** under release record
+`pluginrel_48e56ed7ffe08191be06cf0a5ab40871` on October 1, 2026.
+Review receipt: https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_48e56ed7ffe08191be06cf0a5ab40871.
+The public listing remains v0.9.2. This candidate is not installed in the
+production account or published. It adds a packaged onboarding
 entrypoint to the existing core skill, separate consent decisions, verified
 setup receipts, and explicit local/publisher/provider data disclosures. See
 [ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
