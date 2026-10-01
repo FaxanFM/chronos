@@ -45,7 +45,7 @@ sources: Codex treats `chronos@chronos` and
 - Keeps isolated modest Governor-cycle overruns quiet. Only sustained or
   material runtime degradation backs off the collector, with the budget,
   baseline, overrun, classification, and decision exposed in compact status.
-- Uses one complete caller-aware current-host active inventory per Governor
+- Uses one scoped caller-aware current-host inventory per Governor
   cycle as task-discovery and liveness authority. It does not enumerate stored
   task history. A separate normalized collector snapshot carries
   explicit evidence coverage for all eight Heartbeat families. Five reviewed
@@ -119,15 +119,15 @@ only Governor recurrences carrying this installation's verified key and proves
 zero active current-key matches; foreign or unverified keys are untouched. It
 creates or reconciles the single Governor
 recurrence only after supervision and Heartbeat state are readable and one
-complete caller-aware current-host active inventory accounts for the verified
+scoped caller-aware current-host inventory accounts for the verified
 Governor exactly once. Any failed or partial
 setup pauses or removes every current-key recurrence, including one that existed
 before the attempt, and verifies zero current-key Chronos recurrences. A verified
 concurrent loser leaves the winner unchanged and stands down. Normal Codex
 hook trust is optional for autonomous discovery. If Codex presents a trust
-request, only the user can approve it; Chronos proceeds through one complete
-current-host active inventory per Governor cycle whether hooks are trusted or
-dispatched. That complete active inventory is the authority. Hooks are an
+request, only the user can approve it; Chronos proceeds through one scoped
+current-host inventory per Governor cycle whether hooks are trusted or
+dispatched. That scoped current-host inventory is the authority. Hooks are an
 optional accelerator.
 
 For an on-demand diagnostic without enabling supervision, ask:
@@ -137,7 +137,7 @@ Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite,
 Heartbeat coverage; separate evidence from unknowns.
 ```
 
-Review the packaged lifecycle hook once through Codex `/hooks`. Worker tasks
+Review the packaged lifecycle hooks once in Codex hook settings. Worker tasks
 need no Chronos prompt and can use any runtime model. Setup explicitly enables
 at most one Governor turn per hour while work is active and one every six hours
 while idle. A stable pseudonymous installation-scoped equivalence key,
@@ -156,9 +156,10 @@ resume, clear, or compaction. `Stop` records one completed main-task turn.
 `SessionEnd` records the task end. `SubagentStart` and `SubagentStop` record
 worker lifecycle changes.
 
-The hooks run headless and return no text to the model. Four request asynchronous
-execution when the host supports it. `SessionEnd` is synchronous so the final
-event has a bounded chance to finish before shutdown. Every hook has a
+The hooks run headless and return no text to the model. All five run synchronously
+so shutdown cannot cancel pending lifecycle hints. `Stop` and `SubagentStop`
+return neutral JSON as required by current Codex; they never request additional
+turns or suppress another plugin's continuation decision. Every hook has a
 three-second host timeout. The configured command starts a small intake script,
 not the full supervision engine. Intake validates the host event, protects task
 and agent IDs for the current Windows user, writes one durable event to a
@@ -179,12 +180,12 @@ protected task identifiers, workspace and generation hashes, a model label,
 lifecycle state, and timestamps. They do not create worker turns or recurrences.
 
 Hooks are an optional accelerator, not the source of truth. The Governor still
-uses one complete host task inventory per cycle for discovery and liveness. The
+uses one bounded visible-or-specified host inventory per cycle for discovery and liveness. The
 user controls hook trust through Codex `/hooks`; Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
 run. If a bounded hook cannot persist an event, it stays silent and the next
-complete active inventory remains authoritative.
+scoped current-host inventory remains authoritative.
 
 Heartbeats use the same Governor and recurrence created by full setup. See the
 public [Heartbeat contract](https://github.com/FaxanFM/chronos/blob/main/docs/HEARTBEATS.md)
@@ -289,3 +290,7 @@ See the public [Privacy](https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md
 ## License
 
 MIT
+
+### Visible Working Set
+
+Automatic governance selects at most 50 visible chats from one current-host list, plus chats explicitly selected by the user. Only active members are governed. No pagination or account-wide completeness proof is required. Native schema-v3 input declares `scope=visible_or_specified` and `complete=false`. Unknown or unloaded status is never counted as live; omission means out of scope, not ended. Hooks cannot expand scope. The Governor reports known active chat titles and working-set counts when requested or membership changes, and stays quiet on unchanged routine pulses. Health coverage remains a separate evidence contract.

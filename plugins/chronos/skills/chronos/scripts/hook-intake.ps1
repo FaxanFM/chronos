@@ -205,7 +205,8 @@ function New-HookRecord {
   $modelValue = Get-Value $Data 'model'
   $model = if ($modelValue -is [string] -and $modelValue.Trim() -match '^[A-Za-z0-9._:/-]{1,128}$') { $modelValue.Trim() } else { 'unavailable' }
   return [ordered]@{
-    schema = 2
+    schema = 3
+    producerIdentityHash = Get-TextHash ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
     event = $event
     protectedSessionId = Protect-OpaqueId $session
     protectedAgentId = if ($null -ne $agent) { Protect-OpaqueId $agent } else { $null }
@@ -255,7 +256,17 @@ function Write-HookRecord {
 
 try {
   $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true), $true, 4096, $false)
-  try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
+  try {
+    $buffer = New-Object char[] ($script:HookInputByteLimit + 1)
+    $count = 0
+    while ($count -lt $buffer.Length) {
+      $read = $reader.Read($buffer, $count, $buffer.Length - $count)
+      if ($read -eq 0) { break }
+      $count += $read
+    }
+    if ($count -gt $script:HookInputByteLimit) { throw 'hook_input_oversize' }
+    $raw = [string]::new($buffer, 0, $count)
+  } finally { $reader.Dispose() }
   if ([string]::IsNullOrWhiteSpace($raw)) { throw 'hook_input_empty' }
   if ($raw.Length -gt 0 -and [int][char]$raw[0] -eq 0xFEFF) { $raw = $raw.Substring(1) }
   if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt $script:HookInputByteLimit) { throw 'hook_input_oversize' }
@@ -268,4 +279,7 @@ try {
   # Lifecycle hints are optional acceleration. The Governor's complete host
   # inventory remains authoritative when a bounded hook cannot persist a hint.
 }
+# Current Codex requires JSON even when a completion hook has no feedback.
+# Do not request continuation or suppress another plugin's continuation.
+[Console]::Out.WriteLine('{}')
 exit 0

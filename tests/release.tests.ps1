@@ -18,6 +18,7 @@ $submissionPacketPath = Join-Path $repoRoot "docs\PLUGIN-DIRECTORY-SUBMISSION.md
 $sanitizedResultPath = Join-Path $repoRoot ".github\ISSUE_TEMPLATE\sanitized-result.yml"
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+if ($manifest.hooks -ne './hooks/hooks.json') { throw 'Manifest must explicitly bind the audited hooks.' }
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $supervisionTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Chronos\Supervision\release-tests-" + [guid]::NewGuid())
@@ -112,7 +113,7 @@ try {
     'four bounded direct TEMP child slots',
     'deterministic host-and-Codex-home hash',
     'recurrenceEligible=true',
-    'one compact complete current-host active-list call',
+    'one compact scoped current-host list call',
     'callerVisibility=excluded_by_host',
     'hostInventoryRawObserved',
     'gpt-5.6-terra',
@@ -120,14 +121,14 @@ try {
     'hookExecutionObservation=observed',
     'optional accelerator',
     'hookRequiredForAutonomy=false',
-    'complete current-host active inventory',
+    'scoped current-host inventory',
     'before initialization',
     'pre-existing active recurrence',
     'prove zero active current-key recurrences',
     'Do not schedule a recovery recurrence',
     'fully quit and reopen Codex',
-    'quote-free',
-    'cmd.exe',
+    'PowerShell hook shell',
+    'without starting another interpreter',
     'routine user action',
     'DPAPI does not protect against another process already running as that'
     'CODEX_HOME'
@@ -236,7 +237,7 @@ try {
     'initialization failure',
     'supervision status unreadable',
     'Heartbeat status unreadable',
-    'incomplete active inventory',
+    'missing or invalid scoped inventory',
     'inventory missing Governor',
     'inventory contains Governor more than once',
     'post-eligibility recurrence reconciliation failure'
@@ -247,7 +248,7 @@ try {
       throw "Supervision failure matrix does not fail closed for: $failureRow"
     }
   }
-  if (-not $supervisionContract.Contains('| complete active inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
+  if (-not $supervisionContract.Contains('| valid scoped inventory and `recurrenceEligible=true` | 1 | 0 | no |')) {
     throw 'Supervision success matrix does not activate exactly one Governor recurrence after eligibility.'
   }
   foreach ($required in @(
@@ -358,13 +359,20 @@ try {
   foreach ($required in @(
     'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
     'os: [windows-2022, windows-latest]',
-    'timeout-minutes: 25',
+    'timeout-minutes: 120',
     'Parse PowerShell sources',
     'Parse JSON manifests',
+    'Test source Chronos Heartbeats',
+    '.\tests\heartbeat.tests.ps1',
+    'Test packaged Chronos Inspector',
+    '.\tests\chronos.tests.ps1 -PythonPath python -PluginRoot $package',
     'Test packaged Chronos Heartbeats',
     'Expand-Archive',
     '-PluginRoot $package',
-    'Test Chronos Supervision'
+    'Test Chronos Supervision',
+    'Test packaged Supervision and Governor',
+    '.\tests\supervision.tests.ps1 -PluginRoot $package',
+    '.\tests\governor.tests.ps1 -PluginRoot $package'
   )) {
     if (-not $testWorkflow.Contains($required)) {
       throw "Ordinary CI is missing release-quality validation: $required"
@@ -376,10 +384,17 @@ try {
     'commit.commit.verification.verified',
     'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09',
     'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+    'Test source Chronos Heartbeats',
+    '.\tests\heartbeat.tests.ps1',
+    'Test packaged Chronos Inspector',
+    '.\tests\chronos.tests.ps1 -PythonPath python -PluginRoot $package',
     'Test packaged Chronos Heartbeats',
     'Expand-Archive',
     '-PluginRoot $package',
     'Test Chronos Supervision',
+    'Test packaged Supervision and Governor',
+    '.\tests\supervision.tests.ps1 -PluginRoot $package',
+    '.\tests\governor.tests.ps1 -PluginRoot $package',
     'timeout-minutes:',
     'subject-path: dist/*',
     'gh attestation verify $Path --repo $env:GITHUB_REPOSITORY',
@@ -487,8 +502,11 @@ try {
   if (($installedEventNames -join ',') -ne 'SessionEnd,SessionStart,Stop,SubagentStart,SubagentStop') {
     throw 'Extracted package does not contain the expected bounded monitoring hook set.'
   }
-  if (([regex]::Matches($installedHookText, '"async"\s*:\s*true')).Count -ne 4) {
-    throw 'Extracted package must run every non-terminal monitoring hook in the background.'
+  if (([regex]::Matches($installedHookText, '"async"\s*:\s*true')).Count -ne 0) {
+    throw 'Extracted lifecycle hooks must finish before session shutdown can cancel them.'
+  }
+  foreach ($completion in @('Stop', 'SubagentStop')) {
+    if ($installedHooks.hooks.$completion[0].hooks[0].PSObject.Properties.Name -contains 'async') { throw 'Completion hooks must be synchronous.' }
   }
   if (($installedHooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async') {
     throw 'Extracted package must leave SessionEnd synchronous.'
@@ -504,11 +522,7 @@ try {
     throw 'Extracted lifecycle events do not share one audited Windows launcher.'
   }
   $installedWindowsCommand = [string]$installedWindowsCommands[0]
-  if ($installedWindowsCommand.Contains('"') -or $installedWindowsCommand -notmatch ' -EncodedCommand ([A-Za-z0-9+/=]+)$') {
-    throw 'Extracted Windows hook launcher is not quote-free and encoded for the Codex cmd.exe boundary.'
-  }
-  $installedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
-  if ($installedWindowsPayload -ne "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\hook-intake.ps1')") {
+  if ($installedWindowsCommand -ne "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')") {
     throw 'Extracted Windows hook payload does not resolve PLUGIN_ROOT safely inside PowerShell.'
   }
   foreach ($installedScript in @(Get-ChildItem -LiteralPath $installRoot -Recurse -Filter *.ps1 -File)) {
@@ -595,8 +609,8 @@ try {
   $configuredHookTemp = Join-Path $testRoot 'configured hook temp'
   New-Item -ItemType Directory -Path $configuredHookTemp -Force | Out-Null
   $configuredHookInfo = New-Object Diagnostics.ProcessStartInfo
-  $configuredHookInfo.FileName = $env:ComSpec
-  $configuredHookInfo.Arguments = '/D /S /C "' + $installedWindowsCommand + '"'
+  $configuredHookInfo.FileName = 'powershell.exe'
+  $configuredHookInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($installedWindowsCommand))
   $configuredHookInfo.UseShellExecute = $false
   $configuredHookInfo.CreateNoWindow = $true
   $configuredHookInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -620,8 +634,8 @@ try {
   $configuredHookStderr = $configuredHookProcess.StandardError.ReadToEnd()
   $configuredHookExit = $configuredHookProcess.ExitCode
   $configuredHookProcess.Dispose()
-  if ($configuredHookExit -ne 0 -or $configuredHookStdout -or $configuredHookStderr) {
-    throw 'Packaged configured lifecycle hook did not execute silently through the Codex cmd.exe boundary.'
+  if ($configuredHookExit -ne 0 -or $configuredHookStdout.Trim() -ne '{}' -or $configuredHookStderr) {
+    throw 'Packaged configured lifecycle hook did not return neutral JSON through the Codex PowerShell boundary.'
   }
   $configuredCodexHomeIdentity = ([IO.Path]::GetFullPath((Join-Path $HOME '.codex'))).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).ToUpperInvariant()
   $configuredScopeHash = Get-TextHash ('{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $configuredCodexHomeIdentity)

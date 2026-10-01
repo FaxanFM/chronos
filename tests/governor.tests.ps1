@@ -1,8 +1,10 @@
-param()
+param([string]$PluginRoot = '')
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$governorScript = Join-Path $repoRoot "plugins\chronos\skills\chronos-governor\scripts\governor.ps1"
+if (-not $PluginRoot) { $PluginRoot = Join-Path $repoRoot 'plugins\chronos' }
+$pluginVersion = [string](Get-Content -Raw -LiteralPath (Join-Path $PluginRoot '.codex-plugin\plugin.json') | ConvertFrom-Json).version
+$governorScript = Join-Path $PluginRoot "skills\chronos-governor\scripts\governor.ps1"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-governor-tests-" + [guid]::NewGuid())
 $fixtureRepo = Join-Path $testRoot "repo"
 $runtimeModels = "gpt-5.6-sol=low,medium,high,xhigh,max,ultra|cost=20;gpt-5.6-terra=low,medium,high,xhigh,max,ultra|cost=10;gpt-5.6-luna=low,medium,high,xhigh,max|cost=1"
@@ -201,13 +203,13 @@ try {
   $workspaceId = Get-WorkspaceId
   $fixtureStatePath = Get-StatePath
   $versionStatus = Get-GovernorData (Invoke-Governor @('-Action', 'status'))
-  Assert-Equal $versionStatus.plugin_version '0.9.2' 'Governor must report the active packaged plugin version.'
+  Assert-Equal $versionStatus.plugin_version $pluginVersion 'Governor must report the active packaged plugin version.'
 
   $spacedRepository = Join-Path $testRoot 'repository with spaces'
   New-FixtureRepository $spacedRepository
   $spacedStatus = Invoke-Governor @('-Action', 'status') $spacedRepository
   Assert-Success $spacedStatus 'Sanitized repository identity failed for a normal repository path containing spaces.'
-  Assert-Equal (Get-GovernorData $spacedStatus).plugin_version '0.9.2' 'Spaced-path identity resolved the wrong Governor package.'
+  Assert-Equal (Get-GovernorData $spacedStatus).plugin_version $pluginVersion 'Spaced-path identity resolved the wrong Governor package.'
   [void](Get-StatePath $spacedRepository)
   Register-SafetyControl 'repository-identity-spaced-path'
 
@@ -304,8 +306,10 @@ $input | ForEach-Object { $_ }
 '@ | Set-Content -LiteralPath $filterScript
   $filterScriptForGit = $filterScript.Replace('\', '/')
   $filterMarkerForGit = $filterMarker.Replace('\', '/')
-  $filterCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' + $filterScriptForGit + ' -Marker ' + $filterMarkerForGit
+  # Git executes filters through its shell; single quotes survive PowerShell 5.1's native boundary.
+  $filterCommand = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{0}' -Marker '{1}'" -f $filterScriptForGit.Replace("'", "'\''"), $filterMarkerForGit.Replace("'", "'\''")
   & git -C $filterRepo config filter.chronos-audit.clean $filterCommand
+  if ($LASTEXITCODE -ne 0) { throw 'Could not configure the clean-filter positive control.' }
   & git -C $filterRepo hash-object --path=src/probe.filterprobe --filters src/probe.filterprobe | Out-Null
   if (-not (Test-Path -LiteralPath $filterMarker -PathType Leaf)) {
     throw 'Clean-filter fixture did not execute during its positive control.'

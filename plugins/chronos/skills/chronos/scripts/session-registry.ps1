@@ -4,7 +4,7 @@ param(
   [string]$StatePath,
   [string]$CodexHome,
   [string]$HostInventoryPath,
-  [ValidateSet('unsupported', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+  [ValidateSet('unsupported', 'visible_or_specified', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
   [string]$HostInventoryCompleteness = 'unsupported',
   [ValidateSet('unsupported', 'current_host_runtime')]
   [string]$HostInventoryStatusAuthority = 'unsupported',
@@ -622,7 +622,7 @@ function ConvertTo-UtcTimestamp {
 
 function New-State {
   return [ordered]@{
-    schema = 5
+    schema = 7
     revision = 0L
     governor = $null
     sessions = @{}
@@ -635,6 +635,11 @@ function New-State {
       turnSignals = 0L
       duplicateSignals = 0L
       processedHookEvents = @()
+      lastCompleteInventoryUtc = $null
+      inventoryReconciled = $false
+      scopeMode = 'legacy_complete'
+      scopeCapturedAtUtc = $null
+      scopeTaskHashes = @()
     }
   }
 }
@@ -660,6 +665,19 @@ function Upgrade-State {
   if ((Test-IsInteger $State.schema) -and [int]$State.schema -eq 4) {
     if (-not $State.health.Contains('processedHookEvents')) { $State.health['processedHookEvents'] = @() }
     $State.schema = 5
+  }
+  if ((Test-IsInteger $State.schema) -and [int]$State.schema -eq 5) {
+    $State.health['lastCompleteInventoryUtc'] = $null
+    $State.health['inventoryReconciled'] = $false
+    $State.schema = 6
+  }
+  if ((Test-IsInteger $State.schema) -and [int]$State.schema -eq 6) {
+    $State.health['scopeMode'] = 'legacy_complete'
+    $State.health['scopeCapturedAtUtc'] = $null
+    $State.health['scopeTaskHashes'] = @()
+    # Old claims need a fresh scoped cycle before they can schedule again.
+    $State.health.inventoryReconciled = $false
+    $State.schema = 7
   }
   return $State
 }
@@ -690,14 +708,24 @@ function Assert-StateProtectedIdentity {
 function Assert-State {
   param($State, [switch]$ValidateProtectedIds)
   Assert-ExactKeys $State @('schema', 'revision', 'governor', 'sessions', 'health')
-  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 5 -or
+  if (-not (Test-IsInteger $State.schema) -or [int]$State.schema -ne 7 -or
       -not (Test-IsInteger $State.revision) -or [long]$State.revision -lt 0 -or
       -not ($State.sessions -is [Collections.IDictionary]) -or
       -not ($State.health -is [Collections.IDictionary]) -or
       $State.sessions.Count -gt $script:SessionLimit) {
     throw 'supervision_state_invalid'
   }
-  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc', 'turnSignals', 'duplicateSignals', 'processedHookEvents')
+  Assert-ExactKeys $State.health @('hookRuns', 'droppedEntries', 'ignoredStaleEvents', 'scanOffset', 'lastHookUtc', 'turnSignals', 'duplicateSignals', 'processedHookEvents', 'lastCompleteInventoryUtc', 'inventoryReconciled', 'scopeMode', 'scopeCapturedAtUtc', 'scopeTaskHashes')
+  if ([string]$State.health.scopeMode -notin @('legacy_complete', 'visible_or_specified')) { throw 'supervision_state_invalid' }
+  if ($null -ne $State.health.scopeCapturedAtUtc) { [void](ConvertTo-UtcTimestamp $State.health.scopeCapturedAtUtc) }
+  if (-not ($State.health.scopeTaskHashes -is [Collections.IEnumerable]) -or $State.health.scopeTaskHashes -is [string] -or @($State.health.scopeTaskHashes).Count -gt $script:SessionLimit) { throw 'supervision_state_invalid' }
+  $scopeSet = @{}
+  foreach ($hash in @($State.health.scopeTaskHashes)) {
+    if (-not ($hash -is [string]) -or $hash -notmatch '^[a-f0-9]{64}$' -or $scopeSet.ContainsKey($hash)) { throw 'supervision_state_invalid' }
+    $scopeSet[$hash] = $true
+  }
+  if (-not ($State.health.inventoryReconciled -is [bool])) { throw 'supervision_state_invalid' }
+  if ($null -ne $State.health.lastCompleteInventoryUtc) { [void](ConvertTo-UtcTimestamp $State.health.lastCompleteInventoryUtc) }
   if (-not (Test-IsInteger $State.health.hookRuns) -or [long]$State.health.hookRuns -lt 0 -or
       -not (Test-IsInteger $State.health.droppedEntries) -or [long]$State.health.droppedEntries -lt 0 -or
       -not (Test-IsInteger $State.health.ignoredStaleEvents) -or [long]$State.health.ignoredStaleEvents -lt 0 -or
@@ -878,11 +906,14 @@ function New-PreparedHookEvent {
 function Assert-PendingHookEvent {
   param($Record)
   $schema = Get-Value $Record 'schema' $null
-  if (-not (Test-IsInteger $schema) -or [int]$schema -notin @(1, 2)) { throw 'supervision_pending_event_invalid' }
+  if (-not (Test-IsInteger $schema) -or [int]$schema -notin @(1, 2, 3)) { throw 'supervision_pending_event_invalid' }
   if ([int]$schema -eq 1) {
     Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'observedAtUtc')
-  } else {
+  } elseif ([int]$schema -eq 2) {
     Assert-ExactKeys $Record @('schema', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'signalHash', 'observedAtUtc')
+  } else {
+    Assert-ExactKeys $Record @('schema', 'producerIdentityHash', 'event', 'protectedSessionId', 'protectedAgentId', 'workspaceHash', 'model', 'source', 'signalHash', 'observedAtUtc')
+    if ([string]$Record.producerIdentityHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_pending_event_invalid' }
   }
   $allowedEvents = if ([int]$schema -eq 1) { @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop') } else { @('SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop') }
   if ([string]$Record.event -notin $allowedEvents -or
@@ -897,9 +928,9 @@ function Assert-PendingHookEvent {
   } elseif ($null -ne $Record.protectedAgentId) {
     throw 'supervision_pending_event_invalid'
   }
-  if ([int]$schema -eq 2 -and [string]$Record.event -eq 'Stop') {
+  if ([int]$schema -ge 2 -and [string]$Record.event -eq 'Stop') {
     if ([string]$Record.signalHash -notmatch '^[a-f0-9]{64}$') { throw 'supervision_pending_event_invalid' }
-  } elseif ([int]$schema -eq 2 -and $null -ne $Record.signalHash) {
+  } elseif ([int]$schema -ge 2 -and $null -ne $Record.signalHash) {
     throw 'supervision_pending_event_invalid'
   }
   [void](ConvertTo-UtcTimestamp $Record.observedAtUtc)
@@ -1006,6 +1037,9 @@ function Read-PendingHookEvents {
         Assert-StrictJson $text 'supervision_pending_event_invalid'
         $record = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
         Assert-PendingHookEvent $record
+        if ([int]$record.schema -eq 3 -and [string]$record.producerIdentityHash -ne (Get-TextHash ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value))) {
+          throw 'supervision_hook_identity_mismatch'
+        }
         $session = Unprotect-OpaqueId $record.protectedSessionId
         $agent = $null
         if ([string]$record.event -in @('SubagentStart', 'SubagentStop')) { $agent = Unprotect-OpaqueId $record.protectedAgentId }
@@ -1022,6 +1056,7 @@ function Read-PendingHookEvents {
           Valid = $true
         }) | Out-Null
       } catch {
+        if ([string]$_.Exception.Message -eq 'supervision_hook_identity_mismatch') { throw }
         $result.Add([pscustomobject]@{ Path = $file.FullName; PathHash = $pathHash; EventHash = $eventHash; Record = $null; SessionId = $null; AgentId = $null; ObservedAt = $null; Readable = $true; Valid = $false }) | Out-Null
       }
   }
@@ -1117,13 +1152,18 @@ function Read-HostInventory {
     Assert-StrictJson $text 'supervision_host_inventory_invalid'
     $inventory = ConvertTo-Hashtable ($text | ConvertFrom-Json -ErrorAction Stop)
     if (-not ($inventory -is [Collections.IDictionary]) -or -not $inventory.Contains('schemaVersion')) { throw 'invalid' }
-    if (-not (Test-IsInteger $inventory.schemaVersion) -or [int]$inventory.schemaVersion -notin @(1, 2)) { throw 'invalid' }
+    if (-not (Test-IsInteger $inventory.schemaVersion) -or [int]$inventory.schemaVersion -notin @(1, 2, 3)) { throw 'invalid' }
     $schemaVersion = [int]$inventory.schemaVersion
     $callerVisibility = 'included'
     if ($schemaVersion -eq 1) {
       Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'tasks')
-    } else {
+    } elseif ($schemaVersion -eq 2) {
       Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'callerVisibility', 'tasks')
+    } else {
+      Assert-ExactKeys $inventory @('schemaVersion', 'capturedAtUtc', 'complete', 'callerVisibility', 'scope', 'tasks')
+      if ([string](Get-Value $inventory 'scope' '') -ne 'visible_or_specified' -or $inventory.complete -ne $false) { throw 'invalid' }
+    }
+    if ($schemaVersion -ge 2) {
       if (-not $inventory.Contains('callerVisibility') -or [string]$inventory.callerVisibility -notin @('included', 'excluded_by_host')) { throw 'invalid' }
       $callerVisibility = [string]$inventory.callerVisibility
     }
@@ -1142,7 +1182,10 @@ function Read-HostInventory {
     $endedStates = @('completed', 'failed', 'cancelled', 'archived', 'ended')
     $unknownStates = @('unknown', 'unavailable')
     foreach ($task in $tasks) {
-      Assert-ExactKeys $task @('id', 'status', 'generation')
+      if ($schemaVersion -eq 3) {
+        Assert-ExactKeys $task @('id', 'status', 'generation', 'selection')
+        if ([string](Get-Value $task 'selection' '') -notin @('visible', 'specified')) { throw 'invalid' }
+      } else { Assert-ExactKeys $task @('id', 'status', 'generation') }
       $id = Normalize-OpaqueId (Get-Value $task 'id') 'supervision_host_inventory_invalid'
       if (-not $seen.Add($id)) { throw 'invalid' }
       $status = ([string](Get-Value $task 'status' '')).Trim().ToLowerInvariant()
@@ -1156,6 +1199,7 @@ function Read-HostInventory {
         Active = ($status -in $activeStates)
         Status = if ($status -in $activeStates) { 'live' } elseif ($status -in $inactiveStates) { 'inactive' } elseif ($status -in $endedStates) { 'ended' } else { 'unknown' }
         Generation = $generation
+        Selection = if ($schemaVersion -eq 3) { [string]$task.selection } else { 'legacy' }
       }) | Out-Null
     }
     return [pscustomobject]@{
@@ -1164,6 +1208,7 @@ function Read-HostInventory {
       Complete = [bool]$inventory.complete
       CallerVisibility = $callerVisibility
       RawObserved = $normalized.Count
+      Scope = if ($schemaVersion -eq 3) { 'visible_or_specified' } else { 'active_current_host' }
       Tasks = @($normalized)
     }
   } catch {
@@ -1188,11 +1233,16 @@ function Complete-HostInventoryForGovernor {
       Active = $true
       Status = 'live'
       Generation = $null
+      Selection = 'governor'
     }
     $governorSource = 'intrinsic_cycle_caller'
   } else {
     throw 'supervision_host_inventory_invalid'
   }
+  if ($Inventory.Scope -eq 'visible_or_specified' -and @($tasks | Where-Object { $_.Selection -eq 'visible' -and $_.Id -ne $CurrentGovernorId }).Count -gt 50) {
+    throw 'supervision_visible_scope_limit'
+  }
+  if ($Inventory.Scope -eq 'visible_or_specified' -and $tasks.Count -gt $script:SessionLimit) { throw 'supervision_host_inventory_invalid' }
   return [pscustomobject]@{
     SchemaVersion = [int]$Inventory.SchemaVersion
     CapturedAt = $Inventory.CapturedAt
@@ -1200,6 +1250,7 @@ function Complete-HostInventoryForGovernor {
     CallerVisibility = [string]$Inventory.CallerVisibility
     GovernorSource = $governorSource
     RawObserved = [int]$Inventory.RawObserved
+    Scope = [string]$Inventory.Scope
     Tasks = @($tasks)
   }
 }
@@ -1209,12 +1260,38 @@ function Invoke-HostInventoryReconciliation {
   $currentHash = Get-TextHash $CurrentGovernorId
   if ($null -eq $State.governor -or [string]$State.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
   $present = @{}
+  $liveIds = @{}
   $added = 0
   $reactivated = 0
   $generationChanged = 0
   $ended = 0
   $unknown = 0
+  $State.health.inventoryReconciled = $false
+  if ($null -ne $State.health.scopeCapturedAtUtc -and
+      $Inventory.CapturedAt -lt (ConvertTo-UtcTimestamp $State.health.scopeCapturedAtUtc)) {
+    throw 'supervision_host_inventory_stale'
+  }
+  if ($null -ne $State.health.lastCompleteInventoryUtc -and
+      $Inventory.CapturedAt -lt (ConvertTo-UtcTimestamp $State.health.lastCompleteInventoryUtc)) {
+    throw 'supervision_host_inventory_stale'
+  }
+  Remove-ExpiredRecords $State $Now
+  # Close absent records before making room, independent of inventory ordering.
   foreach ($task in @($Inventory.Tasks)) {
+    $hash = Get-TextHash ([string]$task.Id)
+    $present[$hash] = $true
+    if ($task.Active) { $liveIds[$hash] = $true }
+  }
+  if ([bool]$Inventory.Complete) {
+    foreach ($hash in @($State.sessions.Keys)) {
+      $record = $State.sessions[$hash]
+      if ([string]$record.kind -ne 'task' -or [string]$record.state -ne 'active' -or $hash -eq $currentHash -or $present.ContainsKey($hash)) { continue }
+      if (Set-RecordEndedByHash $State ([string]$hash) $Now $Inventory.CapturedAt) { $ended++ }
+    }
+  }
+  # Inactive observations precede live additions so current work wins capacity.
+  $orderedTasks = @($Inventory.Tasks | Sort-Object Active)
+  foreach ($task in $orderedTasks) {
     $hash = Get-TextHash ([string]$task.Id)
     $generationHash = if ([string]::IsNullOrWhiteSpace([string]$task.Generation)) { $null } else { Get-TextHash ([string]$task.Generation) }
     $present[$hash] = $true
@@ -1225,6 +1302,17 @@ function Invoke-HostInventoryReconciliation {
     }
     if ([bool]$task.Active) {
       if ($null -eq $existing) {
+        if (($Inventory.Complete -or $Inventory.Scope -eq 'visible_or_specified') -and $State.sessions.Count -ge $script:SessionLimit) {
+          $victim = @($State.sessions.Values | Where-Object {
+            $_.kind -eq 'task' -and ($_.state -eq 'ended' -or $Inventory.Scope -eq 'visible_or_specified') -and $_.idHash -ne $currentHash -and
+            -not $liveIds.ContainsKey([string]$_.idHash) -and
+            (ConvertTo-UtcTimestamp $_.lastEventUtc) -le $Inventory.CapturedAt
+          } | Sort-Object lastSeenUtc, idHash | Select-Object -First 1)
+          if ($victim.Count -eq 1) {
+            $State.sessions.Remove([string]$victim[0].idHash)
+            $State.revision = [long]$State.revision + 1
+          }
+        }
         if (Set-SessionRecord $State ([string]$task.Id) 'task' $null (Get-TextHash 'workspace-unavailable') 'unavailable' 'active' 'fallback' $Now $Inventory.CapturedAt 3 -GenerationHash $generationHash -AllowReactivation) { $added++ }
       } elseif ([string]$existing.state -eq 'ended') {
         if (Set-SessionRecord $State ([string]$task.Id) 'task' $null ([string]$existing.workspaceHash) ([string]$existing.model) 'active' ([string]$existing.source) $Now $Inventory.CapturedAt 3 -GenerationHash $generationHash -AllowReactivation) { $reactivated++ }
@@ -1235,19 +1323,27 @@ function Invoke-HostInventoryReconciliation {
         }
       }
     } elseif ($null -ne $existing -and [string]$existing.state -eq 'active' -and $hash -ne $currentHash) {
-      [void](Set-RecordEndedByHash $State $hash $Now $Inventory.CapturedAt $generationHash)
+      [void](Set-RecordEndedByHash $State $hash $Now $Inventory.CapturedAt $generationHash -AuthoritativeInventory:([bool]$Inventory.Complete -or $Inventory.Scope -eq 'visible_or_specified'))
       if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
     }
+  }
+  $unrepresented = 0
+  foreach ($task in @($Inventory.Tasks | Where-Object Active)) {
+    $hash = Get-TextHash ([string]$task.Id)
+    if (-not $State.sessions.Contains($hash) -or $State.sessions[$hash].state -ne 'active') { $unrepresented++ }
   }
   if ([bool]$Inventory.Complete) {
-    foreach ($hash in @($State.sessions.Keys)) {
-      $record = $State.sessions[$hash]
-      if ([string]$record.kind -ne 'task' -or [string]$record.state -ne 'active' -or $hash -eq $currentHash -or $present.ContainsKey($hash)) { continue }
-      [void](Set-RecordEndedByHash $State ([string]$hash) $Now $Inventory.CapturedAt)
-      if ([string]$State.sessions[$hash].state -eq 'ended') { $ended++ }
+    if ($null -eq $State.health.lastCompleteInventoryUtc -or $Inventory.CapturedAt -gt (ConvertTo-UtcTimestamp $State.health.lastCompleteInventoryUtc)) {
+      $State.health.lastCompleteInventoryUtc = $Inventory.CapturedAt.ToString('o')
     }
+    Remove-EndedHistoryForByteCapacity $State $Inventory.CapturedAt $liveIds
   }
-  return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; GenerationChanged = $generationChanged; Ended = $ended; Unknown = $unknown; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
+  # Scope is selection, not lifecycle. Omitted records are never ended here.
+  $State.health.scopeMode = if ($Inventory.Scope -eq 'visible_or_specified') { 'visible_or_specified' } else { 'legacy_complete' }
+  $State.health.scopeCapturedAtUtc = $Inventory.CapturedAt.ToString('o')
+  $State.health.scopeTaskHashes = @()
+  if ($Inventory.Scope -eq 'visible_or_specified') { $State.health.scopeTaskHashes = @($liveIds.Keys | Sort-Object) }
+  return [pscustomobject]@{ Added = $added; Reactivated = $reactivated; GenerationChanged = $generationChanged; Ended = $ended; Unknown = $unknown; Unrepresented = $unrepresented; Observed = @($Inventory.Tasks).Count; Complete = [bool]$Inventory.Complete }
 }
 
 function Get-CompactHostTaskStatuses {
@@ -1257,6 +1353,7 @@ function Get-CompactHostTaskStatuses {
       idHash = (Get-TextHash ([string]$_.Id)).Substring(0, 16)
       status = [string]$_.Status
       generation = if ([string]::IsNullOrWhiteSpace([string]$_.Generation)) { 'unavailable' } else { 'observed' }
+      selection = [string]$_.Selection
     }
   })
 }
@@ -1292,15 +1389,38 @@ function Remove-ExpiredRecords {
       $remove.Add([string]$key) | Out-Null
     }
   }
-  foreach ($key in $remove) { $State.sessions.Remove($key) }
+  foreach ($key in $remove) {
+    $State.sessions.Remove($key)
+    $State.revision = [long]$State.revision + 1
+  }
+}
+
+function Remove-EndedHistoryForByteCapacity {
+  param($State, [DateTimeOffset]$CapturedAt, $LiveIds)
+  # Reserve space for the cycle timestamps and counters written after reconciliation.
+  $limit = $script:StateByteLimit - 256
+  $size = [Text.Encoding]::UTF8.GetByteCount(($State | ConvertTo-Json -Compress -Depth 12))
+  if ($size -le $limit) { return }
+  $victims = @($State.sessions.Values | Where-Object {
+    $_.kind -eq 'task' -and $_.state -eq 'ended' -and
+    ($null -eq $State.governor -or $_.idHash -ne $State.governor.idHash) -and
+    -not $LiveIds.ContainsKey([string]$_.idHash) -and
+    (ConvertTo-UtcTimestamp $_.lastEventUtc) -le $CapturedAt
+  } | Sort-Object lastSeenUtc, idHash)
+  foreach ($victim in $victims) {
+    $State.sessions.Remove([string]$victim.idHash)
+    $State.revision = [long]$State.revision + 1
+    $size = [Text.Encoding]::UTF8.GetByteCount(($State | ConvertTo-Json -Compress -Depth 12))
+    if ($size -le $limit) { break }
+  }
 }
 
 function Set-RecordEndedByHash {
-  param($State, [string]$Hash, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$GenerationHash)
+  param($State, [string]$Hash, [DateTimeOffset]$Now, [DateTimeOffset]$EventObservedAt, [string]$GenerationHash, [switch]$AuthoritativeInventory)
   if (-not $State.sessions.Contains($Hash)) { return $false }
   $record = $State.sessions[$Hash]
   if ($record.state -eq 'ended') { return $true }
-  if ($GenerationHash -and $record.generationHash -and [string]$record.generationHash -ne $GenerationHash) {
+  if (-not $AuthoritativeInventory -and $GenerationHash -and $record.generationHash -and [string]$record.generationHash -ne $GenerationHash) {
     $State.health.ignoredStaleEvents = [long]$State.health.ignoredStaleEvents + 1
     return $false
   }
@@ -1315,6 +1435,7 @@ function Set-RecordEndedByHash {
   $record.endedAtUtc = $Now.ToString('o')
   $record.lastEventUtc = $EventObservedAt.ToString('o')
   $record.lastEventRank = 2
+  if ($AuthoritativeInventory -and $GenerationHash) { $record.generationHash = $GenerationHash }
   $record.recordRevision = [long]$State.revision
   return $true
 }
@@ -1338,6 +1459,13 @@ function Set-SessionRecord {
   )
   $hash = Get-TextHash $Id
   $existing = if ($State.sessions.Contains($hash)) { $State.sessions[$hash] } else { $null }
+  # Complete snapshots replace per-task tombstones for delayed task-start hooks.
+  if ($null -eq $existing -and $Kind -eq 'task' -and -not $AllowReactivation -and
+      $null -ne $State.health.lastCompleteInventoryUtc -and
+      $EventObservedAt -le (ConvertTo-UtcTimestamp $State.health.lastCompleteInventoryUtc)) {
+    $State.health.ignoredStaleEvents = [long]$State.health.ignoredStaleEvents + 1
+    return $false
+  }
   if ($null -ne $existing) {
     $lastEvent = ConvertTo-UtcTimestamp $existing.lastEventUtc
     if ($EventObservedAt -lt $lastEvent -or
@@ -1417,6 +1545,11 @@ function Invoke-HookEvent {
       $agent = Normalize-OpaqueId (Get-Value $HookData 'agent_id') 'supervision_agent_id_invalid'
       $parentHash = Get-TextHash $session
       $parentEnded = $State.sessions.Contains($parentHash) -and [string]$State.sessions[$parentHash].state -eq 'ended'
+      if (-not $State.sessions.Contains($parentHash) -and $null -ne $State.health.lastCompleteInventoryUtc -and
+          $EventObservedAt -le (ConvertTo-UtcTimestamp $State.health.lastCompleteInventoryUtc)) {
+        $State.health.ignoredStaleEvents = [long]$State.health.ignoredStaleEvents + 1
+        break
+      }
       $agentHash = Get-TextHash $agent
       if (-not $parentEnded) {
         [void](Set-SessionRecord $State $agent 'agent' $parentHash $workspaceHash $model 'active' 'subagent' $Now $EventObservedAt 1 $PreparedProtectedId)
@@ -1462,6 +1595,14 @@ function Invoke-HookEvent {
   Remove-ExpiredRecords $State $Now
 }
 
+function Test-RecordInGovernedScope {
+  param($State, $Record, [DateTimeOffset]$Now)
+  if ($State.health.scopeMode -ne 'visible_or_specified') { return $true }
+  if (-not $State.health.inventoryReconciled) { return $false }
+  if ($null -eq $State.health.scopeCapturedAtUtc -or ($Now - (ConvertTo-UtcTimestamp $State.health.scopeCapturedAtUtc)).TotalMinutes -gt 15) { return $false }
+  return $Record.kind -eq 'task' -and @($State.health.scopeTaskHashes) -contains [string]$Record.idHash
+}
+
 function Get-DiscoveryPayload {
   param($State, [string]$RequestedAction, [string]$CurrentSession, [long]$Cursor, [DateTimeOffset]$Now, [switch]$Compact)
   $governorId = $null
@@ -1474,6 +1615,7 @@ function Get-DiscoveryPayload {
   $governorHash = if ($null -ne $State.governor) { [string]$State.governor.idHash } else { $null }
   foreach ($key in @($State.sessions.Keys | Sort-Object)) {
     $record = $State.sessions[$key]
+    if (-not (Test-RecordInGovernedScope $State $record $Now)) { continue }
     $summary = [ordered]@{
       idHash = ([string]$record.idHash).Substring(0, 16)
       kind = [string]$record.kind
@@ -1517,8 +1659,8 @@ function Get-DiscoveryPayload {
     governorTaskId = $governorId
     governorClaimed = ($null -ne $State.governor)
     currentIsGovernor = ($null -ne $currentHash -and $null -ne $State.governor -and $currentHash -eq [string]$State.governor.idHash)
-    activeTasks = $activeTasks.Count
-    activeAgents = $activeAgents.Count
+    activeTasks = @($allActive | Where-Object kind -eq 'task').Count
+    activeAgents = @($allActive | Where-Object kind -eq 'agent').Count
     tasks = @($activeTasks)
     agents = @($activeAgents)
     checkBatch = @($batch)
@@ -1528,8 +1670,11 @@ function Get-DiscoveryPayload {
     changes = @($changes)
     resultTruncated = ($activeCount -gt ($activeTasks.Count + $activeAgents.Count))
     registryCoverage = if ([long]$State.health.hookRuns -gt 0) { 'lifecycle_hooks_observed' } else { 'host_active_inventory_required' }
-    monitoringMode = 'complete_current_host_active_inventory_plus_optional_hooks'
-    monitoredTaskPolicy = 'current_host_active_tasks_only'
+    monitoringMode = 'scoped_current_host_inventory_plus_optional_hooks'
+    monitoredTaskPolicy = 'visible_active_or_explicitly_specified_active_tasks_only'
+    automaticChatLimit = 50
+    accountWideCoverage = $false
+    scopeSnapshotUtc = $State.health.scopeCapturedAtUtc
     turnSignals = [long]$State.health.turnSignals
     duplicateSignals = [long]$State.health.duplicateSignals
     hookModelContext = 'none'
@@ -1539,8 +1684,8 @@ function Get-DiscoveryPayload {
     hookRole = 'optional_acceleration'
     hookRequiredForAutonomy = $false
     lastHookUtc = $State.health.lastHookUtc
-    livenessAuthority = 'complete_current_host_active_inventory'
-    taskDiscoveryAuthority = 'complete_current_host_active_inventory_each_governor_cycle'
+    livenessAuthority = 'current_host_runtime_status_within_selected_scope'
+    taskDiscoveryAuthority = 'visible_or_specified_inventory_each_governor_cycle'
     catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
     loadedTaskCatalogHotSwap = 'unsupported_by_host'
     taskTransport = 'host_required'
@@ -1595,7 +1740,13 @@ function Write-SafeOutput {
 
 function Write-SafeError {
   param([string]$Code, [string]$RequestedAction)
-  Write-SafeOutput ([ordered]@{ ok = $false; error = $Code; action = $RequestedAction })
+  $payload = [ordered]@{ ok = $false; error = $Code; action = $RequestedAction }
+  if ($RequestedAction -eq 'cycle') {
+    $payload['recurrenceEligible'] = $false
+    $payload['checkBatch'] = @()
+    $payload['recommendedCadenceMinutes'] = $null
+  }
+  Write-SafeOutput $payload
 }
 
 $mutex = $null
@@ -1680,11 +1831,10 @@ try {
   }
 
   if ($Action -eq 'status') {
-    Remove-ExpiredRecords $state $now
     $governorTaskId = if ($null -ne $state.governor) { Unprotect-OpaqueId $state.governor.protectedId } else { $null }
     $governorLifecycleState = if ($null -ne $state.governor) { [string]$state.sessions[[string]$state.governor.idHash].state } else { 'unclaimed' }
-    $activeTasks = @($state.sessions.Values | Where-Object { $_.kind -eq 'task' -and $_.state -eq 'active' -and ($null -eq $state.governor -or $_.idHash -ne $state.governor.idHash) }).Count
-    $activeAgents = @($state.sessions.Values | Where-Object { $_.kind -eq 'agent' -and $_.state -eq 'active' }).Count
+    $activeTasks = @($state.sessions.Values | Where-Object { $_.kind -eq 'task' -and $_.state -eq 'active' -and ($null -eq $state.governor -or $_.idHash -ne $state.governor.idHash) -and (Test-RecordInGovernedScope $state $_ $now) }).Count
+    $activeAgents = @($state.sessions.Values | Where-Object { $_.kind -eq 'agent' -and $_.state -eq 'active' -and (Test-RecordInGovernedScope $state $_ $now) }).Count
     Write-SafeOutput ([ordered]@{
       ok = $true
       action = 'status'
@@ -1710,8 +1860,8 @@ try {
       hookRole = 'optional_acceleration'
       hookRequiredForAutonomy = $false
       lastHookUtc = $state.health.lastHookUtc
-      livenessAuthority = 'complete_current_host_active_inventory'
-      taskDiscoveryAuthority = 'complete_current_host_active_inventory_each_governor_cycle'
+      livenessAuthority = 'current_host_runtime_status_within_selected_scope'
+      taskDiscoveryAuthority = 'visible_or_specified_inventory_each_governor_cycle'
       catalogRefreshAction = 'fully_restart_codex_then_start_fresh_task'
       loadedTaskCatalogHotSwap = 'unsupported_by_host'
       taskTransport = 'host_required'
@@ -1739,15 +1889,18 @@ try {
       localMutexScope = 'machine_state_root'
       workerRecurrence = 'disabled'
       modelCalls = 'governor_only'
-      monitoringMode = 'complete_current_host_active_inventory_plus_optional_hooks'
-      monitoredTaskPolicy = 'current_host_active_tasks_only'
+      monitoringMode = 'scoped_current_host_inventory_plus_optional_hooks'
+      monitoredTaskPolicy = 'visible_active_or_explicitly_specified_active_tasks_only'
+      automaticChatLimit = 50
+      accountWideCoverage = $false
+      scopeSnapshotUtc = $state.health.scopeCapturedAtUtc
       hookModelContext = 'none'
       workerModelTurns = 0
-      recurrenceEligible = ($null -ne $state.governor -and [long]$state.governor.cycleCount -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$state.governor.lastCycleUtc))
-      recurrenceCreationPolicy = 'after_successful_complete_active_inventory_cycle'
+      recurrenceEligible = ($null -ne $state.governor -and [bool]$state.health.inventoryReconciled -and [long]$state.governor.cycleCount -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$state.governor.lastCycleUtc))
+      recurrenceCreationPolicy = 'after_successful_scoped_active_inventory_cycle'
       hostInventoryCapabilityPreflightRequired = $true
-      hostInventoryScope = 'active_current_host'
-      hostInventoryCompletenessRequirement = 'complete_active_flag_or_enumerable_active_snapshot'
+      hostInventoryScope = if ($state.health.scopeMode -eq 'visible_or_specified') { 'visible_or_specified' } else { 'active_current_host' }
+      hostInventoryCompletenessRequirement = 'none_for_visible_or_specified_scope'
       hostInventoryUnsupportedError = 'host_inventory_completeness_unsupported'
       hostInventoryStatusAuthorityRequirement = 'current_host_runtime'
       hostInventoryLivenessUnsupportedError = 'host_inventory_liveness_unsupported'
@@ -1763,7 +1916,7 @@ try {
   }
 
   if ($Action -eq 'preflight') {
-    $supportedCompleteness = $HostInventoryCompleteness -in @('active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')
+    $supportedCompleteness = $HostInventoryCompleteness -in @('visible_or_specified', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')
     if (-not $supportedCompleteness) {
       Write-SafeOutput ([ordered]@{
         ok = $false
@@ -1803,9 +1956,9 @@ try {
       recurrenceEligible = $false
       hostInventoryCompleteness = $HostInventoryCompleteness
       hostInventoryStatusAuthority = $HostInventoryStatusAuthority
-      hostInventoryScope = 'active_current_host'
+      hostInventoryScope = if ($HostInventoryCompleteness -eq 'visible_or_specified') { 'visible_or_specified' } else { 'active_current_host' }
       requiredHostAction = 'continue_bootstrap_without_claim'
-      supportedHostRequirement = 'complete_active_set_and_current_host_runtime_status'
+      supportedHostRequirement = 'visible_or_specified_current_host_runtime_status'
     })
     exit 0
   }
@@ -1859,6 +2012,12 @@ try {
     $source = if ($null -ne $existing) { [string]$existing.source } else { 'fallback' }
     $initialized = Set-SessionRecord $state $current 'task' $null $workspaceHash $model 'active' $source $now $now 3 -AllowReactivation
     if (-not $initialized -or $state.sessions[$currentHash].state -ne 'active') { throw 'supervision_event_order_conflict' }
+    if ($HostInventoryCompleteness -eq 'visible_or_specified') {
+      $state.health.scopeMode = 'visible_or_specified'
+      $state.health.scopeCapturedAtUtc = $null
+      $state.health.scopeTaskHashes = @()
+      $state.health.inventoryReconciled = $false
+    }
     $state.revision = [long]$state.revision + 1
     if ($sameGovernor) {
       $state.governor.lastSeenUtc = $now.ToString('o')
@@ -1876,11 +2035,11 @@ try {
     Write-State $state $resolved
     $initializePayload = Get-DiscoveryPayload $state 'initialize' $current $SinceRevision $now
     $initializePayload['recurrenceEligible'] = $false
-    $initializePayload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
-    $initializePayload['requiredHostAction'] = 'run_complete_host_active_inventory_cycle_before_recurrence'
+    $initializePayload['recurrenceCreationPolicy'] = 'after_successful_scoped_active_inventory_cycle'
+    $initializePayload['requiredHostAction'] = 'run_scoped_host_inventory_cycle_before_recurrence'
     $initializePayload['hostInventoryCompleteness'] = $HostInventoryCompleteness
     $initializePayload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
-    $initializePayload['hostInventoryScope'] = 'active_current_host'
+    $initializePayload['hostInventoryScope'] = if ($HostInventoryCompleteness -eq 'visible_or_specified') { 'visible_or_specified' } else { 'active_current_host' }
     Write-SafeOutput $initializePayload
     exit 0
   }
@@ -1890,6 +2049,7 @@ try {
     $subjectHash = Get-TextHash $subject
     if (-not $state.sessions.Contains($subjectHash)) { throw 'supervision_subject_unknown' }
     $record = $state.sessions[$subjectHash]
+    if (-not (Test-RecordInGovernedScope $state $record $now)) { throw 'supervision_subject_out_of_scope' }
     $confirmed = Set-SessionRecord $state $subject ([string]$record.kind) ([string]$record.parentHash) ([string]$record.workspaceHash) ([string]$record.model) 'active' ([string]$record.source) $now $now 3 -AllowReactivation
     if (-not $confirmed -or $state.sessions[$subjectHash].state -ne 'active') { throw 'supervision_event_order_conflict' }
     Write-State $state $resolved
@@ -1897,6 +2057,10 @@ try {
     exit 0
   }
   if ($Action -in @('reconcile-host', 'cycle') -and -not [string]::IsNullOrWhiteSpace($HostInventoryPath) -and $HostInventoryStatusAuthority -ne 'current_host_runtime') {
+    if ($Action -eq 'cycle' -and $null -ne $state.governor -and $state.governor.idHash -eq $currentHash) {
+      $state.health.inventoryReconciled = $false
+      Write-State $state $resolved
+    }
     Write-SafeOutput ([ordered]@{
       ok = $false
       error = 'host_inventory_liveness_unsupported'
@@ -1915,6 +2079,7 @@ try {
   if ($Action -eq 'reconcile-host') {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
     $inventory = Complete-HostInventoryForGovernor (Read-HostInventory $HostInventoryPath $now) $current
+    if ($state.health.scopeMode -eq 'visible_or_specified' -and $inventory.Scope -ne 'visible_or_specified') { throw 'supervision_host_inventory_scope_mismatch' }
     $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
     $state.governor.lastSeenUtc = $now.ToString('o')
     $payload = Get-DiscoveryPayload $state 'reconcile-host' $current $SinceRevision $now -Compact
@@ -1922,7 +2087,7 @@ try {
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
     $payload['hostInventoryComplete'] = [bool]$reconciled.Complete
     $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
-    $payload['hostInventoryScope'] = 'active_current_host'
+    $payload['hostInventoryScope'] = [string]$inventory.Scope
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostTasksAdded'] = [int]$reconciled.Added
@@ -1934,7 +2099,7 @@ try {
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     $payload['recurrenceEligible'] = $false
-    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
+    $payload['recurrenceCreationPolicy'] = 'after_successful_scoped_active_inventory_cycle'
     Write-State $state $resolved
     Write-SafeOutput $payload
     exit 0
@@ -1959,21 +2124,42 @@ try {
   }
   if ($Action -eq 'cycle') {
     if ($null -eq $state.governor -or [string]$state.governor.idHash -ne $currentHash) { throw 'supervision_governor_mismatch' }
+    # A failed or interrupted cycle must not leave prior eligibility durable.
+    $state.health.inventoryReconciled = $false
+    Write-State $state $resolved
     $inventory = Read-HostInventory $HostInventoryPath $now
-    if (-not [bool]$inventory.Complete) { throw 'supervision_host_inventory_incomplete' }
+    if (-not $inventory.Complete -and $inventory.Scope -ne 'visible_or_specified') { throw 'supervision_host_inventory_incomplete' }
+    if ($state.health.scopeMode -eq 'visible_or_specified' -and $inventory.Scope -ne 'visible_or_specified') { throw 'supervision_host_inventory_scope_mismatch' }
     $inventory = Complete-HostInventoryForGovernor $inventory $current
     $reconciled = Invoke-HostInventoryReconciliation $state $inventory $current $now
+    if ($reconciled.Unrepresented -gt 0 -or ($reconciled.Unknown -gt 0 -and $inventory.Scope -ne 'visible_or_specified')) {
+      Write-State $state $resolved
+      Write-SafeOutput ([ordered]@{
+        ok = $false; action = 'cycle'; engine = 'degraded'
+        error = 'supervision_active_inventory_unrepresented'
+        recurrenceEligible = $false; hostTasksUnrepresented = [int]$reconciled.Unrepresented
+        hostTasksUnknown = [int]$reconciled.Unknown; checkBatch = @()
+        recommendedCadenceMinutes = $null; workerRecurrence = 'disabled'
+        requiredHostAction = 'stop_current_key_recurrences_then_resolve_inventory'
+      })
+      exit 1
+    }
+    $state.health.inventoryReconciled = $true
     $state.governor.cycleCount = [long]$state.governor.cycleCount + 1
     $state.governor.lastCycleUtc = $now.ToString('o')
     $state.governor.lastSeenUtc = $now.ToString('o')
-    $activeCount = @($state.sessions.Values | Where-Object { $_.state -eq 'active' -and $_.idHash -ne $state.governor.idHash }).Count
+    $activeCount = @($state.sessions.Values | Where-Object { $_.state -eq 'active' -and $_.idHash -ne $state.governor.idHash -and (Test-RecordInGovernedScope $state $_ $now) }).Count
     $state.governor.idleCycles = if ($activeCount -gt 0) { 0L } else { [long]$state.governor.idleCycles + 1 }
     $payload = Get-DiscoveryPayload $state 'cycle' $current $SinceRevision $now -Compact
     $payload['hostInventoryObserved'] = [int]$reconciled.Observed
     $payload['hostInventoryRawObserved'] = [int]$inventory.RawObserved
-    $payload['hostInventoryComplete'] = $true
+    $payload['hostInventoryComplete'] = [bool]$inventory.Complete
     $payload['hostInventoryStatusAuthority'] = $HostInventoryStatusAuthority
-    $payload['hostInventoryScope'] = 'active_current_host'
+    $payload['hostInventoryScope'] = [string]$inventory.Scope
+    $payload['scopeActiveTasks'] = $activeCount
+    $payload['scopeStatusUnknown'] = [int]$reconciled.Unknown
+    $payload['scopeStatusCoverage'] = if ($reconciled.Unknown -gt 0) { 'partial' } else { 'observed_within_scope' }
+    if ($reconciled.Unknown -gt 0) { $payload['engine'] = 'partial' }
     $payload['hostInventoryCallerVisibility'] = [string]$inventory.CallerVisibility
     $payload['hostInventoryGovernorSource'] = [string]$inventory.GovernorSource
     $payload['hostInventoryCycle'] = [long]$state.governor.cycleCount
@@ -1986,7 +2172,7 @@ try {
     $payload['taskWakePolicy'] = 'intervention_claim_required'
     $payload['requiredHostAction'] = 'wait_compact_batch_then_evaluate_heartbeat'
     $payload['recurrenceEligible'] = $true
-    $payload['recurrenceCreationPolicy'] = 'after_successful_complete_active_inventory_cycle'
+    $payload['recurrenceCreationPolicy'] = 'after_successful_scoped_active_inventory_cycle'
     $state.health.scanOffset = [long]$payload.nextBatchOffset
     Write-State $state $resolved
     Write-SafeOutput $payload
@@ -1997,7 +2183,7 @@ try {
     $payload = Get-DiscoveryPayload $state 'discover' $current $SinceRevision $now
     $payload['cycleAdvanced'] = $false
     $payload['taskWakePolicy'] = 'intervention_claim_required'
-    $payload['requiredHostAction'] = 'run_cycle_with_complete_host_active_inventory'
+    $payload['requiredHostAction'] = 'run_cycle_with_scoped_host_inventory'
     Write-SafeOutput $payload
     exit 0
   }

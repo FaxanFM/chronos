@@ -6,7 +6,7 @@ security-coverage percentage, and the project does not describe it as one.
 
 ## Governor
 
-`tests/governor.tests.ps1` currently runs 47 deterministic validations. They
+`tests/governor.tests.ps1` currently runs 49 deterministic validations. They
 cover runtime inventory selection, model binding, canonical worker IDs,
 single-use plan tokens, V2 `fork_turns=none`, categorical write containment,
 one active lease per worker, fencing, renewal, read-mutation detection,
@@ -21,6 +21,16 @@ operations must ignore it and restore the parent environment.
 
 These tests validate modeled behavior. They do not turn Governor into a
 security boundary. Write delegation remains disabled.
+
+Inspector, Heartbeat, supervision, and Governor suites accept `-PluginRoot`
+to run directly against an extracted release ZIP. This does not install the
+plugin or change the user's current Governor. Ordinary and tagged CI are
+configured to run all four suites against both source and the extracted
+package on windows-2022 and windows-latest, followed by the reproducible-release
+gate. Each serial validation job has a bounded 120-minute budget for its many
+isolated native processes. This job budget does not change production hook
+deadlines or native-action watchdogs. The Governor clean-filter
+fixture supports TEMP paths containing spaces.
 
 ## Inspector
 
@@ -49,9 +59,10 @@ approval aggregates remain unsupported as account billing evidence.
 ## Heartbeats
 
 `tests/heartbeat.tests.ps1` exercises the native Heartbeat action through the
-installed `chronos.cmd` and `chronos.ps1` command surfaces. Both Windows CI jobs build and extract
-the release ZIP, then run this complete suite against that package. The same
-suite accepts a source plugin root for local development. State-containment
+installed `chronos.cmd` and `chronos.ps1` command surfaces. Both Windows CI jobs
+are configured to run the source suite, build and extract the release ZIP, and
+run the complete suite against that package. The same suite accepts a source
+plugin root for local development. State-containment
 cases use a path outside both approved roots and separately verify that
 state-path rejection precedes malformed-input parsing regardless of the package
 extraction folder. A separate regression rejects an unrelated TEMP sibling
@@ -120,17 +131,25 @@ The release acceptance set also covers the corrective Governor contract:
 
 `tests/supervision.tests.ps1` exercises the packaged hook schema, native
 `chronos.cmd` and `chronos.ps1 -Action supervise` wrappers, empty status,
-lifecycle start and end, the exact quote-free configured Windows intake through
+lifecycle start and end, the exact configured PowerShell Windows intake through
 a scheduler-tolerant test watchdog, a separate assertion that every manifest
 hook retains its three-second host ceiling, protected inbox persistence before
 registry creation, malformed-input rejection without an event, and exactly-once
-mutex-bound inbox merge. It also proves that undecryptable DPAPI records degrade
-once without blocking status and that a committed deletion-locked event cannot
+mutex-bound inbox merge.
+
+Configured schema-v3 events bind a hashed Windows producer identity. A
+mismatched consumer returns `supervision_hook_identity_mismatch` before
+decryption, leaves the queued event byte-for-byte unchanged, and creates no
+registry state or drop receipt. The local harness also reproduces this boundary
+with a real sandboxed tool call, then verifies lossless native-account merge.
+
+The suite also proves that undecryptable legacy DPAPI records degrade once
+without blocking status and that a committed deletion-locked event cannot
 replay before eventual cleanup. Separate regressions hold the committed file
 under an exclusive read lock and fill the sibling inbox with 256 events. They
 require zero replay or false corruption, complete presence-aware receipt
 retention, eventual removal, and an empty receipt set after cleanup,
-asynchronous completed-turn activity, duplicate turn-signal deduplication,
+completed-turn activity, duplicate turn-signal deduplication,
 mid-session self-discovery,
 strict UTF-8 and BOM-framed hook input,
 Governor claim and conflict, revision cursors, duplicate events, active-agent
@@ -146,10 +165,10 @@ separate registry, installation-key, and mutex identity for separate Codex
 homes, invalid override rejection before state creation, custom-home prior-v2
 read-only migration, ancestor-junction rejection, and sequential plus
 concurrent custom-home isolation from one unscoped legacy registry and anchor,
-ineligibility before a complete Governor-bearing current-host active inventory,
+ineligibility before a scoped Governor-bearing current-host inventory,
 rejection of schema v1 omission, schema v2 caller-exclusion
 normalization and contradiction rejection,
-cycle and age limits, mandatory complete per-cycle active-inventory
+cycle and age limits, mandatory fresh scoped per-cycle inventory
 reconciliation, raw-versus-normalized inventory counts, one hash-only normalized
 status per inventory task, passive non-advancing discovery, missed-hook task
 recovery, active-to-idle transition, absent-task closure, stale inventory
@@ -167,11 +186,18 @@ recovery, protected fallback contents, reconciliation and
 entry removal after contention, prevention of fallback parent-directory races,
 diagnostic concurrent-hook failures, direct-state failure recovery through the
 two-attempt durable pending queue,
-full 256-record capacity behavior, silent hook output,
-headless Windows commands, the exact quote-free manifest command through the
-Codex-style `cmd.exe /D /S /C` boundary, a plugin root containing spaces,
-fresh `hookRuns` and `lastHookUtc` evidence, bounded event coverage, correct asynchronous flags
-with synchronous `SessionEnd`, absence of high-frequency prompt/tool hooks, and
+full 256-record capacity behavior, active-work admission after 255 retained
+ended tasks, full active counts beyond bounded discovery arrays, cross-generation
+inactive snapshots, durable hook-free retention cleanup, delayed task and child
+hooks after history eviction, stale-snapshot rejection, recurrence ineligibility
+after capacity or unknown-status failure and restart, byte-limit reclamation
+when terminal timestamps grow the state, identity-preserving schema upgrade,
+silent hook output,
+headless Windows commands, the exact manifest command through the
+Codex PowerShell hook boundary, a plugin root containing spaces,
+fresh `hookRuns` and `lastHookUtc` evidence, bounded event coverage, synchronous
+lifecycle handlers, neutral completion-hook JSON on accepted and rejected
+identities, absence of high-frequency prompt/tool hooks, and
 absence of scheduler, process-launch, and network primitives.
 
 The suite does not use an elapsed-time threshold as a correctness assertion;
@@ -196,7 +222,7 @@ also extracts the exact ZIP as a fresh `chronos@openai-curated-remote` cache
 install, verifies canonical registry discovery, the two-skill inventory and version, and runs the packaged `.cmd` Heartbeat and supervision status
 commands so execution-policy handling is part of the release gate. The release
 suite also executes the installed package's exact Windows hook definition
-through `cmd.exe` from a path containing spaces and requires silent registry
+through PowerShell from a path containing spaces and requires protected inbox
 activity. This prevents a scan-valid hook definition from passing while its
 payload never starts.
 
@@ -207,3 +233,19 @@ created. After publication, the workflow verifies the immutable release and
 assets, downloads every asset, compares its bytes with the verified build, and
 checks that the published release record binds the canonical identity to the
 ZIP digest.
+
+## Local Codex Harness
+
+`tests/harness.tests.ps1` accepts the actual Desktop Codex executable and uses
+its plugin manager and app-server protocol on this machine. It checks hook
+discovery, exact-definition trust without a bypass, an actual `hook/completed`
+notification, and protected inbox persistence. The optional existing-account
+model smoke test uses `gpt-6.1-sol`, requires successful native command receipts
+for install, supervision, and Heartbeat status, and verifies SessionStart, Stop,
+and SessionEnd dispatch. It archives only its own test thread. It never claims
+that this second process enumerates Desktop's live tasks. Compact generated
+evidence contains no transcripts, task IDs, commands, or credentials.
+
+### Visible-or-Specified Scope Regression
+
+`tests/supervision.tests.ps1` exercises schema-v3 `complete=false` bootstrap and cycles, native 50-visible-chat enforcement, explicit targets outside the window, intrinsic caller accounting, hash-only output, separate-process restart persistence, window omission without lifecycle endings, hook-only target exclusion, out-of-scope confirmation rejection, conservative unknown/unloaded status, idle/active cadence, and stale snapshot rejection. Legacy complete v1/v2 input remains a compatibility contract, not the normal Governor bootstrap requirement.

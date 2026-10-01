@@ -1,6 +1,36 @@
 # OpenAI Plugin Directory Published Listing Record
 
-Status: v0.8.8 is published in the OpenAI Plugins Directory under the verified
+## v0.9.3 Release Candidate
+
+Version: `0.9.3`
+
+The local full package is `chronos-v0.9.3.zip`, SHA-256
+`2ba48cdde0dc9c718c6535abbd1743b1fffd6e042e18762f88fec2667724cac1`.
+It contains 14 release files, including five optional lifecycle hooks.
+New release destination: https://github.com/FaxanFM/chronos/releases/tag/v0.9.3.
+This is a candidate until installed validation and release verification finish;
+it is not a claim of publication or marketplace approval.
+
+The current OpenAI submission documentation explicitly rejects ZIPs containing
+lifecycle hooks or app references. Do not upload the full package to the portal
+as if it meets that rule. A separately labeled skills-only edition requires its
+own deterministic artifact, tests, disclosure, and submission receipt. Do not
+remove hooks silently or change the prior published package in place.
+
+Official UI guidance allows optional MCP Apps dashboards, explicitly describing
+ChatGPT rendering and tool-only fallback. This release adds no dashboard, hosted
+MCP service, telemetry, or assumption of native Codex component rendering.
+Those require a separately tested integration and must not delay the scoped
+governance correction.
+
+The existing Platform listing was inspected on 2026-10-01 and reports v0.9.2
+Published, both skill checks passed, and no metadata/skill issues. Its old
+complete-host-inventory description needs the scoped correction. It has not
+been replaced with this candidate.
+
+## Historical Publication Records
+
+Status at the earlier publication: v0.8.8 was published in the OpenAI Plugins Directory under the verified
 Dravara, LLC business identity. Both OpenAI skill scans passed and the package
 was published from the existing Chronos listing. The GitHub release artifact is
 `chronos-v0.8.8.zip` with SHA-256
@@ -14,8 +44,9 @@ v0.9.0 is the public GitHub asynchronous-supervision release with artifact
 It has not been submitted to the OpenAI Plugins Directory. Release URL:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.0.
 
-v0.9.2 is the candidate Directory update. It keeps one complete current-host
-active inventory as the liveness authority for each Governor cycle. It does not
+The following record describes the earlier v0.9.2 development tree.
+It is not authorized to replace an existing immutable GitHub release or the
+published Directory package. It uses one bounded visible-or-specified current-host inventory as the liveness authority within that working set. It does not
 enumerate inactive task history. It treats health evidence
 as a separate contract. A schema-v2 collector snapshot carries a stable source
 epoch, an increasing source sequence, and an explicit coverage label for each
@@ -23,22 +54,14 @@ of the eight public Heartbeat families. Missing evidence stays `partial` or
 `unsupported`; it cannot become a clean result. Inspector aggregates are
 accepted only after an authorized, compatible Inspector run produced them.
 
-Governor bootstrap now starts with a non-claiming host-capability preflight.
-The host must expose an explicit completeness flag, terminal cursor pagination
-under one stable snapshot identity, or a fully enumerated total count under one
-stable snapshot identity. A capped `list_threads` contract without that proof
-returns `host_inventory_completeness_unsupported`, leaves zero active current-key
-recurrences, skips fabricated partial reconciliation, and does not retry until
-the host contract changes. This is reported as an expected integration blocker,
-not a healthy or partially completed setup.
-
-The candidate also separates active-set coverage from stored identity
-enumeration. A direct same-host `thread/loaded/list`-equivalent snapshot with
-authoritative runtime status is sufficient. Terminal cursor pagination from a separately spawned
-app-server is not sufficient because that process reports its own `notLoaded`
-state even for Desktop-active tasks. Without current-host runtime status, native
-preflight returns `host_inventory_liveness_unsupported` and remains
-recurrence-ineligible.
+Governor bootstrap uses non-claiming preflight with `visible_or_specified` and
+`current_host_runtime`. It governs at most 50 visible chats plus explicitly
+selected chats, and only when they are active. Schema-v3 inventory declares
+`scope=visible_or_specified` and `complete=false`. No pagination or account-wide
+completeness proof is required. Missing current-host status authority still
+fails closed. A separately spawned app-server is not Desktop liveness evidence.
+Omission leaves scope without asserting a lifecycle end; hooks cannot add
+governance membership. Known active titles and scope counts make selection clear.
 
 The Governor resumes native intervention state before it evaluates new
 transitions. Only native plan, claim, send, and record actions can wake one
@@ -50,7 +73,7 @@ The release also mitigates the embedded-quote Windows hook-launcher defect,
 preserves terminal state when asynchronous lifecycle events arrive out of
 order, and requires a full host restart after upgrade. It isolates supervision
 state across restarted sandbox identities, gates recurrence creation on one
-successful complete-inventory cycle, permits Governor repository discovery
+successful scoped-inventory cycle, permits Governor repository discovery
 while ignoring user Git config, and makes overlapping Heartbeat cycles
 explicitly retryable. Supervision and Heartbeat use canonical `CODEX_HOME`
 installation identity, isolate separate Codex homes, reject reparse-point
@@ -63,11 +86,39 @@ intake path instead of loading the full supervision engine inside the
 three-second host window. The next mutex-owning status or Governor cycle
 validates, receipts, merges, and removes each accepted event. The Governor
 assignment, result, verification, lifecycle, and exclusion contracts are
-self-contained in the installed skill. The candidate
-`chronos-v0.9.2.zip` SHA-256 is
-`c9091cce87c3fef01254a5f1a8235920272d7fb03e0e1439ac33bf32f4b6589c`.
-Candidate release URL:
+self-contained in the installed skill. The earlier, superseded local
+`chronos-v0.9.2.zip` reconciliation package had SHA-256
+`966098ada69f3ff54ccec06f81b0d1476647981d739e7be6a63a1a9f6e209a20`.
+This is an unpublished local reconciliation repair, not a replacement for an
+existing immutable release or an installed Directory package. It prioritizes
+current work over ended-task history, handles newer inactive generations,
+persists cycle retention cleanup, and blocks recurrence eligibility when
+reconciliation cannot account for current work.
+Existing release URL, not a destination for overwriting development artifacts:
 https://github.com/FaxanFM/chronos/releases/tag/v0.9.2.
+
+## Current Local Development Package
+
+Status: local testing only, not submitted or published.
+
+- Manifest compatibility version: `0.9.2`
+- Artifact: `chronos-v0.9.2.zip`
+- SHA-256: `0261f0685cf7b67231ddac5619786ba30fed4ae3a29cf753fdea68a5fd6744ff`
+- Release files: 14
+- Verified local runtime: Codex 0.159.2, Windows PowerShell 5.1
+
+This revision removes nested PowerShell startup from the hook path, returns
+neutral completion JSON, and binds schema-v3 inbox events to a hashed Windows
+producer identity. A sandbox-account read fails with
+`supervision_hook_identity_mismatch` while preserving the event. Scoped
+host-account execution then merges it without loss. Real local hook dispatch
+and native diagnostic execution passed; full regression gates are separate.
+
+The former global-completeness requirement is superseded by the user's explicit
+visible-or-specified scope. Local scoped regression and installed runtime
+verification are required before claiming the updated Governor works. Do not
+submit an unverified development ZIP, overwrite v0.9.2, or infer healthy coverage
+from hooks. A public update requires a fresh version and verified release identity.
 
 Direct listing:
 https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571
@@ -87,8 +138,9 @@ public ChatGPT directory:
 3. Open [organization general settings](https://platform.openai.com/settings/organization/general)
    and complete individual or business verification.
 4. Open the [plugin submission portal](https://platform.openai.com/plugins).
-5. Add a new version to the existing **Skills only** plugin and upload the final
-   `chronos-v0.9.2.zip` release asset after every gate passes.
+5. Add a fresh version to the existing **Skills only** plugin and upload only
+   that version's verified immutable release asset after every gate passes.
+   The local development `chronos-v0.9.2.zip` above is not a submission asset.
 6. Complete the listing, prompts, reviewer cases, availability, release notes,
    and policy attestations below.
 7. Submit the draft for review. Approval does not publish automatically; after
@@ -319,7 +371,7 @@ Do not infer worldwide availability from publication.
 > It detects duplicate Git and Directory installations,
 > keeps one Terra Medium Governor per machine, and
 > leaves monitored tasks passive on their existing models. Each Governor cycle
-> requires and reconciles one complete bounded host task inventory, then returns
+> requires and reconciles one scoped bounded host task inventory, then returns
 > one compact normalized status per listed task. Missing or disabled monitoring
 > hooks do not require manual registration. Default Heartbeat and supervision
 > state now uses the sandbox-writable Windows temporary directory, with safe

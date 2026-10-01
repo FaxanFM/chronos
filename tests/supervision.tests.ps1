@@ -1,11 +1,13 @@
-param()
+param([string]$PluginRoot = '')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$module = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\session-registry.ps1'
-$wrapper = Join-Path $repo 'plugins\chronos\skills\chronos\scripts\chronos.ps1'
-$hooksPath = Join-Path $repo 'plugins\chronos\hooks\hooks.json'
-$governorSkillPath = Join-Path $repo 'plugins\chronos\skills\chronos-governor\SKILL.md'
+if (-not $PluginRoot) { $PluginRoot = Join-Path $repo 'plugins\chronos' }
+$PluginRoot = (Resolve-Path -LiteralPath $PluginRoot).ProviderPath
+$module = Join-Path $PluginRoot 'skills\chronos\scripts\session-registry.ps1'
+$wrapper = Join-Path $PluginRoot 'skills\chronos\scripts\chronos.ps1'
+$hooksPath = Join-Path $PluginRoot 'hooks\hooks.json'
+$governorSkillPath = Join-Path $PluginRoot 'skills\chronos-governor\SKILL.md'
 $approvedTempRoot = Join-Path ([IO.Path]::GetTempPath()) 'Chronos\Supervision'
 $root = Join-Path $approvedTempRoot ('tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -65,7 +67,7 @@ function Invoke-Supervision {
     [long]$SinceRevision = 0,
     [string]$Subject = '',
     [string]$HostInventory = '',
-    [ValidateSet('', 'unsupported', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
+    [ValidateSet('', 'unsupported', 'visible_or_specified', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')]
     [string]$HostInventoryCompleteness = '',
     [ValidateSet('', 'unsupported', 'current_host_runtime')]
     [string]$HostInventoryStatusAuthority = '',
@@ -155,15 +157,15 @@ function Complete-HookProcess {
 }
 
 function Invoke-Hook {
-  param([string]$State, $Data, [string]$ObservedAtUtc = '')
-  Complete-HookProcess (Start-HookProcess $State ($Data | ConvertTo-Json -Compress -Depth 8) $ObservedAtUtc)
+  param([string]$State, $Data, [string]$ObservedAtUtc = '', [int]$TimeoutMilliseconds = 10000)
+  Complete-HookProcess (Start-HookProcess $State ($Data | ConvertTo-Json -Compress -Depth 8) $ObservedAtUtc) $TimeoutMilliseconds
 }
 
 function Start-ConfiguredWindowsHook {
   param([string]$Command, [string]$PluginRoot, [string]$TempRoot, [string]$Json)
   $info = New-Object Diagnostics.ProcessStartInfo
-  $info.FileName = $env:ComSpec
-  $info.Arguments = '/D /S /C "' + $Command + '"'
+  $info.FileName = 'powershell.exe'
+  $info.Arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
   $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -240,12 +242,16 @@ function Invoke-SupervisionInTempRoot {
     $info.EnvironmentVariables['HOME'] = $SandboxHome
   }
   $process = [Diagnostics.Process]::Start($info)
-  if (-not $process.WaitForExit(10000)) {
+  $outputRead = $process.StandardOutput.ReadToEndAsync()
+  $errorRead = $process.StandardError.ReadToEndAsync()
+  # This watchdog bounds fixture processes, not the production hook deadline.
+  if (-not $process.WaitForExit(60000)) {
     try { $process.Kill() } catch {}
-    throw 'TEMP-scoped supervision status exceeded its bounded test timeout.'
+    $process.Dispose()
+    throw ('TEMP-scoped supervision exceeded its test watchdog: {0}:{1}' -f $Action, (Split-Path -Leaf $TempRoot))
   }
-  $output = $process.StandardOutput.ReadToEnd()
-  $errorOutput = $process.StandardError.ReadToEnd()
+  $output = $outputRead.GetAwaiter().GetResult()
+  $errorOutput = $errorRead.GetAwaiter().GetResult()
   $result = [pscustomobject]@{
     ExitCode = $process.ExitCode
     Output = @($output -split "`r?`n" | Where-Object { $_ })
@@ -310,19 +316,17 @@ try {
   foreach ($forbidden in @('PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'PermissionRequest', 'PreCompact', 'PostCompact')) {
     Assert-True (-not $hookText.Contains($forbidden)) "High-frequency or model-steering hook was present: $forbidden"
   }
-  Assert-True ($hookText.Contains('-WindowStyle Hidden')) 'Windows hook commands must be headless.'
-  Assert-True ($hookText.Contains('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')) 'Windows hooks must use the system PowerShell path.'
   $windowsCommands = @(
     $hooks.hooks.PSObject.Properties.Value |
       ForEach-Object { $_[0].hooks[0].commandWindows }
   )
   Assert-True (($windowsCommands | Select-Object -Unique).Count -eq 1) 'Every lifecycle event must use the same audited Windows launcher.'
   $windowsCommand = [string]$windowsCommands[0]
-  Assert-True (-not $windowsCommand.Contains('"')) 'Windows hook launcher must remain quote-free for the Codex cmd.exe outer-quote boundary.'
-  Assert-True ($windowsCommand -match ' -EncodedCommand ([A-Za-z0-9+/=]+)$') 'Windows hook launcher must move path-sensitive logic into an encoded PowerShell payload.'
-  $decodedWindowsPayload = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
-  Assert-True ($decodedWindowsPayload -eq "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills\chronos\scripts\hook-intake.ps1')") 'Windows hook payload did not suppress host noise and resolve the bounded intake path inside PowerShell.'
-  Assert-True (([regex]::Matches($hookText, '"async"\s*:\s*true')).Count -eq 4) 'Every non-terminal hook must use supported background execution.'
+  Assert-True ($windowsCommand -eq "`$ProgressPreference='SilentlyContinue'; & (Join-Path `$env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')") 'Windows hook must resolve PLUGIN_ROOT in the existing Codex PowerShell hook shell without starting another interpreter.'
+  Assert-True (([regex]::Matches($hookText, '"async"\s*:\s*true')).Count -eq 0) 'Lifecycle hints must finish before shutdown can cancel background hooks.'
+  foreach ($completion in @('Stop', 'SubagentStop')) {
+    Assert-True (-not ($hooks.hooks.$completion[0].hooks[0].PSObject.Properties.Name -contains 'async')) 'Completion hooks must finish before the runtime closes their turn.'
+  }
   Assert-True (([regex]::Matches($hookText, '"timeout"\s*:\s*3')).Count -eq 5) 'Every packaged hook must retain the three-second host ceiling.'
   Assert-True (-not (($hooks.hooks.SessionEnd[0].hooks[0].PSObject.Properties.Name) -contains 'async')) 'SessionEnd must remain explicitly synchronous.'
   Assert-True (-not $hookText.Contains('additionalContext')) 'Lifecycle hooks must not add model context.'
@@ -337,17 +341,29 @@ try {
     source = 'startup'
     model = 'gpt-5.6-terra'
   } | ConvertTo-Json -Compress
-  $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredPayload
-  Assert-True ($configuredHook.ExitCode -eq 0 -and -not $configuredHook.Output -and -not $configuredHook.Error) 'Configured Windows hook did not execute silently through the Codex cmd.exe command boundary.'
+  $configuredHook = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $configuredHookTemp $configuredPayload
+  Assert-True ($configuredHook.ExitCode -eq 0 -and $configuredHook.Output.Trim() -eq '{}' -and -not $configuredHook.Error) ('Configured Windows hook did not return neutral JSON through the Codex PowerShell command boundary: ' + ($configuredHook | ConvertTo-Json -Compress))
   Assert-True ($configuredHook.ProcessMilliseconds -lt 30000) 'Configured Windows hook exceeded the bounded test-process watchdog.'
   $configuredStatePath = Get-DefaultSupervisionStatePath $configuredHookTemp
   $configuredInbox = Get-HookInboxDirectory $configuredHookTemp
   Assert-True (-not (Test-Path -LiteralPath $configuredStatePath)) 'Configured Windows hook performed synchronous registry work instead of bounded intake.'
   Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 1) 'Configured Windows hook did not persist exactly one protected inbox event.'
   $configuredInvalidPayload = '{"session_id":"one","SESSION_ID":"two","cwd":"C:/invalid","hook_event_name":"SessionStart","source":"startup"}'
-  $configuredInvalidHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $configuredInvalidPayload
-  Assert-True ($configuredInvalidHook.ExitCode -eq 0 -and -not $configuredInvalidHook.Output -and -not $configuredInvalidHook.Error) 'Invalid configured hook input was not rejected silently.'
+  $configuredInvalidHook = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $configuredHookTemp $configuredInvalidPayload
+  Assert-True ($configuredInvalidHook.ExitCode -eq 0 -and $configuredInvalidHook.Output.Trim() -eq '{}' -and -not $configuredInvalidHook.Error) 'Invalid configured hook input did not return neutral JSON.'
   Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 1) 'Invalid configured hook input created an inbox event.'
+  $configuredEventPath = @(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json')[0].FullName
+  $configuredEventBytes = [IO.File]::ReadAllBytes($configuredEventPath)
+  $foreignEvent = Get-Content -LiteralPath $configuredEventPath -Raw | ConvertFrom-Json
+  Assert-True ($foreignEvent.schema -eq 3 -and $foreignEvent.producerIdentityHash -match '^[a-f0-9]{64}$') 'Configured intake did not bind its Windows identity without exposing the SID.'
+  $foreignEvent.producerIdentityHash = '0' * 64
+  [IO.File]::WriteAllText($configuredEventPath, ($foreignEvent | ConvertTo-Json -Depth 4 -Compress), [Text.UTF8Encoding]::new($false))
+  $foreignBytes = [IO.File]::ReadAllBytes($configuredEventPath)
+  $foreignStatus = Invoke-SupervisionInTempRoot $configuredHookTemp
+  Assert-True ($foreignStatus.ExitCode -eq 1 -and (Get-Payload $foreignStatus).error -eq 'supervision_hook_identity_mismatch') 'Foreign-account hook evidence was not rejected before decryption.'
+  Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($configuredEventPath)) -eq [Convert]::ToBase64String($foreignBytes)) 'Foreign-account evidence was consumed or rewritten.'
+  Assert-True (-not (Test-Path -LiteralPath $configuredStatePath)) 'Foreign-account inspection created registry state or drop receipts.'
+  [IO.File]::WriteAllBytes($configuredEventPath, $configuredEventBytes)
   $configuredStatus = Invoke-SupervisionInTempRoot $configuredHookTemp
   Assert-True ($configuredStatus.ExitCode -eq 0) 'Supervision did not merge the configured hook inbox.'
   $configuredStatusData = Get-Payload $configuredStatus
@@ -356,6 +372,20 @@ try {
   Assert-True (Test-Path -LiteralPath $configuredStatePath -PathType Leaf) 'Inbox merge did not create the private registry.'
   $configuredState = Get-Content -Raw -LiteralPath $configuredStatePath | ConvertFrom-Json
   Assert-True ($configuredState.health.hookRuns -eq 1 -and $configuredState.health.lastHookUtc) 'Configured Windows hook did not record fresh lifecycle activity.'
+
+  $completionHookTemp = Join-Path $root 'completion hook temp'
+  New-Item -ItemType Directory -Path $completionHookTemp -Force | Out-Null
+  foreach ($completion in @('Stop', 'SubagentStop')) {
+    foreach ($validIdentity in @($true, $false)) {
+      $payload = @{ hook_event_name = $completion; session_id = if ($validIdentity) { 'completion-contract' } else { '?' }; turn_id = 'completion-turn'; agent_id = 'completion-agent' } | ConvertTo-Json -Compress
+      $result = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $completionHookTemp $payload
+      Assert-True ($result.ExitCode -eq 0 -and $result.Output.Trim() -eq '{}' -and -not $result.Error) 'Completion hooks must return neutral JSON even when intake fails.'
+    }
+  }
+  foreach ($invalidPayload in @('{"hook_event_name":"Stop",', ('x' * 65537))) {
+    $result = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $completionHookTemp $invalidPayload
+    Assert-True ($result.ExitCode -eq 0 -and $result.Output.Trim() -eq '{}' -and -not $result.Error) 'Malformed or oversized input must still return neutral hook JSON.'
+  }
 
   $undecryptableRecord = [ordered]@{
     schema = 2
@@ -384,8 +414,8 @@ try {
     source = 'startup'
     model = 'gpt-5.6-terra'
   } | ConvertTo-Json -Compress
-  $deleteLockHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $deleteLockPayload
-  Assert-True ($deleteLockHook.ExitCode -eq 0 -and -not $deleteLockHook.Output -and -not $deleteLockHook.Error) 'Deletion-replay fixture hook was not silent and successful.'
+  $deleteLockHook = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $configuredHookTemp $deleteLockPayload
+  Assert-True ($deleteLockHook.ExitCode -eq 0 -and $deleteLockHook.Output.Trim() -eq '{}' -and -not $deleteLockHook.Error) 'Deletion-replay fixture hook did not return neutral JSON successfully.'
   $deleteLockFile = @(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json')
   Assert-True ($deleteLockFile.Count -eq 1) 'Deletion-replay fixture did not create exactly one inbox event.'
   $deleteLockStream = New-Object IO.FileStream($deleteLockFile[0].FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -413,8 +443,8 @@ try {
     source = 'startup'
     model = 'gpt-5.6-terra'
   } | ConvertTo-Json -Compress
-  $receiptBoundaryHook = Invoke-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $receiptBoundaryTemp $receiptBoundaryPayload
-  Assert-True ($receiptBoundaryHook.ExitCode -eq 0 -and -not $receiptBoundaryHook.Output -and -not $receiptBoundaryHook.Error) 'Receipt-boundary fixture hook was not silent and successful.'
+  $receiptBoundaryHook = Invoke-ConfiguredWindowsHook $windowsCommand $PluginRoot $receiptBoundaryTemp $receiptBoundaryPayload
+  Assert-True ($receiptBoundaryHook.ExitCode -eq 0 -and $receiptBoundaryHook.Output.Trim() -eq '{}' -and -not $receiptBoundaryHook.Error) 'Receipt-boundary fixture hook did not return neutral JSON successfully.'
   $receiptBoundaryStatePath = Get-DefaultSupervisionStatePath $receiptBoundaryTemp
   $receiptBoundaryInbox = Get-HookInboxDirectory $receiptBoundaryTemp
   $receiptBoundaryFile = @(Get-ChildItem -LiteralPath $receiptBoundaryInbox -File -Filter 'pending-slot-*.json')
@@ -468,7 +498,7 @@ try {
   $receiptBoundaryCleanup = Get-Payload (Invoke-SupervisionInTempRoot $receiptBoundaryTemp)
   $receiptBoundaryState = Get-Content -Raw -LiteralPath $receiptBoundaryStatePath | ConvertFrom-Json
   Assert-True ($receiptBoundaryCleanup.hookRuns -eq 257 -and @($receiptBoundaryState.health.processedHookEvents).Count -eq 0) 'Slot-bound receipts were not pruned after both inboxes were empty.'
-  Assert-True ($receiptBoundaryState.schema -eq 5) 'Receipt-boundary state did not preserve the compatible private schema.'
+  Assert-True ($receiptBoundaryState.schema -eq 7) 'Receipt-boundary state did not upgrade the private schema.'
 
   $configuredConcurrentHooks = @(0..7 | ForEach-Object {
     $concurrentPayload = @{
@@ -478,11 +508,11 @@ try {
       source = 'startup'
       model = 'gpt-5.6-terra'
     } | ConvertTo-Json -Compress
-    Start-ConfiguredWindowsHook $windowsCommand (Join-Path $repo 'plugins\chronos') $configuredHookTemp $concurrentPayload
+    Start-ConfiguredWindowsHook $windowsCommand $PluginRoot $configuredHookTemp $concurrentPayload
   })
   foreach ($configuredConcurrentHook in $configuredConcurrentHooks) {
     $configuredConcurrentResult = Complete-ConfiguredWindowsHook $configuredConcurrentHook
-    Assert-True ($configuredConcurrentResult.ExitCode -eq 0 -and -not $configuredConcurrentResult.Output -and -not $configuredConcurrentResult.Error) 'Concurrent configured hook did not remain silent and successful.'
+    Assert-True ($configuredConcurrentResult.ExitCode -eq 0 -and $configuredConcurrentResult.Output.Trim() -eq '{}' -and -not $configuredConcurrentResult.Error) 'Concurrent configured hook did not remain neutral and successful.'
     Assert-True ($configuredConcurrentResult.ProcessMilliseconds -lt 30000) 'Concurrent configured hook exceeded the bounded test-process watchdog.'
   }
   Assert-True (@(Get-ChildItem -LiteralPath $configuredInbox -File -Filter 'pending-slot-*.json').Count -eq 8) 'Concurrent configured hooks did not reserve eight distinct inbox slots.'
@@ -835,7 +865,7 @@ try {
   Assert-True ($emptyData.equivalenceScope -eq 'installation' -and $emptyData.installationScopePersistence -eq 'state_root_anchor') 'Installation equivalence scope or persistence boundary regressed.'
   Assert-True ($emptyData.stateStoreMode -eq 'explicit' -and $emptyData.stateStoreWriteReady -and $emptyData.routineUserAction -eq 'none') 'State-store preflight or autonomous routine-failure contract regressed.'
   Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_active_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
-  Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'complete_current_host_active_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
+  Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'visible_or_specified_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
   Assert-True ($emptyData.catalogRefreshAction -eq 'fully_restart_codex_then_start_fresh_task' -and $emptyData.loadedTaskCatalogHotSwap -eq 'unsupported_by_host') 'Install refresh guidance did not preserve the host catalog boundary.'
   Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-5.6-terra' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select Terra Medium.'
   $scopePath = Join-Path (Split-Path -Parent $state) 'installation-scope.json'
@@ -863,7 +893,7 @@ try {
   Assert-True (-not $identityOnlyInitialize.ok -and $identityOnlyInitialize.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyInitialize.governorClaimed) 'Initialize claimed a Governor from identity enumeration without current-host liveness authority.'
   $capabilityStatus = Get-Payload (Invoke-Supervision $capabilityState)
   Assert-True (-not $capabilityStatus.governorClaimed -and $capabilityStatus.hostInventoryCapabilityPreflightRequired -and $capabilityStatus.hostInventoryUnsupportedError -eq 'host_inventory_completeness_unsupported') 'Capability preflight failure left an active-but-unschedulable Governor claim.'
-  foreach ($supportedCompleteness in @('active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
+  foreach ($supportedCompleteness in @('visible_or_specified', 'active_snapshot', 'complete_flag', 'cursor_snapshot', 'total_count_snapshot')) {
     $identityOnlyPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness)
     Assert-True (-not $identityOnlyPreflight.ok -and $identityOnlyPreflight.error -eq 'host_inventory_liveness_unsupported' -and -not $identityOnlyPreflight.recurrenceEligible) "Identity-only completeness mode $supportedCompleteness was incorrectly accepted as current-host liveness."
     $supportedPreflight = Get-Payload (Invoke-Supervision -State $capabilityState -Action 'preflight' -HostInventoryCompleteness $supportedCompleteness -HostInventoryStatusAuthority 'current_host_runtime')
@@ -875,7 +905,7 @@ try {
   $hostInitialize = Invoke-Supervision $hostState 'initialize' $hostGovernor
   Assert-True ($hostInitialize.ExitCode -eq 0) 'Host reconciliation fixture could not claim its Governor.'
   $hostInitializeData = Get-Payload $hostInitialize
-  Assert-True (-not $hostInitializeData.recurrenceEligible -and $hostInitializeData.recurrenceCreationPolicy -eq 'after_successful_complete_active_inventory_cycle') 'Initialization incorrectly authorized a recurrence before a complete active inventory cycle.'
+  Assert-True (-not $hostInitializeData.recurrenceEligible -and $hostInitializeData.recurrenceCreationPolicy -eq 'after_successful_scoped_active_inventory_cycle') 'Initialization incorrectly authorized a recurrence before a complete active inventory cycle.'
   $hostInventoryPath = Join-Path $root 'host-inventory.json'
   [IO.File]::WriteAllText($hostInventoryPath, ([ordered]@{
     schemaVersion = 1
@@ -935,11 +965,60 @@ try {
   $staleInventory = Get-Payload (Invoke-Supervision -State $hostState -Action 'reconcile-host' -Session $hostGovernor -HostInventory $hostInventoryPath)
   Assert-True (-not $staleInventory.ok -and $staleInventory.error -eq 'supervision_host_inventory_invalid') 'Stale host inventory did not fail closed.'
 
+  $scopeState = Join-Path $root 'visible-scope-registry.json'
+  $scopeGovernor = 'thread-visible-governor'
+  $scopePath = Join-Path $root 'visible-scope-inventory.json'
+  function Write-ScopedInventory {
+    param([object[]]$Tasks, [string]$Captured = [DateTimeOffset]::UtcNow.ToString('o'))
+    [IO.File]::WriteAllText($scopePath, ([ordered]@{
+      schemaVersion = 3; capturedAtUtc = $Captured; complete = $false
+      callerVisibility = 'excluded_by_host'; scope = 'visible_or_specified'; tasks = @($Tasks)
+    } | ConvertTo-Json -Compress -Depth 5), [Text.UTF8Encoding]::new($false))
+  }
+  $scopeInit = Get-Payload (Invoke-Supervision -State $scopeState -Action initialize -Session $scopeGovernor -HostInventoryCompleteness visible_or_specified)
+  Assert-True ($scopeInit.ok -and -not $scopeInit.recurrenceEligible) 'Visible-window initialization was blocked by global completeness or scheduled early.'
+  $scopeTasks = @(1..50 | ForEach-Object { [ordered]@{ id = "visible-$_"; status = 'active'; generation = $null; selection = 'visible' } })
+  $scopeTasks += [ordered]@{ id = 'explicit-outside-window'; status = 'waiting'; generation = $null; selection = 'specified' }
+  Write-ScopedInventory $scopeTasks
+  $scopeCycle = Get-Payload (Invoke-Supervision -State $scopeState -Action cycle -Session $scopeGovernor -HostInventory $scopePath)
+  Assert-True ($scopeCycle.ok -and $scopeCycle.recurrenceEligible -and -not $scopeCycle.hostInventoryComplete -and $scopeCycle.hostInventoryScope -eq 'visible_or_specified') 'An honest bounded snapshot could not advance the Governor.'
+  Assert-True ($scopeCycle.activeTasks -eq 51 -and $scopeCycle.automaticChatLimit -eq 50 -and -not $scopeCycle.accountWideCoverage -and $scopeCycle.recommendedCadenceMinutes -eq 60 -and $scopeCycle.workerRecurrence -eq 'disabled') 'Visible cap, explicit selection, cadence, or recurrence topology changed.'
+  Assert-True ($scopeCycle.hostInventoryRawObserved -eq 51 -and $scopeCycle.hostInventoryObserved -eq 52 -and @($scopeCycle.checkBatch).Count -eq 8) 'Scoped Governor accounting or compact batch bound failed.'
+  Assert-True (($scopeCycle | ConvertTo-Json -Compress -Depth 8) -notmatch 'visible-[0-9]|explicit-outside-window|thread-visible-governor') 'Scoped cycle exposed a raw ID.'
+  $scopeRestart = Get-Payload (Invoke-Supervision $scopeState)
+  Assert-True ($scopeRestart.activeTasks -eq 51 -and $scopeRestart.recurrenceEligible) 'Scoped membership did not survive a separate-process restart.'
+  $tooManyVisible = @($scopeTasks | Where-Object selection -eq 'visible') + @([ordered]@{ id = 'visible-51'; status = 'active'; generation = $null; selection = 'visible' })
+  Write-ScopedInventory $tooManyVisible
+  $scopeOverLimit = Get-Payload (Invoke-Supervision -State $scopeState -Action cycle -Session $scopeGovernor -HostInventory $scopePath)
+  Assert-True (-not $scopeOverLimit.ok -and $scopeOverLimit.error -eq 'supervision_visible_scope_limit' -and -not $scopeOverLimit.recurrenceEligible) 'The automatic 50-chat cap was not enforced natively.'
+  [void](Invoke-Hook $scopeState @{ session_id = 'hook-only-outside-window'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup' })
+  $oneSpecified = @([ordered]@{ id = 'explicit-outside-window'; status = 'waiting'; generation = $null; selection = 'specified' })
+  Write-ScopedInventory $oneSpecified
+  $scopeShrunk = Get-Payload (Invoke-Supervision -State $scopeState -Action cycle -Session $scopeGovernor -HostInventory $scopePath)
+  Assert-True ($scopeShrunk.ok -and $scopeShrunk.activeTasks -eq 1 -and $scopeShrunk.hostTasksEnded -eq 0 -and @($scopeShrunk.checkBatch).Count -eq 1) 'Window omission or hooks broadened governance or fabricated task endings.'
+  $scopeDisk = Get-Content -Raw $scopeState | ConvertFrom-Json
+  $omittedHash = Get-TestHash 'visible-1'
+  Assert-True ($scopeDisk.sessions.$omittedHash.state -eq 'active') 'An omitted chat was incorrectly marked ended.'
+  $scopeConfirm = Get-Payload (Invoke-Supervision -State $scopeState -Action confirm-active -Session $scopeGovernor -Subject 'visible-1')
+  Assert-True (-not $scopeConfirm.ok -and $scopeConfirm.error -eq 'supervision_subject_out_of_scope') 'Confirmation bypassed the selected scope.'
+  Write-ScopedInventory @(
+    [ordered]@{ id = 'explicit-outside-window'; status = 'idle'; generation = $null; selection = 'specified' },
+    [ordered]@{ id = 'unknown-visible'; status = 'unknown'; generation = $null; selection = 'visible' },
+    [ordered]@{ id = 'unloaded-visible'; status = 'notLoaded'; generation = $null; selection = 'visible' }
+  )
+  $scopeIdle = Get-Payload (Invoke-Supervision -State $scopeState -Action cycle -Session $scopeGovernor -HostInventory $scopePath)
+  Assert-True ($scopeIdle.ok -and $scopeIdle.recurrenceEligible -and $scopeIdle.activeTasks -eq 0 -and $scopeIdle.recommendedCadenceMinutes -eq 360 -and @($scopeIdle.checkBatch).Count -eq 0) 'Unseen cached work or unknown/unloaded statuses prevented scoped idle cadence.'
+  Assert-True ($scopeIdle.scopeStatusCoverage -eq 'partial' -and $scopeIdle.scopeStatusUnknown -eq 1) 'Unknown status collapsed to healthy scoped coverage.'
+  $staleScope = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+  Write-ScopedInventory $oneSpecified $staleScope
+  $scopeStale = Get-Payload (Invoke-Supervision -State $scopeState -Action cycle -Session $scopeGovernor -HostInventory $scopePath)
+  Assert-True (-not $scopeStale.ok -and $scopeStale.error -eq 'supervision_host_inventory_stale') 'An older window replaced current scoped state.'
+
   $cycleState = Join-Path $root 'cycle-registry.json'
   $cycleGovernor = 'thread-cycle-governor'
   [void](Invoke-Supervision $cycleState 'initialize' $cycleGovernor)
   $passiveDiscovery = Get-Payload (Invoke-Supervision $cycleState 'discover' $cycleGovernor)
-  Assert-True (-not $passiveDiscovery.cycleAdvanced -and $passiveDiscovery.governorCycleCount -eq 0 -and $passiveDiscovery.requiredHostAction -eq 'run_cycle_with_complete_host_active_inventory') 'Passive discovery was incorrectly counted as a Governor cycle.'
+  Assert-True (-not $passiveDiscovery.cycleAdvanced -and $passiveDiscovery.governorCycleCount -eq 0 -and $passiveDiscovery.requiredHostAction -eq 'run_cycle_with_scoped_host_inventory') 'Passive discovery was incorrectly counted as a Governor cycle.'
   $missingCycleInventory = Get-Payload (Invoke-Supervision $cycleState 'cycle' $cycleGovernor)
   Assert-True (-not $missingCycleInventory.ok -and $missingCycleInventory.error -eq 'supervision_host_inventory_required') 'A Governor cycle without host inventory did not fail closed.'
   $governorOmittedInventory = Join-Path $root 'governor-omitted-inventory.json'
@@ -989,7 +1068,7 @@ try {
   } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
   $cycle = Get-Payload (Invoke-Supervision -State $cycleState -Action 'cycle' -Session $cycleGovernor -HostInventory $hostInventoryPath)
   Assert-True ($cycle.ok -and $cycle.governorCycleCount -eq 2 -and $cycle.hostInventoryCycle -eq 2 -and $cycle.hostInventoryComplete -and $cycle.hostInventoryObserved -eq 3 -and $cycle.hostInventoryRawObserved -eq 3) 'A complete host inventory did not advance exactly one additional Governor cycle.'
-  Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_complete_active_inventory_cycle' -and $cycle.hostInventoryScope -eq 'active_current_host') 'A verified complete active inventory cycle did not authorize the one Governor recurrence.'
+  Assert-True ($cycle.recurrenceEligible -and $cycle.recurrenceCreationPolicy -eq 'after_successful_scoped_active_inventory_cycle' -and $cycle.hostInventoryScope -eq 'active_current_host') 'A verified complete active inventory cycle did not authorize the one Governor recurrence.'
   Assert-True (@($cycle.hostTaskStatuses).Count -eq 3 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'live').Count -eq 2 -and @($cycle.hostTaskStatuses | Where-Object status -eq 'ended').Count -eq 1) 'The cycle did not return one normalized status per host task.'
   Assert-True (($cycle.hostTaskStatuses | ConvertTo-Json -Compress) -notmatch 'thread-cycle|cycle-live-generation|cycle-governor-generation') 'Compact host statuses exposed a raw task ID or generation.'
   $cycleJson = $cycle | ConvertTo-Json -Compress -Depth 8
@@ -1107,7 +1186,7 @@ try {
   }
   Assert-True ($turnSignal.ExitCode -eq 0 -and -not $turnSignal.Output -and -not $turnSignal.Error) 'Stop activity hook must be silent and non-blocking.'
   $turnStatus = Get-Payload (Invoke-Supervision $state)
-  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'complete_current_host_active_inventory_plus_optional_hooks' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
+  Assert-True ($turnStatus.turnSignals -eq 1 -and $turnStatus.monitoringMode -eq 'scoped_current_host_inventory_plus_optional_hooks' -and $turnStatus.hookModelContext -eq 'none' -and $turnStatus.workerModelTurns -eq 0) 'Completed-turn activity did not update the zero-model-cost monitoring counters.'
   $rawAfterTurn = [IO.File]::ReadAllText($state)
   foreach ($private in @('turn-private-identifier', 'private assistant response that must not persist')) {
     Assert-True (-not $rawAfterTurn.Contains($private)) "Registry persisted private Stop input: $private"
@@ -1312,10 +1391,94 @@ try {
       schemaVersion = 1; capturedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); complete = $true; tasks = @($fairTasks)
     } | ConvertTo-Json -Compress -Depth 4), [Text.UTF8Encoding]::new($false))
     $fair = Get-Payload (Invoke-Supervision -State $fairState -Action 'cycle' -Session $fairGovernor -HostInventory $hostInventoryPath)
+    Assert-True ($fair.ok) ('Fairness cycle failed: ' + ($fair | ConvertTo-Json -Compress -Depth 8))
     Assert-True (@($fair.checkBatch).Count -le 8) 'Governor check batch exceeded the bounded size.'
     foreach ($entry in @($fair.checkBatch)) { [void]$seenFairIds.Add([string]$entry.idHash) }
   }
   Assert-True ($seenFairIds.Count -eq 17 -and @($seenFairIds | Where-Object { -not $expectedFairHashes.Contains($_) }).Count -eq 0) 'Rotating hash-only batches did not cover all 17 active tasks in three cycles.'
+
+  # Audit regressions use public commands against source or the exact package.
+  $auditState = Join-Path $root 'audit-active-history.json'
+  $auditGovernor = 'audit-governor'
+  [void](Invoke-Supervision $auditState 'initialize' $auditGovernor)
+  function Invoke-AuditCycle {
+    param([object[]]$Tasks, [int]$Schema = 1, [string]$Captured = '')
+    if (-not $Captured) { $Captured = [DateTimeOffset]::UtcNow.ToString('o') }
+    $inventory = [ordered]@{ schemaVersion = $Schema; capturedAtUtc = $Captured; complete = $true; tasks = $Tasks }
+    if ($Schema -eq 2) { $inventory['callerVisibility'] = 'excluded_by_host' }
+    [IO.File]::WriteAllText($hostInventoryPath, ($inventory | ConvertTo-Json -Compress -Depth 5), [Text.UTF8Encoding]::new($false))
+    Get-Payload (Invoke-Supervision -State $auditState -Action cycle -Session $auditGovernor -HostInventory $hostInventoryPath)
+  }
+  $auditCaller = [ordered]@{ id = $auditGovernor; status = 'running'; generation = 'gov-a' }
+  $auditWorkers = @(1..255 | ForEach-Object { [ordered]@{ id = "audit-worker-$_"; status = 'running'; generation = 'a' } })
+  $auditFull = Invoke-AuditCycle (@($auditCaller) + $auditWorkers)
+  Assert-True ($auditFull.activeTasks -eq 255 -and $auditFull.recurrenceEligible) 'Full live set was undercounted or rejected.'
+  $auditEnded = Invoke-AuditCycle @($auditCaller)
+  Assert-True ($auditEnded.activeTasks -eq 0 -and $auditEnded.hostTasksEnded -eq 255) 'Audit fixture did not close 255 workers.'
+  $auditNew = [ordered]@{ id = 'audit-new-worker'; status = 'running'; generation = 'a' }
+  $auditReplacement = Invoke-AuditCycle @($auditCaller, $auditNew)
+  Assert-True ($auditReplacement.ok -and $auditReplacement.activeTasks -eq 1 -and $auditReplacement.hostTasksAdded -eq 1 -and @($auditReplacement.checkBatch).Count -eq 1 -and $auditReplacement.recommendedCadenceMinutes -eq 60 -and $auditReplacement.recurrenceEligible) 'Retained history displaced current active work (F1).'
+  $auditDisk = Get-Content -Raw $auditState | ConvertFrom-Json
+  $evictedWorker = @($auditWorkers | Where-Object { $auditDisk.sessions.PSObject.Properties.Name -notcontains (Get-TestHash $_.id) })[0]
+  Assert-True ($null -ne $evictedWorker -and @($auditDisk.sessions.PSObject.Properties).Count -eq 256) 'Current-work admission did not preserve bounded history.'
+  [void](Invoke-Hook $auditState @{ session_id = $evictedWorker.id; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup' } $auditDisk.health.lastCompleteInventoryUtc 60000)
+  $afterDelayedHook = Get-Payload (Invoke-Supervision $auditState)
+  Assert-True ($afterDelayedHook.activeTasks -eq 1 -and $afterDelayedHook.ignoredStaleEvents -ge 1) 'A delayed hook revived history evicted by authoritative inventory.'
+  [void](Invoke-Hook $auditState @{ session_id = $evictedWorker.id; agent_id = 'audit-delayed-child'; cwd = $cwd; hook_event_name = 'SubagentStart' } $auditDisk.health.lastCompleteInventoryUtc 60000)
+  Assert-True ((Get-Payload (Invoke-Supervision $auditState)).activeAgents -eq 0) 'A delayed child hook revived an evicted parent.'
+  $olderSnapshot = (Get-Date $auditDisk.health.lastCompleteInventoryUtc).ToUniversalTime().AddSeconds(-1).ToString('o')
+  $auditStale = Invoke-AuditCycle @($auditCaller, $evictedWorker) 1 $olderSnapshot
+  Assert-True (-not $auditStale.ok -and $auditStale.error -eq 'supervision_host_inventory_stale') 'An older snapshot revived evicted history.'
+  Assert-True (-not (Get-Payload (Invoke-Supervision $auditState)).recurrenceEligible) 'A rejected snapshot preserved prior recurrence eligibility.'
+
+  $auditNew.status = 'idle'
+  $auditNew.generation = 'b'
+  $auditInactive = Invoke-AuditCycle @($auditCaller, $auditNew)
+  Assert-True ($auditInactive.hostTasksEnded -eq 1 -and $auditInactive.activeTasks -eq 0 -and @($auditInactive.checkBatch).Count -eq 0 -and $auditInactive.recommendedCadenceMinutes -eq 360) 'New-generation inactivity did not close the older active record (F2).'
+  $beforeNewGeneration = [DateTimeOffset]::UtcNow.ToString('o')
+  $auditNew.status = 'running'
+  $auditNew.generation = 'c'
+  [void](Invoke-AuditCycle @($auditCaller, $auditNew))
+  [void](Invoke-Hook $auditState @{ session_id = $auditNew.id; cwd = $cwd; hook_event_name = 'SessionEnd' } $beforeNewGeneration 60000)
+  Assert-True ((Get-Payload (Invoke-Supervision $auditState)).activeTasks -eq 1) 'Authoritative generation handling weakened stale-hook rejection.'
+  $auditNew.status = 'idle'
+  [void](Invoke-AuditCycle @($auditCaller, $auditNew))
+
+  $auditDisk = Get-Content -Raw $auditState | ConvertFrom-Json
+  $expiredHash = Get-TestHash $auditNew.id
+  $expiredRecord = $auditDisk.sessions.$expiredHash
+  $expiredRecord.firstSeenUtc = [DateTimeOffset]::UtcNow.AddHours(-26).ToString('o')
+  foreach ($field in @('lastSeenUtc', 'endedAtUtc', 'lastEventUtc')) { $expiredRecord.$field = [DateTimeOffset]::UtcNow.AddHours(-25).ToString('o') }
+  [IO.File]::WriteAllText($auditState, ($auditDisk | ConvertTo-Json -Compress -Depth 12), [Text.UTF8Encoding]::new($false))
+  [void](Invoke-AuditCycle @($auditCaller))
+  $prunedDisk = Get-Content -Raw $auditState | ConvertFrom-Json
+  $prunedStatus = Get-Payload (Invoke-Supervision $auditState)
+  Assert-True ($prunedDisk.sessions.PSObject.Properties.Name -notcontains $expiredHash -and $prunedStatus.retainedRecords -eq @($prunedDisk.sessions.PSObject.Properties).Count) 'Hook-free cycle did not persist retention or status disagreed with durable state (F3).'
+  [void](Invoke-AuditCycle @($auditCaller))
+  Assert-True ((Get-Content -Raw $auditState | ConvertFrom-Json).sessions.PSObject.Properties.Name -notcontains $expiredHash) 'Expired record returned after process restart.'
+
+  $tooManyLive = @(1..256 | ForEach-Object { [ordered]@{ id = "audit-overflow-$_"; status = 'running'; generation = 'a' } })
+  $auditOverflow = Invoke-AuditCycle $tooManyLive 2
+  Assert-True (-not $auditOverflow.ok -and -not $auditOverflow.recurrenceEligible -and $auditOverflow.hostTasksUnrepresented -ge 1 -and $null -eq $auditOverflow.recommendedCadenceMinutes) 'Unrepresentable caller-excluded active inventory authorized recurrence.'
+  Assert-True (-not (Get-Payload (Invoke-Supervision $auditState)).recurrenceEligible) 'Restart/status resurrected eligibility after reconciliation failure.'
+  $auditRecovered = Invoke-AuditCycle @($auditCaller)
+  Assert-True ($auditRecovered.ok -and $auditRecovered.recurrenceEligible -and $auditRecovered.activeTasks -eq 0) ('Valid inventory could not recover after capacity failure. ' + ($auditRecovered | ConvertTo-Json -Compress -Depth 8))
+  Assert-True ((Get-Item -LiteralPath $auditState).Length -le 262144 -and @((Get-Content -Raw $auditState | ConvertFrom-Json).sessions.PSObject.Properties).Count -lt 256) 'Terminal timestamp growth was not contained by ended-history reclamation.'
+  $auditUnknown = Invoke-AuditCycle @($auditCaller, [ordered]@{ id = 'audit-unknown'; status = 'unknown' })
+  Assert-True (-not $auditUnknown.ok -and -not $auditUnknown.recurrenceEligible -and $auditUnknown.hostTasksUnknown -eq 1) 'Unknown runtime evidence authorized recurrence.'
+  [void](Invoke-AuditCycle @($auditCaller))
+  $auditMissing = Get-Payload (Invoke-Supervision $auditState 'cycle' $auditGovernor)
+  Assert-True (-not $auditMissing.ok -and -not (Get-Payload (Invoke-Supervision $auditState)).recurrenceEligible) 'Missing inventory left an earlier successful cycle eligible.'
+  $legacyAudit = Get-Content -Raw $auditState | ConvertFrom-Json
+  $legacyGovernorId = $legacyAudit.governor.protectedId
+  $legacyAudit.schema = 5
+  $legacyAudit.health.PSObject.Properties.Remove('lastCompleteInventoryUtc')
+  $legacyAudit.health.PSObject.Properties.Remove('inventoryReconciled')
+  [IO.File]::WriteAllText($auditState, ($legacyAudit | ConvertTo-Json -Compress -Depth 12), [Text.UTF8Encoding]::new($false))
+  Assert-True (-not (Get-Payload (Invoke-Supervision $auditState)).recurrenceEligible) 'Legacy state authorized recurrence before a fresh cycle.'
+  [void](Invoke-AuditCycle @($auditCaller))
+  $upgradedAudit = Get-Content -Raw $auditState | ConvertFrom-Json
+  Assert-True ($upgradedAudit.schema -eq 7 -and $upgradedAudit.health.inventoryReconciled -and $upgradedAudit.governor.protectedId -eq $legacyGovernorId) 'Private schema upgrade lost Governor identity or failed to persist.'
 
   $capacityState = Join-Path $root 'capacity.json'
   Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
@@ -1342,7 +1505,7 @@ try {
     health = [ordered]@{ hookRuns = 256L; droppedEntries = 0L; ignoredStaleEvents = 0L; scanOffset = 0L; lastHookUtc = $capacityNow }
   }
   [IO.File]::WriteAllText($capacityState, ($capacityFixture | ConvertTo-Json -Compress -Depth 10), [Text.UTF8Encoding]::new($false))
-  [void](Invoke-Hook $capacityState @{ session_id = 'thread-capacity-overflow'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' })
+  [void](Invoke-Hook $capacityState @{ session_id = 'thread-capacity-overflow'; cwd = $cwd; hook_event_name = 'SessionStart'; source = 'startup'; model = 'gpt-5.6-terra' } '' 60000)
   $capacity = Get-Payload (Invoke-Supervision $capacityState)
   Assert-True ($capacity.engine -eq 'degraded' -and $capacity.registryCapacity -eq 'exhausted' -and $capacity.retainedRecords -eq 256 -and $capacity.droppedEntries -eq 1) ('Registry saturation was silent or evicted retained active work. ' + ($capacity | ConvertTo-Json -Compress -Depth 4))
 

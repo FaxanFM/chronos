@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($PluginRoot)) { $PluginRoot = Join-Path $repo 'plugins\chronos' }
 $PluginRoot = [IO.Path]::GetFullPath($PluginRoot)
+$pluginVersion = [string](Get-Content -Raw -LiteralPath (Join-Path $PluginRoot '.codex-plugin\plugin.json') | ConvertFrom-Json).version
 $wrapper = Join-Path $PluginRoot 'skills\chronos\scripts\chronos.ps1'
 $module = Join-Path $PluginRoot 'skills\chronos\scripts\heartbeat.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) (Join-Path 'Chronos\Heartbeat-v2' ('tests-' + [guid]::NewGuid().ToString('N')))
@@ -675,8 +676,8 @@ try {
   $adapter = New-Case 'inspector-adapter'
   $inspector1 = Join-Path $adapter.Path 'inspector-1.txt'
   $inspector2 = Join-Path $adapter.Path 'inspector-2.txt'
-  [IO.File]::WriteAllText($inspector1, ("CHRONOS HEALTHY approvalReviewCoverage=complete approvalReviewsPerHour=2 approvalReviewerMainInputRatio=0.2 approvalRepeatedRequests=0 nestedReviewerSessionsObserved=0`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=11111111111111111111111111111111 inspectionCapturedAtUtc={0} pluginVersion=0.9.2 approvalReviewTurnsObserved=2 primaryTurnsObserved=10 approvalReviewTurnShare=16.7 approvalRepeatedPrefixRequests=0 approvalPersistenceRetries=0" -f $adapter.BaseTime.ToString('o')), [Text.UTF8Encoding]::new($false))
-  [IO.File]::WriteAllText($inspector2, ("CHRONOS WARNING approvalReviewCoverage=complete approvalReviewsPerHour=20 approvalReviewerMainInputRatio=0.9 approvalRepeatedRequests=10 nestedReviewerSessionsObserved=1`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=22222222222222222222222222222222 inspectionCapturedAtUtc={0} pluginVersion=0.9.2 approvalReviewTurnsObserved=30 primaryTurnsObserved=3 approvalReviewTurnShare=91 approvalRepeatedPrefixRequests=10 approvalPersistenceRetries=8" -f $adapter.BaseTime.AddMinutes(10).ToString('o')), [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($inspector1, ("CHRONOS HEALTHY approvalReviewCoverage=complete approvalReviewsPerHour=2 approvalReviewerMainInputRatio=0.2 approvalRepeatedRequests=0 nestedReviewerSessionsObserved=0`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=11111111111111111111111111111111 inspectionCapturedAtUtc={0} pluginVersion={1} approvalReviewTurnsObserved=2 primaryTurnsObserved=10 approvalReviewTurnShare=16.7 approvalRepeatedPrefixRequests=0 approvalPersistenceRetries=0" -f $adapter.BaseTime.ToString('o'), $pluginVersion), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($inspector2, ("CHRONOS WARNING approvalReviewCoverage=complete approvalReviewsPerHour=20 approvalReviewerMainInputRatio=0.9 approvalRepeatedRequests=10 nestedReviewerSessionsObserved=1`nCHRONOS EFFICIENCY inspectionEvidenceVersion=1 inspectionRunId=22222222222222222222222222222222 inspectionCapturedAtUtc={0} pluginVersion={1} approvalReviewTurnsObserved=30 primaryTurnsObserved=3 approvalReviewTurnShare=91 approvalRepeatedPrefixRequests=10 approvalPersistenceRetries=8" -f $adapter.BaseTime.AddMinutes(10).ToString('o'), $pluginVersion), [Text.UTF8Encoding]::new($false))
   $adapterInput1 = Join-Path $adapter.Path 'adapter-1.json'
   $adapterInput2 = Join-Path $adapter.Path 'adapter-2.json'
   [IO.File]::WriteAllText($adapterInput1, (@{ schemaVersion = 2; runId = 'adapter-1'; capturedAtUtc = $adapter.BaseTime.ToString('o'); sourceEpoch = 'inspector-adapter'; sourceSequence = 1; origin = 'inspector'; forceCadence = $true; collectorCoverage = (Get-StrictCoverage) } | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
@@ -684,7 +685,7 @@ try {
   $unauthorizedInspector = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $inspector1 -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
   Assert-FailedSafely $unauthorizedInspector 'heartbeat_inspector_authorization_required' 'Inspector evidence without an authorized run.'
   $incompatibleInspector = Join-Path $adapter.Path 'inspector-incompatible.txt'
-  [IO.File]::WriteAllText($incompatibleInspector, ((Get-Content -Raw -LiteralPath $inspector1).Replace('pluginVersion=0.9.2', 'pluginVersion=0.9.1')), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($incompatibleInspector, ((Get-Content -Raw -LiteralPath $inspector1).Replace(('pluginVersion=' + $pluginVersion), 'pluginVersion=0.0.0')), [Text.UTF8Encoding]::new($false))
   $incompatibleResult = [pscustomobject]@{ ExitCode = $( $o = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wrapper -Action heartbeat -HeartbeatInputPath $adapterInput1 -HeartbeatInspectorOutputPath $incompatibleInspector -HeartbeatInspectorAuthorized -HeartbeatStatePath $adapter.State 2>&1); $LASTEXITCODE ); Output = $o; Text = ($o -join "`n") }
   Assert-FailedSafely $incompatibleResult 'heartbeat_inspector_incompatible' 'Inspector evidence from another plugin version.'
   $malformedInspectorMetric = Join-Path $adapter.Path 'inspector-malformed-metric.txt'

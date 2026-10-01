@@ -62,7 +62,9 @@ The authoritative immutable v0.8.8 ZIP SHA-256 is
 `686070c504e73fe5997cac754f801a3f55235d6b32b5bff761f59a210f2e2f50`.
 The authoritative immutable v0.9.0 ZIP SHA-256 is
 `52006ba07fa9ffef0705c0c65261134331a7e6c2543e6baf24210fa42871aa67`.
-v0.8.8 is the current published Directory package. v0.9.2 replaces the failed
+The Platform portal was verified on 2026-10-01: v0.9.2 is the published Directory
+package. v0.9.3 is the local scoped-governance correction pending verified
+GitHub publication and a separate supported Directory update. v0.9.2 replaced the failed
 v0.9.0 Windows hook path and completes its audit and external-canary gates.
 
 ## Published Release
@@ -188,10 +190,11 @@ Check `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` in supervision
 status. Where the host dispatches hooks, capture the baseline and prove those
 values advance. Some current Windows Codex and `codex exec` paths can omit hook
 dispatch even while `/hooks` reports active and trusted. Chronos therefore uses
-one complete current-host active inventory per Governor cycle as its autonomous
+one scoped current-host inventory per Governor cycle as its autonomous
 discovery authority. It does not enumerate inactive task history. v0.9.2 keeps
-the Windows launcher quote-free because Codex passes it
-through an outer `cmd.exe` command boundary.
+the Windows launcher inside Codex's PowerShell hook shell, without starting a
+second interpreter or relying on cmd.exe-only environment expansion. Custom
+non-PowerShell Windows hook shells are not verified.
 
 First inspect all host automations named `Chronos Governor pulse`, but derive
 mutation authority only from the complete current installation key. Reuse a live
@@ -199,7 +202,7 @@ target only after its title and assignment confirm the dedicated role. Otherwise
 reuse a claimed Governor after the same check, or create one fresh task without
 inherited history. Do not automatically fork a working task. Elect one contender,
 fence current-key recurrences to zero, initialize, require readable status and a
-complete Governor-bearing inventory, then reconcile one current-key automation.
+scoped Governor-bearing inventory, then reconcile one current-key automation.
 Use `& $chronos -Action supervise -SupervisionAction status` for compact registry
 health.
 
@@ -227,7 +230,7 @@ change the installation key or authorize a second Governor. On first use, a read
 installation anchor is imported with its state, preserving the existing key
 without changing the prior source. If a prior root is inaccessible,
 Chronos preserves it, initializes the writable v3 slot, and rebuilds from a
-complete current-host active inventory. Loss of the registry disables the discovery hint but
+scoped current-host inventory. Loss of the registry disables the discovery hint but
 does not affect Codex tasks. Reconcile existing host automations before
 recreating a claim so registry loss cannot justify a duplicate task or
 recurrence. `engine=degraded` with `registryCapacity=exhausted` means Chronos
@@ -351,3 +354,7 @@ rollback. v0.5.4 state is version 3 and older Governor versions may not
 understand it; preserve it for audit and begin delegation only after confirming
 the selected version's state behavior. Rollback never requires changing the
 Codex diagnostic SQLite database or deleting user work.
+
+### Bounded Governance Scope
+
+Use `visible_or_specified` for native preflight and initialization. One current-host `list_threads(limit=50)` call selects a deduplicated window of at most 50 visible non-Governor chats (pinned UI order followed by returned non-pinned recency order). Explicitly selected chats outside the window require bounded current-host reads for those exact IDs. Schema v3 uses `scope=visible_or_specified`, `complete=false`, and per-task `selection=visible|specified`. No pagination or all-account completeness requirement applies. Only known active scope members enter the compact check batch or active cadence. Omission leaves scope without asserting a lifecycle end. Hooks add evidence, not membership. Missing health evidence stays partial or unsupported.

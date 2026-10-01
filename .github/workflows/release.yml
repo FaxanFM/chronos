@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    timeout-minutes: 25
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +39,9 @@ jobs:
       - name: Test Chronos
         shell: powershell
         run: .\tests\chronos.tests.ps1 -PythonPath python
+      - name: Test source Chronos Heartbeats
+        shell: powershell
+        run: .\tests\heartbeat.tests.ps1
       - name: Test packaged Chronos Heartbeats
         shell: powershell
         run: |
@@ -48,12 +51,23 @@ jobs:
           .\scripts\build-release.ps1 -Version $version -OutputDirectory $build
           Expand-Archive -LiteralPath (Join-Path $build "chronos-v$version.zip") -DestinationPath $package
           .\tests\heartbeat.tests.ps1 -PluginRoot $package
+      - name: Test packaged Chronos Inspector
+        shell: powershell
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'chronos-heartbeat-package'
+          .\tests\chronos.tests.ps1 -PythonPath python -PluginRoot $package
       - name: Test Chronos Supervision
         shell: powershell
         run: .\tests\supervision.tests.ps1
       - name: Test Chronos Governor
         shell: powershell
         run: .\tests\governor.tests.ps1
+      - name: Test packaged Supervision and Governor
+        shell: powershell
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'chronos-heartbeat-package'
+          .\tests\supervision.tests.ps1 -PluginRoot $package
+          .\tests\governor.tests.ps1 -PluginRoot $package
       - name: Test reproducible release
         shell: powershell
         run: .\tests\release.tests.ps1

@@ -1,11 +1,13 @@
 param(
-  [string]$PythonPath = "python"
+  [string]$PythonPath = "python",
+  [string]$PluginRoot = ''
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$chronosScript = Join-Path $repoRoot "plugins\chronos\skills\chronos\scripts\chronos.ps1"
-$chronosSkill = Join-Path $repoRoot "plugins\chronos\skills\chronos\SKILL.md"
+if (-not $PluginRoot) { $PluginRoot = Join-Path $repoRoot 'plugins\chronos' }
+$chronosScript = Join-Path $PluginRoot "skills\chronos\scripts\chronos.ps1"
+$chronosSkill = Join-Path $PluginRoot "skills\chronos\SKILL.md"
 $fixtureScript = Join-Path $PSScriptRoot "create_log_fixture.py"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-tests-" + [guid]::NewGuid())
 $fixtureHome = Join-Path $testRoot "fixture-home"

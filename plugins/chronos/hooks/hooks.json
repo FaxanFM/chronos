@@ -8,8 +8,7 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
-            "async": true,
+            "commandWindows": "$ProgressPreference='SilentlyContinue'; & (Join-Path $env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')",
             "timeout": 3
           }
         ]
@@ -21,7 +20,7 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
+            "commandWindows": "$ProgressPreference='SilentlyContinue'; & (Join-Path $env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')",
             "timeout": 3
           }
         ]
@@ -33,8 +32,7 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
-            "async": true,
+            "commandWindows": "$ProgressPreference='SilentlyContinue'; & (Join-Path $env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')",
             "timeout": 3
           }
         ]
@@ -46,8 +44,7 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
-            "async": true,
+            "commandWindows": "$ProgressPreference='SilentlyContinue'; & (Join-Path $env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')",
             "timeout": 3
           }
         ]
@@ -59,8 +56,7 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -NonInteractive -File \"$PLUGIN_ROOT/skills/chronos/scripts/hook-intake.ps1\"",
-            "commandWindows": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnADsAIAAmACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQAIAAnAHMAawBpAGwAbABzAFwAYwBoAHIAbwBuAG8AcwBcAHMAYwByAGkAcAB0AHMAXABoAG8AbwBrAC0AaQBuAHQAYQBrAGUALgBwAHMAMQAnACkA",
-            "async": true,
+            "commandWindows": "$ProgressPreference='SilentlyContinue'; & (Join-Path $env:PLUGIN_ROOT 'skills/chronos/scripts/hook-intake.ps1')",
             "timeout": 3
           }
         ]

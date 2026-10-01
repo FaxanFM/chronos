@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Set up one local Codex Governor for passive task supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only worker coordination.",
   "author": {
     "name": "Dravara, LLC",
@@ -11,10 +11,11 @@
   "license": "MIT",
   "keywords": ["codex", "openai", "windows", "diagnostics", "powershell", "ai-agents", "sqlite", "approval-workflows", "resource-health", "productivity"],
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Diagnose and govern Codex",
-    "longDescription": "Run one local Governor that discovers active Codex tasks from one complete host inventory per cycle, evaluates actionable Heartbeats, and contacts only the exact affected task when intervention is justified. Optional silent hooks accelerate lifecycle hints without creating model turns. Chronos also diagnoses Windows degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. No publisher telemetry.",
+    "longDescription": "Run one local Governor for active chats in a visible window of up to 50, plus chats you explicitly select. Evaluate evidence-bound Heartbeats and contact only the affected active chat when intervention is justified. Optional silent hooks add lifecycle evidence without creating model turns. Chronos also diagnoses Windows degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
     "capabilities": ["One-Governor setup", "Passive task discovery", "Actionable Heartbeats", "Verified task intervention", "Windows resource diagnostics", "Token and approval analysis", "SQLite churn detection", "Bounded read-worker coordination"],

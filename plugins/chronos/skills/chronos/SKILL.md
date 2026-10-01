@@ -16,6 +16,15 @@ Run this lightweight check once when Chronos is first used in a task:
 The launcher is not guaranteed to be on `PATH`. Invoke every Chronos command by
 the installed skill-root path shown here.
 
+Windows supervision commands must run as the Windows account that runs Codex's
+hooks. Current-user DPAPI does not cross the sandbox-account boundary. For a
+sandboxed shell tool, request narrowly scoped approval for the rooted native
+command with `sandbox_permissions=require_escalated`; do not disable the sandbox
+or hook trust globally. `supervision_hook_identity_mismatch` means the command
+used a different Windows identity. Preserve the pending evidence and rerun the
+same command under the authorized host account. Never delete events, reset
+state, or report healthy coverage to work around that error.
+
 `sourceObservation=cache_inventory_not_enabled_state` means the result shows
 valid cached package sources; cache presence alone does not prove that a source
 is enabled. `sourceConflict=CONFIRMED` requires the running Directory package
@@ -45,15 +54,17 @@ The next status or Governor cycle merges them into the supervision registry
 under its mutex. It validates DPAPI identities inside the per-file boundary and
 persists bounded slot-and-content receipts before deletion. It scans both
 bounded inboxes before pruning receipts and defers temporarily unreadable files,
-so one bad, locked, or queued file cannot block or replay supervision. Four request
-asynchronous execution where supported; `SessionEnd` remains synchronous. They do not run on tools, commands, approvals, or prompts and
-return no model context. Direct diagnostic hooks use the same protected event
+so one bad, locked, or queued file cannot block or replay supervision. All five
+finish synchronously; a session shutdown cannot cancel a pending start hint.
+`Stop` and `SubagentStop` return neutral JSON, never continuation decisions.
+They do not run on tools, commands, approvals, or prompts and return no model
+context. Direct diagnostic hooks use the same protected event
 format if registry contention prevents an immediate write. On Windows, each
-definition uses a quote-free encoded launcher
-because Codex passes the configured command through `cmd.exe`; the decoded
-payload only resolves the installed plugin root and invokes the small intake
-script. Do not rewrite it as a quoted `-File` command or route configured hooks
-through the full supervision engine.
+definition resolves the installed plugin root in Codex's PowerShell hook shell
+and invokes the small intake script without starting a second interpreter.
+Custom non-PowerShell Windows hook shells are not verified. Do not route
+configured hooks through the full supervision engine or add nested shell startup
+inside SessionEnd's three-second deadline.
 
 ## Full setup request
 
@@ -64,20 +75,23 @@ reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
 This is a hard gate, not a best-effort sequence: the host must create or enable
 no recurrence until initialization succeeds, supervision and Heartbeat status
-are readable, one complete caller-aware inventory of current-host active tasks
+are readable, one scoped caller-aware inventory of visible or specified chats
 accounts for the selected Governor exactly once, and the cycle returns
 `recurrenceEligible=true`. Any
 earlier failure must end with zero active current-key recurrences and no recovery
 recurrence.
 Before any Governor task creation, claim, or convergence attempt, inspect the
-host task contract. It must return the complete current-host active set directly,
-or expose a broader same-runtime snapshot with a proof that every active task is
-included. A same-host `thread/loaded/list`-equivalent snapshot with authoritative
-runtime status is sufficient. Chronos does not require enumeration of inactive or historical
-tasks. A capped `list_threads` contract that does not guarantee all active tasks
-is unsupported. Return exactly
-`host_inventory_completeness_unsupported`, skip partial reconciliation, enforce
-zero current-key recurrences, and do not retry until the host contract changes.
+host task contract. Use one `list_threads(limit=50)` response, not account history
+or pagination. Keep only Codex chats on this local host. Combine pinned UI order
+then non-pinned recency order, deduplicate
+IDs, exclude the Governor, and take the first 50 visible chats before filtering
+for active status. Add only chats explicitly selected by the user, using bounded
+current-host status reads for exact IDs missing from the window. Use native mode
+`visible_or_specified` and schema-v3 `scope=visible_or_specified`, `complete=false`.
+Missing completeness metadata does not block scoped governance. Report known
+active chat titles and the scope count when asked or the working set changes.
+Do not claim every active chat in the account is covered. Window omission means
+out of scope, not ended. Hooks do not expand scope.
 Stored identity enumeration is neither required nor sufficient. Every status
 must come from the current host runtime. A separate `codex app-server` process
 reports process-local `notLoaded` states and must return
@@ -85,19 +99,18 @@ reports process-local `notLoaded` states and must return
 Do not stop after an inspection or return setup instructions for the user to
 relay. Never bypass or auto-approve Codex hook trust. If hooks remain untrusted,
 complete setup through authoritative host inventory without asking the user to
-register tasks only when host capability preflight proves complete active-set
-coverage.
-Otherwise return `host_inventory_completeness_unsupported` with zero recurrence.
+register tasks. Current-host runtime status is still required; an identity-only
+source fails closed with zero recurrence.
 On a supported host, state only that optional hook acceleration is pending trust. An installed, active, or
-trusted `/hooks` entry is configuration evidence, not proof that the command
+trusted hook-settings entry is configuration evidence, not proof that the command
 executed. Read `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` from
 native supervision status. Report `not_observed` until a fresh post-trust
-lifecycle or completed-turn event advances those fields. Keep one complete
-current-host active inventory per Governor cycle as the task-discovery and
+lifecycle or completed-turn event advances those fields. Keep one bounded scoped
+current-host inventory per Governor cycle as the task-discovery and
 liveness authority on a supported host whether hooks execute or not. Hooks are
 an optional accelerator only.
 `hookRequiredForAutonomy=false` must remain true, and a non-dispatching host
-must not make setup fail after complete active inventory and topology postconditions
+must not make setup fail after scoped inventory and topology postconditions
 pass.
 
 Treat a nonempty `CODEX_HOME` as the installation boundary. Otherwise use the
@@ -142,20 +155,17 @@ automations.
 
 Only the Governor task runs `-SupervisionAction initialize`, `cycle`,
 `reconcile-host`, and `discover`. Every Governor recurrence must use `cycle`
-with one fresh, host-proven complete current-host active inventory. Use
-`active_snapshot` when the same host directly returns every active task and its
-runtime status. A capped task list that does not guarantee the full active set is
-an unsupported bootstrap capability. Do not create a fabricated partial
-inventory or repeatedly call `reconcile-host`; stop with
-`host_inventory_completeness_unsupported` and
-zero current-key recurrences. A stored identity list without current-host
+with one fresh visible-or-specified current-host inventory. Pass
+`-SupervisionHostInventoryCompleteness visible_or_specified` for preflight and
+initialization. A capped list is sufficient for this bounded working set; no
+account-wide completeness proof is needed. A stored identity list without current-host
 runtime status stops with `host_inventory_liveness_unsupported` under the same
-zero-recurrence rule. `reconcile-host` is retained only for bounded
-diagnostic use with an independently supplied partial inventory. From the
+zero-recurrence rule. `reconcile-host` is a bounded diagnostic and does not advance
+a cycle or enable recurrence. From the
 authoritative current host, `idle`, `ready`, and `notLoaded` normalize to
 `inactive` and are not governed. `systemError` is also non-active and normalizes
-to `inactive`. Schema v1 requires the Governor in the
-raw list. Schema v2 may declare `callerVisibility=excluded_by_host`, omit only
+to `inactive`. Schema v3 includes `scope=visible_or_specified`, `complete=false`,
+and task `selection=visible|specified`. It may declare `callerVisibility=excluded_by_host`, omit only
 the current Governor, and let the same cycle account for that registry-verified
 caller without a second host query. Passive `discover` does not increment
 the Governor cycle counter. The `.cmd` launcher always applies the required noninteractive

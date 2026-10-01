@@ -8,6 +8,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $pluginRoot = Join-Path $repoRoot "plugins\chronos"
 $manifestPath = Join-Path $pluginRoot ".codex-plugin\plugin.json"
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+if ($manifest.hooks -ne './hooks/hooks.json') { throw 'Manifest must explicitly bind the audited hooks.' }
 $manifestVersion = [string]$manifest.version
 if (-not $Version) { $Version = $manifestVersion }
 $Version = $Version.TrimStart('v')

@@ -39,7 +39,7 @@ param(
   [string]$SupervisionAction = "status",
   [string]$SupervisionStatePath,
   [string]$SupervisionHostInventoryPath,
-  [ValidateSet("unsupported", "active_snapshot", "complete_flag", "cursor_snapshot", "total_count_snapshot")]
+  [ValidateSet("unsupported", "visible_or_specified", "active_snapshot", "complete_flag", "cursor_snapshot", "total_count_snapshot")]
   [string]$SupervisionHostInventoryCompleteness = "unsupported",
   [ValidateSet("unsupported", "current_host_runtime")]
   [string]$SupervisionHostInventoryStatusAuthority = "unsupported",
