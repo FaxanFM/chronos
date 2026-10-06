@@ -7,8 +7,11 @@ global hooks feature-control procedure and public signing trust/verification.
 Full ZIP SHA-256 `2fa6a9202df710fa393cbc29417f959750cb585f346755b62879b86a2750d72a`
 (14 files); Directory ZIP SHA-256
 `a5d7f5ec3538eb0b3afdb080133b873198113ef88fb627c25c92fe19834b0cdc`
-(12 files, no hooks). These bytes are not uploaded or published. New packaged
-regression checks and independent candidate review remain pending; do not use
+(12 files, no hooks). These bytes are not uploaded or published. Local removal,
+Inspector, Heartbeat, Supervision, Governor (49 scenarios), reproducibility,
+Directory contracts, hook configuration control and signing-trust checks pass.
+Compatibility evidence for unchanged module hashes is detailed in the audit
+response. Independent candidate review remains pending; do not use
 the October 1 review receipt as approval of these different bytes.
 
 October 5, 2026: the modified working tree builds a different full
