@@ -1,9 +1,11 @@
 # Privacy Policy
 
-Effective October 1, 2026 (v0.9.4 draft; not yet distributed)
+Effective October 1, 2026. See the README's Current Versions for edition availability.
 
 Chronos is a local Windows plugin. Health inspection and Heartbeat evaluation
-run on demand. Five reviewed monitoring hooks can record bounded task
+run when invoked with the user's authorization. Automatic Inspector diagnostics
+require separate standing permission; a one-off briefing does not grant it.
+Five reviewed monitoring hooks can record bounded task
 lifecycle, completed-turn activity, and subagent lifecycle hints after the user
 trusts their exact definition.
 Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
@@ -85,6 +87,11 @@ arguments, tool output, credentials, or usernames. The local Governor can
 decrypt an identifier for host task routing, so that ID can enter the Governor
 task or host-tool context; Chronos does not transmit it to its publisher.
 
+Hook metadata includes unsalted SHA-256 hashes of the Windows account SID and
+workspace path. Someone who can guess a value can test it against the hash;
+these values are pseudonymous, not anonymous. No raw SID or workspace path is
+stored in the hook record.
+
 Supervision also stores `installation-scope.json`, containing only schema
 version `1` and one 128-bit lowercase hexadecimal ID. A new v3 installation
 derives the ID from a SHA-256 hash of the local machine name and canonical Codex
@@ -94,6 +101,33 @@ Chronos uses a nonempty `CODEX_HOME` when supplied and otherwise uses the
 current user's `.codex` directory. It exposes only a truncated hash of that
 canonical identity in status. An invalid or inaccessible override is rejected
 before any registry, Heartbeat state, claim, or mutex-owned record is created.
+
+### Local State Locations
+
+`T` is the Windows process temporary directory; `L` is Windows LocalAppData.
+Supervision `H` is SHA-256 of uppercase machine name, `|`, and uppercase
+canonical Codex home. Heartbeat `B` hashes the JSON-serialized equivalent
+scope string. Repository `R` hashes Git's canonical common directory in lowercase.
+
+| Location | Contents and ownership boundary |
+| --- | --- |
+| `T\Chronos-Supervision-v3-<first24 H>-<0..3>\` | Current bounded recovery slots: registry, installation anchor, pending subdirectory |
+| `T\Chronos-Supervision-Inbox-v1-<first24 H>\` | Current home's pending hook receipts |
+| `T\Chronos\Supervision-v2\<prior H>\` | Earlier machine/home casing, registry and anchor |
+| `T\Chronos\Supervision\`, `L\Chronos\Supervision\` | Pre-home-isolation legacy registry/anchor; selected only for the actual default home |
+| `T\Chronos\Heartbeat-v2\<B>\` | Current Heartbeat evaluation, delivery and collector metadata |
+| `T\Chronos\Heartbeat\<prior B>\`, `L\Chronos\Heartbeat\<prior B>\`, prior v2 hashes | Legacy default-home scopes, including original CWD where applicable |
+| `T\Chronos\Governor\<R>\` | Repository lease state and backup; explicit repository selection required |
+| `<Git common directory>\chronos\` | Legacy repository lease state; explicit repository selection required |
+
+An explicit full-removal request may erase only selected Chronos metadata with
+the native `data-plan`/`data-remove` protocol before plugin-manager uninstall.
+Unknown entries, links, changed plans and active leases fail closed. Other homes
+and repositories remain untouched. Old CWD scopes require that original working
+directory; unknown historical scopes are retained, not falsely reported erased.
+Chat history, Codex logs, plugin-manager/trust records and downloaded release
+archives are not erased by this command. Local removal plans contain paths and
+file hashes for private review; do not post them in public support reports.
 The validation rejects a reparse point in any path component, including an
 ancestor junction. Unscoped legacy state and installation anchors are eligible
 only for the default `.codex` home. Explicit or environment-provided homes do

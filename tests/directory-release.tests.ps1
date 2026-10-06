@@ -58,10 +58,22 @@ try {
       $manifest.extensions.'com.openai'.onboardingSkill -ne './skills/chronos/SKILL.md') {
     throw 'Directory listing or onboarding does not match the edition.'
   }
+  $onboarding = Get-Content -Raw (Join-Path $package 'skills/chronos/SKILL.md')
+  if (-not $onboarding.Contains('Directory hook disclosure:') -or
+      $onboarding.Contains('Would you like to review the installed definitions')) {
+    throw 'Directory onboarding asks for trust of hooks it does not include.'
+  }
+  if (-not $onboarding.Contains('automaticDiagnosticsAllowed=yes|no')) {
+    throw 'Directory build lost standing diagnostic consent.'
+  }
   foreach ($prompt in $manifest.interface.defaultPrompt) {
     if ($prompt.Length -gt 128 -or $prompt.Contains("`n")) { throw 'Directory starter exceeds submission limits.' }
   }
   $record = Get-Content -Raw (Join-Path $first "$name.release.json") | ConvertFrom-Json
+  if ($manifest.interface.privacyPolicyURL -notmatch "/blob/v$([regex]::Escape($version))/PRIVACY.md$" -or
+      $manifest.interface.termsOfServiceURL -notmatch "/blob/v$([regex]::Escape($version))/TERMS.md$") {
+    throw 'Directory policy links are not version-bound.'
+  }
   if ($record.edition -ne 'skills_only' -or $record.lifecycle_hooks_included -or $record.packaged_files -ne 12) {
     throw 'Directory release record does not bind its edition and 12-file package.'
   }
@@ -76,7 +88,8 @@ try {
   New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
   $state = Join-Path $stateRoot 'session-registry.json'
   $empty = Read-Supervision @('-SupervisionAction', 'status')
-  if ($empty.recommendedGovernorModel -ne 'gpt-6-sol' -or $empty.recommendedGovernorReasoningEffort -ne 'medium') {
+  if ($empty.recommendedGovernorModel -ne 'gpt-6-sol' -or $empty.recommendedGovernorReasoningEffort -ne 'medium' -or
+      -not $empty.recommendedGovernorModelRequiresHostAdvertisement) {
     throw 'Directory native model recommendation is stale.'
   }
   $preflight = Read-Supervision @('-SupervisionAction', 'preflight', '-SupervisionHostInventoryCompleteness', 'visible_or_specified',

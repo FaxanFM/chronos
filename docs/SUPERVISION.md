@@ -11,11 +11,11 @@ After installing or upgrading Chronos, fully quit and reopen Codex. Then open a
 fresh task and ask:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
-This request opts in to one host-managed recurring Governor turn: at most 24
+This request begins onboarding; a separate recurring choice opts in to one
+host-managed recurring Governor turn: at most 24
 turns per day while monitored work is active and four per day while idle at the
 default cadence. Worker tasks receive no recurring turns. Chronos requires a
 fresh Governor or pauses after 336 cycles or 14 days, whichever comes first.

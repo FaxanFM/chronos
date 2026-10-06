@@ -179,9 +179,8 @@ must match the model persisted by `plan`. A difference fails with
 
 The installed plugin bundles five monitoring hooks: `SessionStart`,
 `SessionEnd`, `SubagentStart`, `SubagentStop`, and `Stop`. Codex applies its
-normal hash-based trust review before these non-managed hooks can run. Start,
-subagent, and completed-turn handlers request asynchronous execution where the
-host supports it; `SessionEnd` remains synchronous as required by Codex. Some
+normal hash-based trust review before these non-managed hooks can run. All five
+handlers use bounded synchronous intake as defined in `hooks.json`. Some
 current Windows Codex and `codex exec` paths do not dispatch trusted hooks.
 When invoked, all return exit zero without output, add no model context, and
 fail silent on a registry error.

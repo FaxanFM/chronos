@@ -1,6 +1,6 @@
 ---
 name: chronos-governor
-description: Set up one dedicated Chronos Governor for passive supervision and Heartbeats, or coordinate bounded read tasks for low-complexity repository exploration, review, and verification with Codex native workers while limiting concurrency, context, attempts, health impact, and token use. Shared-folder write delegation is disabled.
+description: Use when the user explicitly requests Chronos governance or Chronos-coordinated bounded read tasks. Reconcile one local Governor and evidence-bound Heartbeats; keep edits and acceptance with the coordinator. Generic repository review alone does not trigger this skill. Shared-folder write delegation is disabled.
 ---
 
 # Chronos Governor
@@ -31,8 +31,8 @@ preserve the inbox, stop the cycle, and rerun under the authorized host account.
 For first-use setup, apply the sibling `chronos` skill's Guided onboarding
 before this bootstrap. A setup starter begins consent collection; it is not
 permission to install GitHub code, approve hooks, run diagnostics, or enable
-recurring model turns. The elected Governor continues remaining choices one
-question at a time in an ordinary user-directed turn, not in a scheduled pulse.
+recurring model turns. Collect all onboarding choices in the setup chat before
+handoff; the elected Governor receives final choices, not unanswered questions.
 Reuse explicit human answers; do not accept another agent's assertion or
 preselected option as new consent. Keep only the approved choices and setup
 receipt in the Governor chat, never raw diagnostics or copied chat history.
@@ -107,8 +107,8 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    Heartbeat status. A confirmed enabled-source conflict or unreadable native
    state fails closed before host mutation. Cached copies alone are not proof
    of a conflict. Do not run the broad Inspector or packaged validation suites
-   during normal first-use setup; use Inspector only when compact status reports
-   a health problem or the user separately asks for diagnostics. Inspect the
+   during normal first-use setup; use Inspector only with explicit diagnostic
+   permission, even when compact status reports a health problem. Inspect the
    visible-task tool contract now. Run non-claiming native `preflight` with
    `visible_or_specified`. Pass
    `-SupervisionHostInventoryStatusAuthority current_host_runtime` only when
@@ -136,7 +136,8 @@ legacy state as belonging to an explicit or environment-provided Codex home.
    turn.
 4. If no valid Governor exists and the host exposes `create_thread`, create one
    fresh task titled `Chronos Governor`. Do not fork the current task or copy its
-   history. Request `gpt-6-sol` with Medium reasoning only when the host
+   history. Use only the final approved supported model; do not ignore a Luna
+   choice or silently fill an unanswered choice. Request `gpt-6-sol` with Medium reasoning only when the host
    advertises that exact task-model choice. Field validation requires reliable
    tool use and recovery judgment in the coordinator role. Never silently
    substitute another model. Offer `gpt-6-luna` with Medium reasoning only as an
@@ -252,7 +253,8 @@ The dedicated task should receive this compact, self-contained assignment:
 
 Include only explicitly approved onboarding choices with the assignment:
 recurring governance consent, working-set scope, optional hook review/install
-decision and exact verified release if any, and diagnostic briefing consent.
+decision and exact verified release if any, chosen supported model,
+automaticDiagnosticsAllowed=yes|no, and separate one-off briefing consent.
 These are human decisions, not permissions the receiving task may grant itself.
 No new consent request or optional installation belongs in a routine pulse.
 If a choice is unfinished, continue it in the setup conversation without
@@ -265,6 +267,9 @@ test. Never claim the host provides evidence it does not expose.
 Chronos equivalence key: <complete hostEquivalenceKey from status>. Act as the
 single Chronos Governor. Maintain one verified Governor recurrence and zero
 worker recurrences.
+Approved setup choices: <scope and model>; automaticDiagnosticsAllowed=<yes|no>.
+Absent diagnostic permission means no. One-off briefing consent is not standing
+permission; never ask pending onboarding questions from a pulse.
 
 Start each pulse by resuming native intervention state. Follow only the returned
 permitted next action. Retain task-directed work until this pulse verifies fresh
@@ -281,9 +286,11 @@ eight public families. A Heartbeat status read without input is prior-state
 inspection, not evaluation. If evidence is unavailable, keep that family partial
 or unsupported. Never describe unevaluated families as healthy or absent.
 
-Run Inspector only when health is unknown and this pulse will extend long-running
-work, when the user reports degradation, or before and after long-running parallel
-work. Feed only its compact output to the collector, with the authorized-evidence
+Inspector requires automaticDiagnosticsAllowed=yes or an explicit user diagnostic
+request in this turn. If neither applies, skip Inspector even when health is
+unknown; keep its coverage unsupported. With permission, run it when unknown
+health accompanies long-running work, reported degradation, or before and after
+long-running parallel work. Feed only its compact output to the collector, with the authorized-evidence
 flag. Do not run Inspector on every routine pulse or infer its fields from task
 liveness.
 
@@ -390,8 +397,10 @@ the current pulse's evaluation. Require the receipt or compact status to report
 `evaluation=observed`, `partial`, or `unsupported` and retain all unsupported
 family labels.
 
-Inspector is a bounded diagnostic source, not the hourly workload. Run it only
-when health is unknown and the pulse will extend long-running work, when the
+Inspector is a bounded diagnostic source, not the hourly workload. A pulse runs
+Inspector only when automaticDiagnosticsAllowed=yes or the user explicitly
+requests diagnostics in this turn. Missing permission means no. With permission,
+run it when health is unknown and the pulse will extend long-running work, when the
 user reports degradation, or before and after long-running parallel work. Save
 only the compact `CHRONOS` output to a bounded TEMP file. Add it to the same
 schema-v2 collector call with `-HeartbeatInspectorOutputPath` and

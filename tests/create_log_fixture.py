@@ -2,6 +2,7 @@ import argparse
 import sqlite3
 import time
 from pathlib import Path
+from typing import Optional
 
 
 def create_fixture(path: Path) -> None:
@@ -95,12 +96,14 @@ def create_closed_wal_fixture(path: Path) -> None:
             sidecar.unlink()
 
 
-def write_fixture(path: Path, duration: float) -> None:
+def write_fixture(path: Path, duration: float, ready_path: Optional[Path] = None, stop_path: Optional[Path] = None) -> None:
     connection = sqlite3.connect(path, timeout=2)
     try:
         connection.execute("PRAGMA journal_mode=WAL")
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
+            if stop_path is not None and stop_path.exists():
+                break
             connection.execute(
                 """
                 INSERT INTO logs (
@@ -111,6 +114,8 @@ def write_fixture(path: Path, duration: float) -> None:
                 (0, 0, "TRACE", "fixture-writer", "x" * 256, 256),
             )
             connection.commit()
+            if ready_path is not None and not ready_path.exists():
+                ready_path.write_text("ready", encoding="utf-8")
             time.sleep(0.02)
     finally:
         connection.close()
@@ -121,6 +126,8 @@ def main() -> None:
     parser.add_argument("action", choices=("create", "partial", "wal", "verify", "write"))
     parser.add_argument("path", type=Path)
     parser.add_argument("--duration", type=float, default=4.0)
+    parser.add_argument("--ready-path", type=Path)
+    parser.add_argument("--stop-path", type=Path)
     args = parser.parse_args()
 
     if args.action == "create":
@@ -132,7 +139,7 @@ def main() -> None:
     elif args.action == "verify":
         verify_fixture(args.path)
     else:
-        write_fixture(args.path, args.duration)
+        write_fixture(args.path, args.duration, args.ready_path, args.stop_path)
 
 
 if __name__ == "__main__":

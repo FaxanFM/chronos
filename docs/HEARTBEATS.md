@@ -21,11 +21,10 @@ idle hours, at most 24 or four turns per day. The host rotates or pauses the
 Governor after 336 cycles or 14 days so recurring context cannot grow without a
 bound.
 
-The normal first-use request enables supervision and Heartbeats together:
+The normal first-use request begins consent-led setup for supervision and Heartbeats:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
 Do not create a separate Heartbeat task or recurrence. A complete setup result

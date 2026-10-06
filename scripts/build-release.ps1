@@ -71,12 +71,23 @@ function Get-PackagedBytes {
   )
   if ($isText) {
     $content = [System.IO.File]::ReadAllText($File.FullName)
+    $relative = $File.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+    if ($relative -eq 'README.md') {
+      $content = $content.Replace('https://github.com/FaxanFM/chronos/blob/main/', "https://github.com/FaxanFM/chronos/blob/v$Version/")
+      $content = $content.Replace('--ref v0.9.3', "--ref v$Version")
+    }
+    if ($relative -eq '.codex-plugin/plugin.json') {
+      $versionedManifest = $content | ConvertFrom-Json
+      $versionedManifest.interface.privacyPolicyURL = "https://github.com/FaxanFM/chronos/blob/v$Version/PRIVACY.md"
+      $versionedManifest.interface.termsOfServiceURL = "https://github.com/FaxanFM/chronos/blob/v$Version/TERMS.md"
+      $content = ($versionedManifest | ConvertTo-Json -Depth 12) + "`n"
+    }
     if ($Edition -eq 'Directory') {
       $relative = $File.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
       if ($relative -eq '.codex-plugin/plugin.json') {
         $directoryManifest = $content | ConvertFrom-Json
         $directoryManifest.PSObject.Properties.Remove('hooks')
-        $directoryManifest.description = 'Skills-only edition: one local Codex Governor for passive supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only coordination. No lifecycle hooks.'
+        $directoryManifest.description = 'Skills-only edition: Windows only; one local Codex Governor for passive supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only coordination. No lifecycle hooks.'
         $directoryManifest.interface.longDescription = 'Skills-only Plugin Directory edition. Govern active local Codex chats in a visible window of up to 50 plus explicit selections, with one Governor, evidence-bound Heartbeats, and verified exact-target intervention. Diagnose Windows degradation, quota and context pressure, approval and review loops, rule problems, rollout duplication, and SQLite churn. Lifecycle hooks are not included or auto-installed; missing evidence stays unknown. No publisher telemetry.'
         $directoryManifest.interface.defaultPrompt[0] = 'Set up Chronos for my active chats: explain privacy, configure one Governor, and verify scope and Heartbeat coverage.'
         $content = ($directoryManifest | ConvertTo-Json -Depth 12) + "`n"
@@ -108,6 +119,12 @@ See https://github.com/FaxanFM/chronos for source, privacy, and installation gui
 Fully quit and reopen Codex, then use a fresh chat after an install or upgrade.
 "@ + "`n"
       } elseif ($relative -in @('skills/chronos/SKILL.md', 'skills/chronos-governor/SKILL.md')) {
+        if ($relative -eq 'skills/chronos/SKILL.md') {
+          $pattern = '(?s)<!-- FULL_EDITION_HOOK_CHOICE_START -->.*?<!-- FULL_EDITION_HOOK_CHOICE_END -->'
+          if ([regex]::Matches($content, $pattern).Count -ne 1) { throw 'Missing edition-specific hook choice boundary.' }
+          $content = [regex]::Replace($content, $pattern,
+            'Directory hook disclosure: no lifecycle hooks are included; fresh session, completed-turn, and subagent event evidence is unavailable. Do not ask the full-edition hook trust question.')
+        }
         $heading = if ($relative -eq 'skills/chronos/SKILL.md') { '# Chronos' } else { '# Chronos Governor' }
         $notice = "**Installed edition: skills-only.** No lifecycle hooks or hook installer are included. Use current-host task status and compatible authorized Inspector evidence for core governance. Missing coverage stays partial or unsupported. Do not download or auto-install GitHub hooks from this Directory skill; optional hooks require a separate independent user-directed installation. Hook trust and execution are unavailable in this edition.`n"
         $content = $content.Replace("$heading`r`n", "$heading`r`n`r`n$notice").Replace("$heading`n", "$heading`n`n$notice")

@@ -70,6 +70,17 @@ jobs:
       - name: Test reproducible release
         shell: powershell
         run: .\tests\release.tests.ps1
+      - name: Test usability contracts
+        shell: powershell
+        run: .\tests\usability.tests.ps1
+      - name: Test source and packaged scoped removal
+        shell: powershell
+        run: |
+          .\tests\lifecycle-removal.tests.ps1
+          .\tests\lifecycle-removal.tests.ps1 -PluginRoot (Join-Path $env:RUNNER_TEMP 'chronos-heartbeat-package')
+      - name: Test published signer trust and verification contract
+        shell: powershell
+        run: .\tests\release-verification.tests.ps1
       - name: Test skills-only Directory release
         shell: powershell
         run: .\tests\directory-release.tests.ps1

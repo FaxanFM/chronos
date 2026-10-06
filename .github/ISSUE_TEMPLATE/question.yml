@@ -1,0 +1,13 @@
+name: Chronos question
+description: Ask a non-sensitive usage or privacy-policy question.
+title: "[Question]: "
+body:
+  - type: markdown
+    attributes:
+      value: This is public. Ask about the policy or behavior without personal data, raw state, paths, IDs, or private records. Use private security reporting for vulnerabilities; no general private privacy contact is currently published.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true

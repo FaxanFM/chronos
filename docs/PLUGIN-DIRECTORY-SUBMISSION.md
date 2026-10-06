@@ -1,5 +1,26 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## Local Usability Remediation Build - Not Submitted
+
+October 6, 2026: the new local candidate adds native scoped removal, a tested
+global hooks feature-control procedure and public signing trust/verification.
+Full ZIP SHA-256 `2fa6a9202df710fa393cbc29417f959750cb585f346755b62879b86a2750d72a`
+(14 files); Directory ZIP SHA-256
+`a5d7f5ec3538eb0b3afdb080133b873198113ef88fb627c25c92fe19834b0cdc`
+(12 files, no hooks). These bytes are not uploaded or published. New packaged
+regression checks and independent candidate review remain pending; do not use
+the October 1 review receipt as approval of these different bytes.
+
+October 5, 2026: the modified working tree builds a different full
+`chronos-v0.9.4.zip`, SHA-256
+`7738563b03186cdf82ca4ab62fb67cd002d0ee90a98c234b8a645d4e69b6ba9b`.
+Two local builds matched. This is not the signed source pin or uploaded package
+recorded below. It has not been installed, signed as a new candidate, uploaded,
+or published. Release remains HOLD under
+[the usability response](V0.9.4-USABILITY-AUDIT-RESPONSE.md).
+Keep the previous submission receipt and hashes as historical evidence; a new
+candidate needs its own signed identity, gates, review and submission.
+
 ## v0.9.4 Submission Candidate
 
 Version: `0.9.4`

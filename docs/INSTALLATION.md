@@ -1,6 +1,16 @@
 # Install Chronos For Codex
 
-## Readiness And Edition
+## Choose Your Route
+
+Ordinary users: choose a verified published edition in [Current Versions](../README.md#current-versions).
+Testers: the pinned source instructions below are explicit testing only.
+Optional hooks: use the separate full GitHub edition, with user-controlled trust.
+
+The pinned testing source below predates the current usability repairs. It does
+not contain those fixes and is not the new candidate. See the
+[audit response](V0.9.4-USABILITY-AUDIT-RESPONSE.md) before a recorded walkthrough.
+
+## Testing Identity
 
 Updated October 1, 2026. This guide covers the full Windows GitHub edition,
 including both skills and all five optional lifecycle hooks.
@@ -23,8 +33,7 @@ with its Windows 2022 runner and was retried without changing the candidate.
 Do not describe either preview as a fully released, always-running product.
 
 The [OpenAI Directory listing](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)
-still publishes v0.9.2. The separate v0.9.4 skills-only package is a new upload
-candidate, not an approved update. It contains both skills and 12 release files,
+has its publication record in the README. The separate skills-only package contains both skills and 12 release files,
 with no hook configuration or hook-intake launcher. The
 current [submission documentation](https://developers.openai.com/plugins/deploy/submission)
 excludes lifecycle hooks from submitted ZIPs. A Directory-to-GitHub automatic
@@ -81,9 +90,10 @@ trust or prove dispatch. You can decline them and continue supported core setup.
 
 ## Prompt-Led Installation
 
-If a Chronos Governor chat already exists, send the following there. If Chronos
-has been uninstalled, it has no newly loaded plugin skill; use a fresh local
-Codex chat to do the initial plugin-manager install. After restart, start the
+For an edition switch, use a fresh local Codex chat with no Chronos skill loaded.
+The Directory skill cannot authorize its own GitHub source switch. If Chronos
+has been uninstalled, use that same independent installation route.
+After restart, start the
 onboarding prompt below and let it reuse or create one verified Governor.
 An old Governor chat name alone does not prove ownership or current guidance.
 
@@ -219,22 +229,54 @@ The setup explains the visible-or-specified scope and asks:
    one Governor model turn per active hour or six idle hours. It uses your Codex
    allowance. No worker gets a recurrence. The Governor has a 336-cycle or
    14-day rotation bound. On-demand checks do not monitor between requests.
-2. **Review optional GitHub hooks, keep them off, or decide later?** On the
+2. **Which supported Governor model?** Ask after recurring consent, including
+   supported alternatives or on-demand checks when GPT-6 Sol is not advertised.
+3. **Review installed hooks, keep them off, or decide later?** On the
    already installed full edition, review the current definition, not another
    install. Trust only through Codex's real hook review controls. Desktop UI can
    differ by build; do not assume a `/hooks` desktop command. The official
    [hook guide](https://learn.chatgpt.com/docs/hooks) describes exact-definition
    trust and the CLI hook browser. If controls are unavailable, report that
    limitation; never edit trust records to bypass it.
-3. **Run a diagnostic briefing or skip it?** Inspector checks bounded Windows
+4. **Allow automatic diagnostics or on request only?** Unknown health does not
+   authorize Inspector. Pass this standing choice separately to the Governor.
+5. **Run a diagnostic briefing or skip it?** This authorizes only one briefing.
+   Inspector checks bounded Windows
    resource and compatible Codex evidence. It does not edit database rows or
    rules; SQLite can update coordination sidecars with a read-only handle.
 
-The selected Governor can lead remaining questions after a named handoff. The
+All questions remain in the setup chat before the selected Governor receives
+the final choices. Pending choices resume in that chat, without reminders. The
 user does not manually register worker chats or run broad release tests. A
 declined optional feature must not prevent otherwise supported core governance.
 If hooks were already trusted, an off choice needs verified disablement; do not
 claim they are off merely because you declined an installation question.
+
+### Hooks Off: Build-Qualified Control
+
+The desktop-bundled Windows CLI **0.160.0** was tested on October 6, 2026 with
+an isolated Codex home. Its supported command persists `features.hooks=false`
+and a new CLI process reports the effective hooks feature as false:
+
+```powershell
+& $codex --version
+& $codex features disable hooks
+if ($LASTEXITCODE -ne 0) { throw 'Hooks disable failed.' }
+& $codex features list
+if ($LASTEXITCODE -ne 0) { throw 'Hooks state unavailable.' }
+```
+
+Resolve `$codex` using the desktop CLI locator above. Run in the same Codex home
+and project context as the desktop chat. This disables **all hooks**, including
+other plugins, not just Chronos. Obtain separate consent for that wider change.
+It changes no trust records. Fully quit and reopen Codex before relying on it
+for an existing desktop session. Require the `hooks` row to end in `false`;
+project, cloud or administrator overrides can change the effective state.
+If the desktop control or effective state cannot be verified, report
+"Hooks: cannot confirm on this build" and stop destructive removal.
+The fixture proves persistence and a fresh CLI process, not live desktop event
+dispatch. A zero Chronos hook counter is not disablement evidence. See the
+[official hooks-off contract](https://learn.chatgpt.com/docs/hooks#turn-hooks-off).
 
 ## Verify The Result
 
@@ -257,6 +299,8 @@ The placeholder must be replaced with the manager-verified installed skill
 root, not a guessed path. Chronos is not guaranteed to be on PATH. Supervision
 must use Codex's Windows user when DPAPI-protected hook evidence is read; use
 only scoped host-account approval if needed, never a blanket sandbox bypass.
+Supervision status can include raw routing IDs. Keep it in the private setup
+chat; use a plain summary for support and redact identifiers before sharing.
 
 Fresh hook counters prove observed events, not all five handlers. Do not create
 subagents or routine wakes to manufacture a demonstration. A scheduled recurrence
@@ -295,6 +339,77 @@ Pausing the Governor stops scheduled turns, not hooks. Disabling hooks stops
 new hook events, not an existing recurrence. Uninstalling does not promise
 erasure of local metadata, OpenAI chat history, or GitHub activity. Data cleanup
 is a separate explicit request after scope and stopped-state checks.
+
+### Full Local Metadata Removal
+
+Run before uninstalling, from any ordinary chat:
+
+```text
+Remove this Chronos installation and its owned local metadata. Explain the
+scope first. Verify its exact recurrence is stopped and hooks are disabled;
+ask separately before disabling all plugins' hooks. Show the native data-plan,
+include only repositories I select, and obtain deletion confirmation. Apply
+that exact plan, verify no selected Chronos state remains, then uninstall with
+the supported manager. Preserve other installations, chats, logs and caches.
+```
+
+The manager-verified core skill root is required; Chronos is not on PATH by
+contract. For a stopped, hook-disabled scope with explicit deletion consent:
+
+```powershell
+$chronos = Join-Path '<installed chronos skill root>' 'scripts\chronos.cmd'
+$selectedHome = '<verified Codex home>'
+$plan = & $chronos -Action data-plan -CodexHome $selectedHome | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $plan.ok) { throw 'Removal plan failed.' }
+$plan.files # Review privately; these paths must not be posted in a public issue.
+& $chronos -Action data-remove -CodexHome $selectedHome -RemovalPlanHash $plan.planHash -ConfirmRecurrencesStopped -ConfirmHooksDisabled -ConfirmLocalDataRemoval
+if ($LASTEXITCODE -ne 0) { throw 'Removal incomplete. Obtain a new plan; do not recurse manually.' }
+$after = & $chronos -Action data-plan -CodexHome $selectedHome | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $after.ok -or $after.fileCount -ne 0 -or @($after.directories).Count -ne 0) { throw 'Selected state remains.' }
+```
+
+The confirmation flags assert checks done by the caller; native code does not
+query host automations or hook settings. Add the same `-RemovalRepositories`
+selection to all three commands to include an explicitly selected repository's
+lease metadata; live leases or lock files block removal. Run from the original
+working directory to include old CWD-bound Heartbeat state. Other old CWD scopes
+are not searched and must not be claimed erased. No recursive root deletion is
+used. A concurrent writer or permission failure can leave partial removal;
+the command returns a failure, not a complete-erasure receipt.
+
+After uninstall, use the host automation inventory to locate an orphan by its
+exact installation-equivalence key and pause/delete only that recurrence.
+Use a verified same-release source command in an independent chat for metadata
+cleanup; it does not require reinstalling the plugin. Consult the
+[exact state-location table](../PRIVACY.md#local-state-locations), never delete
+the entire Chronos directory or foreign scope hashes.
+
+## Verify A Published Release
+
+Requires Git, GitHub CLI (`gh`), Windows PowerShell 5.1, and the supported Codex
+CLI for the installed-version check. From a trusted Chronos checkout:
+
+```powershell
+$version = [string](Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json).version
+& .\scripts\verify-release.ps1 -Version $version -Edition Directory -CodexPath $codex
+if ($LASTEXITCODE -ne 0) { throw 'Release verification failed.' }
+```
+
+The script verifies the annotated tag and commit against the published
+[allowed signers](security/allowed_signers), then checks the immutable release,
+ZIP checksum, asset binding, and attestation bound to that commit, tag and
+release workflow. It finally requires exactly one enabled installed Chronos at
+that version. Choose `-Edition Full` for the GitHub edition. Before installation,
+`-SkipInstalledCheck` is explicit and reports a skipped check, not install PASS.
+Published Chronos SSH signer fingerprint:
+`SHA256:iQB6k+xQ+EhrKOgRhgc174hqe7FtJa/quyJ541iq1Gs` (Ed25519).
+Confirm this fingerprint through a trusted channel; do not accept a replacement
+key merely because a downloaded checkout supplies one.
+
+This new candidate is not published. Its release command must fail until an
+immutable signed tag and attested assets exist. A preview can prove a source
+signature and reproducible local bytes, but cannot prove a future release
+attestation, approval, or unattended desktop execution.
 
 ## Data And Recording A Walkthrough
 

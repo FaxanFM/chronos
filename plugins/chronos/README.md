@@ -11,8 +11,9 @@ stay passive. Chronos sends no publisher telemetry.
 
 **[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
 
-Published by Dravara, LLC. The currently approved directory package is live for eligible
-users, subject to region, supported surface, workspace controls, and role.
+Published by Dravara, LLC. See the repository README's Current Versions for
+publication records. Directory access is subject to supported surface,
+workspace controls, and role.
 Directory publication is not an OpenAI endorsement. Use the Git marketplace
 commands below only when the Directory is unavailable. Do not install both
 sources: Codex treats `chronos@chronos` and
@@ -71,7 +72,7 @@ the result reports whether that activity was observed.
 Install from the Directory link above. As a fallback, install from Git:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
 codex.cmd plugin add chronos@chronos
 ```
 
@@ -121,8 +122,7 @@ Pending consent and required restarts are reported, not scheduled for retry.
 For complete setup, use the first starter prompt or ask:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
 Chronos verifies the package source and native status, reuses or creates one
@@ -196,7 +196,9 @@ lifecycle state, and timestamps. They do not create worker turns or recurrences.
 
 Hooks are an optional accelerator, not the source of truth. The Governor still
 uses one bounded visible-or-specified host inventory per cycle for discovery and liveness. The
-user controls hook trust through Codex `/hooks`; Chronos never approves trust on
+user controls hook trust through the host's supported review controls; see
+[hook review](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+Chronos never approves trust on
 the user's behalf. Installed or trusted status shows configuration only. Chronos
 reports hook execution as observed only after native status records a new hook
 run. If a bounded hook cannot persist an event, it stays silent and the next
@@ -286,8 +288,9 @@ maps the focused v0.7.7 correctness repairs and validation boundary.
   does not store transcript or workspace paths. DPAPI does not isolate data from
   another process already running as that user. The temporary contention
   fallback uses the same protected or hashed metadata and no raw path.
-- Stores one random, non-secret 128-bit installation ID with no machine-derived
-  data so host reconciliation remains scoped to this PC after registry recovery.
+- New installations derive a non-secret 128-bit installation ID from a SHA-256
+  hash of the machine name and canonical Codex home. Earlier random anchors are
+  retained unchanged. Raw machine names and Codex-home paths are not stored.
 - Heartbeat evaluation stores bounded per-scope transition, coverage, cadence,
   deduplication, hashed delivery/outbox, intervention, and health metadata. It does not persist raw snapshots,
   prompts, responses, commands, source, paths, credentials, or tool output.

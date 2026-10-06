@@ -1,8 +1,7 @@
 # Chronos Onboarding And Consent
 
-Status: v0.9.4 source draft. Not installed, submitted, or published. The
-hook-enabled v0.9.3 candidate remains a separate artifact; this draft does not
-change its signed commit, tag, ZIP, or installed package.
+See [Current Versions](../README.md#current-versions) for publication records.
+Source changes here do not update an installed or submitted package.
 
 ## One Entry Prompt
 
@@ -14,10 +13,17 @@ has loaded; it is not a pre-install executable or an automatic trust grant.
 > Set up Chronos for my active chats: explain privacy, offer optional hooks,
 > configure one Governor, and verify what is running.
 
+The Directory skills-only starter is:
+
+> Set up Chronos for my active chats: explain privacy, configure one Governor, and verify scope and Heartbeat coverage.
+
+It gives one hooks-absence disclosure, not a trust question for missing hooks.
+
 The packaged `extensions.com.openai.onboardingSkill` points to the existing
 `chronos` skill. No third skill, hidden installer, account signup, or new
 background service is added. The Governor uses the same onboarding contract
-when it takes over a user-authorized setup. It does not send consent reminders
+when it receives a completed user-authorized setup. All decisions remain in
+the setup chat before handoff. It does not send consent reminders
 from scheduled pulses or require the user to relay technical commands between
 chats. Before handoff, the setup chat identifies the elected Governor and
 passes only approved choices, not the user's conversation history.
@@ -48,14 +54,20 @@ default selection, or silence as consent.
 | Review GitHub hooks | Explanation and inspection of five short lifecycle handlers | Review only; installation of an exact version/source change and hook trust are separate decisions |
 | Keep hooks off | Core governance without new lifecycle evidence | No hook install or auto-trust; existing trusted hooks must be disclosed and disabled through supported controls with scoped confirmation |
 | Decide later | Core setup can continue | No additional hook permission; preserve and disclose existing hook state |
-| Run briefing | Bounded Windows and compatible Codex health diagnostics | Inspector once for the requested briefing; no broad validation suite or automatic diagnostic upload |
-| Skip briefing | Core task checks without Inspector evidence | No new Inspector run; unavailable health coverage stays unsupported |
+| Allow automatic diagnostics | Bounded diagnostics when qualifying work or degradation needs evidence | Standing Inspector permission, passed as automaticDiagnosticsAllowed=yes; not every pulse |
+| On request only | No autonomous Inspector runs | automaticDiagnosticsAllowed=no, including when health is unknown |
+| Run briefing | Bounded Windows and compatible Codex health diagnostics | Inspector once; not standing permission, no broad validation suite or upload |
+| Skip briefing | Core task checks without a new briefing | With on-request-only permission, subsequent unknown-health pulses do not run Inspector |
 
 The Governor prefers GPT-6 Sol (`gpt-6-sol`) with Medium reasoning when the
 current host advertises it. GPT-6 Luna (`gpt-6-luna`) with Medium reasoning is
 available only as an explicit user-selected alternative. Verify the effective
 host choice; a native recommendation is not a model-setting change or a token
 savings measurement. Existing Governor and worker models are not silently changed.
+Ask the model question after recurring consent. If Sol is not advertised, show
+supported alternatives and let the user choose, or offer on-demand checks.
+The Governor rotates after 336 cycles or 14 days through a verified handoff;
+otherwise it pauses. Show its chat and how to ask for status or pause.
 
 The five hooks are `SessionStart`, `SessionEnd`, `Stop` (main turn completed),
 `SubagentStart`, and `SubagentStop`. They record protected identifiers, hashes,
@@ -89,7 +101,7 @@ publisher signature proves source identity, not OpenAI approval or hook trust.
 [Codex hook documentation](https://developers.openai.com/plugins/build/plugins)
 requires explicit trust of the current hook definition. Onboarding must use the
 host's real review controls, not write trust records or suggest a nonexistent
-`/hooks` command. Required full quit/reopen and fresh-chat steps remain visible.
+`/hooks` desktop command; the documented browser is CLI-only. Required full quit/reopen and fresh-chat steps remain visible.
 Chronos does not close Codex automatically. If execution has not been observed
 after trust, the receipt says so; no forced workers or routine wakes are created
 to manufacture an event.
@@ -100,18 +112,19 @@ Return a compact receipt from fresh observations, not the following illustrative
 values. Keep it in the user's chat, not a telemetry file:
 
 ```text
-Edition/version/source: <verified installation or unresolved>
-Scope: visible_or_specified; <working-set count>; account-wide=false
-Recurring consent: <yes/no/pending>
-Governor/recurrence: <verified owner and active/paused/absent/unverified>
-Native cycle: <actual result or not_run>
-Scheduled execution: <verified/not_verified; actual pulse evidence required>
-Hooks: choice=<decision>; trust=<host observation>; execution=<fresh observation>
-Heartbeats: observed=<n>; partial=<n>; unsupported=<n>; mode=<actual mode>
-Diagnostic briefing: <chosen/skipped/pending>; evidence=<actual coverage>
+Installation: <edition, verified version and source, or unresolved>
+Work covered: <visible/selected scope and count; not account-wide>
+Governor: <chat, approved model, recurrence active/paused/absent/unverified>
+Native check: <actual result, or not run>
+Scheduled checks: <observed execution, or not yet verified>
+Hooks: <not included/off confirmed via host control/cannot confirm on this build>;
+       trust=<review result>; execution=<fresh event observed/not observed>
+Health evidence: <observed, partial and unsupported counts out of 8>
+Diagnostics: automatic=<allowed/on request only>; briefing=<run/skipped/pending>
 Data: bounded local state; Codex chat processing; no publisher runtime telemetry
-Setup: <core_ready/restart_required/awaiting_consent/blocked>
+Setup: <ready/restart needed/choice pending/blocked>
 Next step: <only a real pending action, or none>
+Check or pause: <Governor chat; ask for status or pause recurring checks>
 ```
 
 One native cycle proves that cycle, not an unattended scheduled pulse. A
@@ -127,6 +140,14 @@ receipt is an enforceable native permission ledger: runtime/host approval
 boundaries remain authoritative.
 
 ## Stop And Data Controls
+
+For explicit full metadata removal, use the native `data-plan`/`data-remove`
+protocol before uninstalling. Select the Codex home and repositories, verify
+zero current-key recurrences and disabled hooks, obtain deletion consent, then
+verify an empty plan. See [the complete procedure](INSTALLATION.md#full-local-metadata-removal).
+No promise to erase chats, logs, caches, trust records or unknown old scopes.
+The tested CLI hooks-off setting is global: it affects other plugins too and
+requires separate consent, a full desktop restart and same-context verification.
 
 Pausing the scoped Governor recurrence stops scheduled model turns. Disabling
 hooks stops new hook events. These are separate controls. Use the plugin manager

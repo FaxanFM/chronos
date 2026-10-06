@@ -328,7 +328,7 @@ try {
   ) -join "`n"
   $publicReadmes = $publicReadmes -replace '\s+', ' '
   foreach ($required in @(
-    'Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.',
+    [string]$manifest.interface.defaultPrompt[0],
     'Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.',
     'Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here.',
     'one dedicated Governor',
@@ -465,6 +465,17 @@ try {
         $reader = [System.IO.StreamReader]::new($entry.Open(), [System.Text.Encoding]::UTF8)
         try { $entryText = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
+        if ($entry.FullName -eq 'README.md' -and $entryText.Contains('/blob/main/')) {
+          throw 'Packaged README links must use the release tag, not moving main.'
+        }
+        if ($entry.FullName -eq '.codex-plugin/plugin.json') {
+          $packagedManifest = $entryText | ConvertFrom-Json
+          foreach ($policyUrl in @($packagedManifest.interface.privacyPolicyURL, $packagedManifest.interface.termsOfServiceURL)) {
+            if ($policyUrl -notmatch "/blob/v$([regex]::Escape($version))/") {
+              throw 'Packaged policy URL is not version-bound.'
+            }
+          }
+        }
       }
     }
     foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/hook-intake.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
