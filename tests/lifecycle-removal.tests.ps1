@@ -99,9 +99,34 @@ try {
   $repoSelection = @('-RemovalRepositories', $repository)
   $liveLease = Invoke-Removal $homeA 'data-plan' $repoSelection
   Assert ($liveLease.code -ne 0 -and $liveLease.data.error -eq 'removal_active_lease') ('Active lease was not rejected: ' + ($liveLease.data | ConvertTo-Json -Compress))
+  foreach ($status in @('blocked_legacy_write', 'verified', 'awaiting_verification')) {
+    [IO.File]::WriteAllText($governorState, ('{"version":4,"tasks":{},"leases":{"active":{"status":"' + $status + '"}}}'))
+    $unresolved = Invoke-Removal $homeA 'data-plan' $repoSelection
+    Assert ($unresolved.code -ne 0 -and $unresolved.data.error -eq 'removal_active_lease') ('Unresolved lease was accepted: ' + $status)
+  }
+  foreach ($record in @('null', '[]', '{}', '{"status":"unknown"}', '{"status":false}', '{"status":["released"]}')) {
+    [IO.File]::WriteAllText($governorState, ('{"version":4,"tasks":{},"leases":{"invalid":' + $record + '}}'))
+    $invalidRecord = Invoke-Removal $homeA 'data-plan' $repoSelection
+    Assert ($invalidRecord.code -ne 0 -and $invalidRecord.data.error -eq 'removal_governor_state_invalid') ('Malformed lease was accepted: ' + $record)
+  }
   [IO.File]::WriteAllText($governorState, '{"version":4,"tasks":{},"leases":[]}')
   $invalidLeaseMap = Invoke-Removal $homeA 'data-plan' $repoSelection
   Assert ($invalidLeaseMap.code -ne 0 -and $invalidLeaseMap.data.error -eq 'removal_governor_state_invalid') 'Malformed lease map was treated as no active leases.'
+  foreach ($status in @('accepted', 'failed', 'released')) {
+    [IO.File]::WriteAllText($governorState, ('{"version":4,"tasks":{},"leases":{"terminal":{"status":"' + $status + '"}}}'))
+    $terminal = Invoke-Removal $homeA 'data-plan' $repoSelection
+    Assert ($terminal.code -eq 0) ('Native terminal lease was rejected: ' + $status)
+  }
+  [IO.File]::WriteAllText(($governorState + '.bak'), '{"version":4,"tasks":{},"leases":{"prior":{"status":"blocked_legacy_write"}}}')
+  $settledBackup = Invoke-Removal $homeA 'data-plan' $repoSelection
+  Assert ($settledBackup.code -eq 0 -and $settledBackup.data.fileCount -eq 2) 'Stale backup overrode the settled current state.'
+  Remove-Item -LiteralPath $governorState
+  $orphanBackup = Invoke-Removal $homeA 'data-plan' $repoSelection
+  Assert ($orphanBackup.code -ne 0 -and $orphanBackup.data.error -eq 'removal_active_lease') 'Orphan unresolved backup was accepted.'
+  [IO.File]::WriteAllText($governorState, '{"version":4,"tasks":{},"leases":{"invalid":null}}')
+  $invalidPrimary = Invoke-Removal $homeA 'data-plan' $repoSelection
+  Assert ($invalidPrimary.code -ne 0 -and $invalidPrimary.data.error -eq 'removal_governor_state_invalid') 'Invalid current state was masked by a backup.'
+  Remove-Item -LiteralPath ($governorState + '.bak')
   [IO.File]::WriteAllText($governorState, '{"version":4,"tasks":{},"leases":{}}')
   $repoPlan = Invoke-Removal $homeA 'data-plan' $repoSelection
   $repoRemoved = Invoke-Removal $homeA 'data-remove' (@('-RemovalPlanHash', $repoPlan.data.planHash) + $confirm + $repoSelection)

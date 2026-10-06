@@ -741,6 +741,16 @@ try {
   $archive = [System.IO.Compression.ZipFile]::OpenRead($firstArtifact)
   try {
     foreach ($fileRecord in @($releaseManifest.files)) {
+      $sourcePath = Join-Path $repoRoot ('plugins/chronos/' + $fileRecord.path)
+      $sourceFile = Get-Item -LiteralPath $sourcePath
+      $sourceBytes = if ($sourceFile.Name -eq 'LICENSE' -or $sourceFile.Extension.ToLowerInvariant() -in @('.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt')) {
+        $sourceText = [IO.File]::ReadAllText($sourcePath).Replace("`r`n", "`n").Replace("`r", "`n")
+        [Text.UTF8Encoding]::new($false).GetBytes($sourceText)
+      } else { [IO.File]::ReadAllBytes($sourcePath) }
+      $sourceSha = [Security.Cryptography.SHA256]::Create()
+      try { $sourceHash = ([BitConverter]::ToString($sourceSha.ComputeHash([byte[]]$sourceBytes))).Replace('-', '').ToLowerInvariant() }
+      finally { $sourceSha.Dispose() }
+      if ($sourceHash -cne $fileRecord.source_sha256) { throw "Release manifest source hash mismatch: $($fileRecord.path)" }
       $entry = $archive.GetEntry([string]$fileRecord.path)
       if (-not $entry) { throw "Release manifest references a missing entry: $($fileRecord.path)" }
       $sha = [System.Security.Cryptography.SHA256]::Create()

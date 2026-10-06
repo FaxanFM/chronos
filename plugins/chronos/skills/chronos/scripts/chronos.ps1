@@ -132,8 +132,18 @@ if ($Action -in @('data-plan', 'data-remove')) {
             if ($data.version -notin @(1, 2, 3, 4) -or $null -eq $data.leases -or $null -eq $data.tasks) { throw 'removal_governor_state_invalid' }
             if ($data.leases.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
                 $data.tasks.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') { throw 'removal_governor_state_invalid' }
+            $leaseAuthority = $child.Name -eq 'governor-state.json' -or
+              -not (Test-Path -LiteralPath (Join-Path $entry.path 'governor-state.json') -PathType Leaf)
             foreach ($lease in $data.leases.PSObject.Properties) {
-              if ($lease.Value.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified')) { throw 'removal_active_lease' }
+              if ($null -eq $lease.Value -or $lease.Value.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
+                  $lease.Value.status -isnot [string]) { throw 'removal_governor_state_invalid' }
+              if ($lease.Value.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified', 'blocked_legacy_write')) {
+                # Replace() retains the previous revision. A valid current state
+                # settles that lease; an orphan backup cannot prove settlement.
+                if ($leaseAuthority) { throw 'removal_active_lease' }
+                continue
+              }
+              if ($lease.Value.status -cnotin @('accepted', 'failed', 'released')) { throw 'removal_governor_state_invalid' }
             }
           }
           $files += [ordered]@{ path = $child.FullName; sha256 = (Get-FileHash -LiteralPath $child.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }

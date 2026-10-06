@@ -10,6 +10,7 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('cgi-' + [guid]::NewGuid().ToSt
 $fixtureHome = Join-Path $fixture 'codex-home'
 $codex = (Resolve-Path -LiteralPath $CodexPath).ProviderPath
 $expected = Get-Content -Raw -LiteralPath $ReleaseManifestPath | ConvertFrom-Json
+if ($expected.edition -ne 'full') { throw 'Git source installation requires a full-edition release manifest.' }
 $priorHome = $env:CODEX_HOME
 $installed = $false
 $catalogAdded = $false
@@ -62,7 +63,10 @@ try {
     }
     foreach ($record in $expected.files) {
       $file = Get-Item -LiteralPath (Join-Path $cacheRoot $record.path)
-      if ((Get-NormalizedHash $file) -ne $record.sha256) { throw ('Installed source mismatch: ' + $record.path) }
+      # ZIP metadata is version-rewritten; the Git manager installs signed source.
+      # Older release records predate these transformations and have one hash.
+      $sourceHash = if ($record.source_sha256) { $record.source_sha256 } else { $record.sha256 }
+      if ((Get-NormalizedHash $file) -ne $sourceHash) { throw ('Installed source mismatch: ' + $record.path) }
     }
     $files = @(Get-ChildItem -LiteralPath $cacheRoot -File -Recurse -Force | Where-Object { $_.Name -ne '.gitignore' })
     if ($files.Count -ne $expected.packaged_files) { throw 'Installed release-file count mismatch.' }
@@ -76,7 +80,7 @@ try {
     if (@($after.installed | Where-Object { $_.name -eq 'chronos' }).Count -ne 0) { throw 'Guide uninstall did not remove the isolated plugin.' }
     [ordered]@{
       result = 'PASS'; version = $expected.version; commit = $resolvedCommit
-      normalizedReleaseFiles = $files.Count; hookDefinitions = 5; modelTurns = 0
+      normalizedSourceFiles = $files.Count; hookDefinitions = 5; modelTurns = 0
       productionAccountChanged = $false; hookTrustChanged = $false
       hookExecution = 'not_evaluated'; scheduledExecution = 'not_evaluated'
       uninstallVerified = $true

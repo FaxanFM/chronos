@@ -11,6 +11,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps
 The builder packages only tracked plugin files, rejects untracked plugin input
 and reparse ancestors, sorts entries, assigns a fixed ZIP timestamp, and writes
 the ZIP, SHA-256 checksum, and a per-file hash/size manifest to `dist`.
+Each current file record separates `sha256` (packaged bytes) from
+`source_sha256` (LF-normalized tracked source). The builder pins README and policy
+links, and the Directory edition also changes its metadata and skill notices.
+Do not compare a Git-manager source install with a transformed ZIP hash; the
+installation-guide test checks source hashes, while release tests check ZIP
+hashes. Neither comparison replaces signature or attestation verification.
 `tests/release.tests.ps1` builds twice and requires identical artifact hashes.
 This proves same-environment reproducibility for the tested Windows runtime. It
 does not claim byte identity across arbitrary ZIP implementations or operating

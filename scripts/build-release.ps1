@@ -64,6 +64,15 @@ foreach ($file in $files) {
   }
 }
 
+function Get-NormalizedSourceBytes {
+  param([System.IO.FileInfo]$File)
+  if ($File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @('.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt')) {
+    $text = [IO.File]::ReadAllText($File.FullName).Replace("`r`n", "`n").Replace("`r", "`n")
+    return ,([Text.UTF8Encoding]::new($false).GetBytes($text))
+  }
+  return ,([IO.File]::ReadAllBytes($File.FullName))
+}
+
 function Get-PackagedBytes {
   param([System.IO.FileInfo]$File)
   $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @(
@@ -171,6 +180,7 @@ try {
           path = $relative
           bytes = [long]$bytes.Length
           sha256 = Get-BytesHash $bytes
+          source_sha256 = Get-BytesHash (Get-NormalizedSourceBytes $file)
         })
       } finally {
         $entryStream.Dispose()

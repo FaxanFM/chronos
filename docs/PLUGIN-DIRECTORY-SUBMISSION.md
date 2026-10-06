@@ -2,16 +2,19 @@
 
 ## Local Usability Remediation Build - Not Submitted
 
-October 6, 2026: the new local candidate adds native scoped removal, a tested
+October 6, 2026, after code-review corrections: the new local candidate adds native scoped removal, a tested
 global hooks feature-control procedure and public signing trust/verification.
-Full ZIP SHA-256 `2fa6a9202df710fa393cbc29417f959750cb585f346755b62879b86a2750d72a`
+Full ZIP SHA-256 `02cadf9e23f489329268055ff211621970a607362884efb8f1e0034561281d42`
 (14 files); Directory ZIP SHA-256
-`a5d7f5ec3538eb0b3afdb080133b873198113ef88fb627c25c92fe19834b0cdc`
+`c51e02198f00c95c8449c8608cfc6cadc2ce06d8e054f84eeb5f381f3f0c9402`
 (12 files, no hooks). These bytes are not uploaded or published. Local removal,
 Inspector, Heartbeat, Supervision, Governor (49 scenarios), reproducibility,
 Directory contracts, hook configuration control and signing-trust checks pass.
 Compatibility evidence for unchanged module hashes is detailed in the audit
-response. Independent candidate review remains pending; do not use
+response. The maintainer code review caught and corrected an unresolved-lease
+removal guard, stale-backup precedence and the distinction between source and
+packaged file hashes.
+This is not an independent external audit or live desktop certification; do not use
 the October 1 review receipt as approval of these different bytes.
 
 October 5, 2026: the modified working tree builds a different full
