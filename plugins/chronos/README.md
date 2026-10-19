@@ -2,10 +2,11 @@
 
 # Chronos for Codex - Control Room and workflow orchestration
 
-The v0.10.0 candidate bundles the Control Room launcher and dashboard. After
+The v0.10.2 candidate bundles the Control Room launcher, dashboard and guided
+onboarding, with model and thinking-level choices for each stage. After
 installation, start with:
 
-> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+> Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
 Chronos launches its packaged local runtime and opens the UI; the user does not
 start a server manually. It requires a local Codex executor and Node 22+, prefers

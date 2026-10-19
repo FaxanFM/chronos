@@ -38,7 +38,7 @@ marketplace package uses the same guided setup and controls without lifecycle
 hooks. A GitHub release does not make a marketplace submission approved or live.
 After installation, use one starter:
 
-> Turn my goal and selected framework files into a ready-to-review Chronos Control Room workflow. Recommend models and thinking levels, explain permissions, and open it paused.
+> Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
 Chronos starts and opens the private local dashboard itself. No manual server
 command, repository clone, npm install, hook patch or scheduled Governor is

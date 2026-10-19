@@ -3,15 +3,17 @@
 See [Current Versions](../README.md#current-versions) for publication records.
 Source changes here do not update an installed or submitted package.
 
-## Control Room Setup In v0.10.0
+## Control Room Setup In v0.10.2
 
-The v0.10.0 candidate makes this the primary setup starter for both editions:
+The v0.10.2 candidate uses this primary setup starter for both editions:
 
-> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+> Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
 The packaged onboarding skill is `chronos-control-room`. It uses the current
-workspace, a Software factory template and one execution slot unless the user
-chooses otherwise. It resolves bundled or installed Node 22+ and local Codex,
+workspace and selected framework files or folders to prepare a paused workflow,
+with suggested host-supported models and thinking levels. Without a custom
+plan, it uses the Software factory template and one execution slot unless the
+user chooses otherwise. It resolves bundled or installed Node 22+ and local Codex,
 launches the included runtime, verifies its private health response and opens
 the dashboard. Users do not copy a command or manually keep a server terminal
 open. A repeat request reuses the same workspace instance. A different running

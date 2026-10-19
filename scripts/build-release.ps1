@@ -129,9 +129,7 @@ diagnostics. It has no
 lifecycle hook definitions or hook installer. Core governance uses current
 local host statuses; missing health evidence remains partial or unsupported.
 
-Start with: Turn my goal and selected framework files into a ready-to-review
-Chronos Control Room workflow. Recommend models and thinking levels, explain
-permissions, and open it paused.
+Start with: Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
 Setup starts and reopens the local dashboard without a manual server command.
 It needs a local Codex executor and Node 22+; the onboarding skill prefers bundled

@@ -46,7 +46,7 @@ After installing the published GitHub edition, or after the reviewed Directory
 update is available, in a supported local Codex environment,
 choose its setup starter or ask:
 
-> Turn my goal and selected framework files into a ready-to-review Chronos Control Room workflow. Recommend models and thinking levels, explain permissions, and open it paused.
+> Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
 Chronos selects the current project unless you choose another, starts its
 packaged runtime and opens the dashboard. You do not start a server, clone the
