@@ -58,6 +58,9 @@ try {
   if ([string]$manifest.interface.shortDescription.Length -gt 30) {
     throw "Directory short description must be at most 30 characters."
   }
+  if ([string]$manifest.interface.supportURL -ne 'https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md') {
+    throw 'Directory support must resolve to the public Chronos support guide.'
+  }
   $defaultPrompts = @($manifest.interface.defaultPrompt)
   if ($defaultPrompts.Count -ne 3) {
     throw "Directory defaultPrompt must contain exactly three distinct product actions."

@@ -26,6 +26,7 @@
     "category": "Developer Tools",
     "capabilities": ["One-prompt Control Room setup", "Visual workflow editor", "Bot pools and stage queues", "Isolated workspace execution", "Native verification and review gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
+    "supportURL": "https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [

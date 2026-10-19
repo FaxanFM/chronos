@@ -1,5 +1,28 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.10.0 Publication Metadata Correction
+
+The first portal upload created draft `appsub_6ad633c8ddac81919c18de8361e9fde8`
+on the existing Chronos listing. Its live metadata check requires a support URL,
+even though the skills-only documentation does not require every MCP listing URL.
+The manifest now includes the existing public `SUPPORT.md` guide, with source and
+Directory-package regressions. No runtime, hooks, permissions or version changed.
+
+Corrected full ZIP SHA-256:
+`8bb96eff6694570cd9275d111c23898012bc5ca96fdf0726f7f87d43351142d5`.
+Corrected Directory ZIP SHA-256:
+`d1cc4615050e8de9604514c15031b794f288d9573034f0ff732305c092d389f6`.
+Both are in `dist/chronos-v0.10.0-support-fix/` and supersede the earlier candidate
+hashes below. The Directory build uses the release-tag policy URLs.
+
+PR #4 was merged. The first signed v0.10.0 tag points to
+`63399c5190dc2162c46d86aa021fbda3f9365a64`; its release workflow was stopped before
+publication after the portal finding. No immutable v0.10.0 release asset exists
+yet. Correcting that unpublished tag requires explicit user approval; do not
+silently replace a public tag or describe this draft as submitted or published.
+The original source remains in Git history. Version 1.0 is the next milestone,
+not the current release.
+
 ## v0.10.0 Control Room Candidate (Prepared, Not Submitted)
 
 Version: `0.10.0`. This is the prepared candidate on the `codex/chronos-control-room`
