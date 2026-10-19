@@ -1,5 +1,32 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.10.1 Patch Release And Submission Candidate
+
+Version: `0.10.1`.
+
+The user chose to preserve the original v0.10.0 tag and release the public-support
+metadata correction as v0.10.1. Version 1.0 remains a later milestone. The original
+v0.10.0 tag object is `2f431005de342f388fe4badd923b10c320337cb9`, pointing to
+`63399c5190dc2162c46d86aa021fbda3f9365a64`; it must not be replaced.
+
+The patch adds the public support guide required by the live portal, plus explicit
+source and Directory-package regressions. Runtime executable files are unchanged.
+The plugin manifest and runtime payload version are 0.10.1.
+
+Full edition: `chronos-v0.10.1.zip`, 31 files, five opt-in hooks, SHA-256
+`bc59db98bfc3bdbf8ef9d5fd496bf5dda6054c7b41cb7e4e8385354429148daf`.
+Directory edition: `chronos-v0.10.1-skills-only.zip`, 29 files, zero hooks, SHA-256
+`ab1d1fb2f61f2c80c25a80e5dafee69e9958ec5f7f1fd4cfba033afc8132956d`.
+Local artifacts and per-file receipts are in `dist/chronos-v0.10.1-final/`.
+Release destination: https://github.com/FaxanFM/chronos/releases/tag/v0.10.1.
+
+Publication and review submission are pending. Require the signed tag, passing
+release workflow, immutable assets, matching hashes and attestation before final
+marketplace submission. Submit the published Directory asset to the existing
+Chronos listing, not a new listing or the older approved 0.9.4 package. Keep the
+full hook-enabled edition on GitHub. Record the publication and review receipts
+when complete; a draft upload is not a submitted or live update.
+
 ## v0.10.0 Publication Metadata Correction
 
 The first portal upload created draft `appsub_6ad633c8ddac81919c18de8361e9fde8`

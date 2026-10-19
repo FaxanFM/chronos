@@ -1,6 +1,6 @@
 # Chronos Control Room
 
-## Packaged v0.10.0 candidate
+## Packaged v0.10.1 candidate
 
 The current plugin candidate packages this Control Room as the
 `chronos-control-room` onboarding skill. Users can ask Chronos to set up the room in

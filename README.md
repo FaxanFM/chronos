@@ -32,7 +32,7 @@ used to develop and distribute it.
 
 ## Chronos Control Room
 
-The **v0.10.0 candidate includes Control Room inside the plugin**, with a
+The **v0.10.1 candidate includes Control Room inside the plugin**, with a
 packaged launcher and onboarding skill. It is not yet a published marketplace
 update. After this candidate is installed, use one starter:
 
@@ -72,11 +72,14 @@ check; confirm the listing and release before installing.
 | --- | --- | --- |
 | Directory skills-only | Live listing v0.9.2; v0.9.4 submitted for review | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
 | GitHub full | Published v0.9.3 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.9.3); five optional hooks |
-| Control Room preview | Unreleased v0.10.0 candidate; publication pending | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md); not in the current Directory package |
+| Control Room preview | Unreleased v0.10.1 candidate; publication pending | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md); not in the current Directory package |
 | Legacy onboarding preview | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
 
-The current source is not the previously uploaded package. Audit repairs
-require a new signed candidate and review before publication.
+The signed v0.10.0 tag is retained as the original candidate history. The
+v0.10.1 candidate carries the support-metadata correction; it remains pending
+review and publication. The current source is not the previously uploaded
+package. Audit repairs require a new signed candidate and review before
+publication.
 
 Chronos is available to eligible users
 across plans, including Free, subject to region, supported surface, workspace

@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Launch a local Codex workflow dashboard with one setup prompt, isolated task execution, optional outcome and tool-call learning, and Windows diagnostics.",
   "requires_local_executor": true,
   "author": {
