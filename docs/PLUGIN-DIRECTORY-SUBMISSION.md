@@ -2,7 +2,7 @@
 
 ## v0.10.0 Control Room Candidate (Prepared, Not Submitted)
 
-Version: `0.10.0`. This is the current local candidate on the `codex/chronos-control-room`
+Version: `0.10.0`. This is the prepared candidate on the `codex/chronos-control-room`
 branch. It is not uploaded, submitted, approved, or published, and it does not replace
 the immutable v0.9.2 listing. The candidate adds a packaged, one-prompt Control Room
 onboarding skill. On a supported desktop host it discovers the authenticated local
@@ -33,10 +33,33 @@ skills-only ZIP bound to verified signed source, with its own immutable hash and
 Do not reuse historical hashes
 below or upload this working candidate by implication.
 
-Prepared artifacts: `chronos-v0.10.0.zip` (31 files), SHA-256
+Signed package-source commit:
+[`e0bf2d95c104a9206bc41cee977c2d0fa7dc3766`](https://github.com/FaxanFM/chronos/commit/e0bf2d95c104a9206bc41cee977c2d0fa7dc3766).
+Its SSH signature verifies against `docs/security/allowed_signers`. Documentation-only
+commits may follow on the same branch without changing the packaged source files.
+
+Prepared artifacts in `dist/chronos-v0.10.0-marketplace-ready/`:
+`chronos-v0.10.0.zip` (31 files), SHA-256
 `598f508c5d193fc9a1e5933ae142126797b3a88aa4072a74bc4766b01736ee88`;
 `chronos-v0.10.0-skills-only.zip` (29 files, no hooks), SHA-256
-`a99c292f95a015e050ecd23c36ce89317334c7ad528b87858ac0aef06b122aac`.
+`cf2370ffbb5418c0badbfe5e0acaa29f7372bbc1a73e3cf6cd4b498621ceda64`.
+Only the skills-only ZIP is the prepared Directory upload. Its policy URLs and
+`policy_source_ref` bind to the signed commit above, not a future release tag.
+The neighboring `.sha256` and `.release.json` files bind the artifact and each
+packaged/source file hash. The ZIP itself has no separate detached signature.
+The full ZIP retains the default future-tag policy URLs and is not upload-ready
+until a separately authorized release creates that tag. Neither artifact is a
+published release asset.
+
+Rebuild the prepared Directory bytes from this source history with Windows
+PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Version 0.10.0 -Edition Directory -PolicyCommit e0bf2d95c104a9206bc41cee977c2d0fa7dc3766 -OutputDirectory dist/chronos-v0.10.0-marketplace-ready
+```
+
+The execution-policy flag applies only to that build process; it does not change
+the user's saved PowerShell policy or grant Control Room execution consent.
 Reserved release URL: https://github.com/FaxanFM/chronos/releases/tag/v0.10.0
 (not published). Source is under review in https://github.com/FaxanFM/chronos/pull/4.
 
@@ -52,11 +75,11 @@ Before submission:
    A fresh hardened four-stage workflow also passed with four actual model turns,
    native verification exit zero, unchanged source and a held human gate. No
    credentials were copied and the production profile was not changed.
-2. Create and verify the signed source commit, push the existing Control Room
-   branch, and obtain the current-commit Windows and Control Room CI results.
-   The current local changes are not yet the published PR head.
-3. Build both editions from that clean signed identity and confirm these ZIP
-   hashes still reproduce. Review the commit and source/file-hash bindings.
+2. Verify the signed source commit and the existing Control Room PR's current
+   head. Require passing Windows and Control Room CI results for that head;
+   historical green checks are not approval of a later commit.
+3. Rebuild the Directory edition with the exact `PolicyCommit` above and confirm
+   its ZIP hash reproduces. Review the signed commit and source/file-hash bindings.
 4. Obtain release approval before merging, tagging or publishing immutable assets.
    The final Directory package must pin privacy/terms to public signed source;
    a reserved, nonexistent release tag is not an upload-ready policy URL.
