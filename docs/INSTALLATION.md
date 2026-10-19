@@ -1,5 +1,10 @@
 # Install Chronos For Codex
 
+For the v0.10.0 Control Room candidate, use the separate
+[one-prompt setup guide](CONTROL-ROOM-PLUGIN.md). It bundles the dashboard and
+launcher; no hooks or scheduled Governor are required. Publication is pending,
+so the historical v0.9.4 source pin below does not install Control Room.
+
 ## Choose Your Route
 
 Ordinary users: choose a verified published edition in [Current Versions](../README.md#current-versions).

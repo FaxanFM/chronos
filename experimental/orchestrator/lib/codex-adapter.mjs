@@ -10,6 +10,9 @@ const MAX_SUMMARY = 2000;
 const REQUEST_TIMEOUT = 10000;
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const pathKey = (value) => process.platform === 'win32' ? resolve(value).toLowerCase() : resolve(value);
+const EVIDENCE_LIMIT = 256;
+const EVIDENCE_TYPES = new Set(['commandExecution', 'webSearch', 'mcpToolCall', 'fileChange']);
+const NON_TOOL_ITEM_TYPES = new Set(['agentMessage', 'userMessage', 'reasoning', 'plan', 'contextCompaction']);
 
 export class CodexAdapter extends EventEmitter {
   constructor({ codexPath, cwd, codexHome, transportFactory, spawnProc = spawn } = {}) {
@@ -52,7 +55,9 @@ export class CodexAdapter extends EventEmitter {
       // untracked turns, account tools or hook side effects in this process.
       const disabled = ['hooks', 'apps', 'plugins', 'goals', 'multi_agent', 'multi_agent_v2', 'browser_use', 'computer_use', 'in_app_browser', 'in_app_local_automation'];
       const featureArgs = disabled.flatMap((feature) => ['--disable', feature]);
-      this.child = this.spawnProc(path, ['app-server', ...featureArgs, '--config', 'mcp_servers={}', '--config', 'web_search="disabled"', '--listen', 'stdio://'], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const executable = /\.(?:js|mjs|cjs)$/i.test(path) ? process.execPath : path;
+      const commandArgs = /\.(?:js|mjs|cjs)$/i.test(path) ? [path, 'app-server', ...featureArgs, '--config', 'mcp_servers={}', '--config', 'web_search="disabled"', '--listen', 'stdio://'] : ['app-server', ...featureArgs, '--config', 'mcp_servers={}', '--config', 'web_search="disabled"', '--listen', 'stdio://'];
+      this.child = this.spawnProc(executable, commandArgs, { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       this.transport = this.#childTransport(this.child, generation);
     } else {
       this.transport = await this.transportFactory();
@@ -143,7 +148,7 @@ export class CodexAdapter extends EventEmitter {
     if (typeof threadId !== 'string' || !threadId) throw new Error('thread_start_missing_id');
     await this.#verifyIsolation(threadId);
     // Register before turn/start so an immediate notification cannot race ownership.
-    this.owned.set(threadId, { taskId: task.id || threadId, turnId: null, active: true, policy: expectedType });
+    this.owned.set(threadId, { taskId: task.id || threadId, turnId: null, active: true, policy: expectedType, evidence: this.#newEvidence() });
     try {
       const turn = await this.#request('turn/start', { threadId, cwd, approvalPolicy: 'never', sandboxPolicy: this.sandboxPolicy(cwd, policy), input: [{ type: 'text', text: task.instruction }] });
       const turnId = turn?.turn?.id || turn?.turnId;
@@ -326,6 +331,7 @@ export class CodexAdapter extends EventEmitter {
     if (owned.turnId && turnId && owned.turnId !== turnId) return;
     const nestedStatus = params.turn?.status?.type || params.turn?.status;
     if (owned) this.diagnosticsState.lastStatus = typeof nestedStatus === 'string' ? nestedStatus.slice(0, 40) : null;
+    if (/item\/(started|completed)$/.test(method)) this.#observeItem(owned, method, params.item);
     if (/turn\/completed$/.test(method) && nestedStatus === 'completed') this.#emitTask(params.threadId, 'completed', turnId, owned.summary);
     else if (/turn\/(failed|error)$/.test(method) || nestedStatus === 'failed' || nestedStatus === 'error') this.#emitTask(params.threadId, 'failed', turnId, this.#boundedText(params));
     else if (/turn\/interrupted$/.test(method) || nestedStatus === 'interrupted') this.#emitTask(params.threadId, 'interrupted', turnId);
@@ -339,7 +345,34 @@ export class CodexAdapter extends EventEmitter {
   #emitTask(threadId, kind, turnId, text) {
     const owned = this.owned.get(threadId); if (!owned) return;
     if (['completed', 'failed', 'interrupted'].includes(kind)) owned.active = false;
-    this.emit('task-event', { taskId: owned.taskId, kind, turnId, ...(text ? { summary: text } : {}) });
+    this.emit('task-event', { taskId: owned.taskId, kind, turnId, ...(text ? { summary: text } : {}), ...(['completed', 'failed', 'interrupted'].includes(kind) ? { executionEvidence: this.#finishEvidence(owned) } : {}) });
+  }
+
+  #newEvidence() { return { startedAt: Date.now(), tracked: new Map(), counts: Object.fromEntries([...EVIDENCE_TYPES, 'unknownItem'].map((type) => [type, { started: 0, completed: 0, failed: 0 }])), partial: false, partialReasons: [] }; }
+  #observeItem(owned, method, item) {
+    const type = typeof item?.type === 'string' ? item.type : '';
+    if (NON_TOOL_ITEM_TYPES.has(type)) return;
+    const bucket = EVIDENCE_TYPES.has(type) ? type : 'unknownItem';
+    if (!EVIDENCE_TYPES.has(type)) { owned.evidence.partial = true; this.#reason(owned.evidence, 'unknown-item-type'); }
+    const id = typeof item?.id === 'string' && item.id ? item.id : null;
+    const started = method.endsWith('/started');
+    if (!id) { owned.evidence.partial = true; this.#reason(owned.evidence, 'missing-item-id'); return; }
+    if (owned.evidence.tracked.size >= EVIDENCE_LIMIT && !owned.evidence.tracked.has(id)) { owned.evidence.partial = true; this.#reason(owned.evidence, 'item-limit'); return; }
+    if (started) {
+      if (owned.evidence.tracked.has(id)) { owned.evidence.partial = true; this.#reason(owned.evidence, 'duplicate-item'); return; }
+      owned.evidence.tracked.set(id, { bucket }); owned.evidence.counts[bucket].started++;
+    } else {
+      const record = owned.evidence.tracked.get(id);
+      if (!record) { owned.evidence.partial = true; this.#reason(owned.evidence, 'unmatched-item'); return; }
+      if (record.completed) { owned.evidence.partial = true; this.#reason(owned.evidence, 'duplicate-item'); return; }
+      record.completed = true; const status = item?.status?.type || item?.status;
+      if (status === 'failed' || status === 'error' || (record.bucket === 'commandExecution' && Number.isFinite(item?.exitCode) && item.exitCode !== 0)) owned.evidence.counts[record.bucket].failed++; else owned.evidence.counts[record.bucket].completed++;
+    }
+  }
+  #reason(evidence, reason) { if (!evidence.partialReasons.includes(reason)) evidence.partialReasons.push(reason); }
+  #finishEvidence(owned) {
+    const evidence = owned.evidence; for (const record of evidence.tracked.values()) if (!record.completed) { evidence.partial = true; this.#reason(evidence, 'missing-completion'); }
+    return { coverage: 'observed_events_only', observedWallMs: Math.max(0, Date.now() - evidence.startedAt), counts: evidence.counts, partial: evidence.partial, ...(evidence.partialReasons.length ? { partialReasons: evidence.partialReasons } : {}) };
   }
 
   #boundedText(value) {

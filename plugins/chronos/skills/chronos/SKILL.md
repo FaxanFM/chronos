@@ -5,6 +5,11 @@ description: Set up, check, pause, or remove Chronos on Windows and explain its 
 
 # Chronos
 
+For Control Room launch, dashboard, visual pipelines or managed workspace-write
+requests, use the sibling `chronos-control-room` skill first. Its packaged runtime
+has its own consent and does not need this legacy Governor bootstrap. Keep this
+skill for Windows diagnostics, hook review and explicitly requested chat governance.
+
 ## Guided onboarding
 
 For a setup starter or first-use setup request, explain the choices below before

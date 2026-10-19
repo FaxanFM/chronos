@@ -25,7 +25,7 @@ function Invoke-PluginJson {
 
 function Get-NormalizedHash {
   param([IO.FileInfo]$File)
-  $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @('.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt')
+  $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @('.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt', '.mjs', '.js', '.css', '.html')
   if ($isText) {
     $text = [IO.File]::ReadAllText($File.FullName).Replace("`r`n", "`n").Replace("`r", "`n")
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes($text)
@@ -58,7 +58,8 @@ try {
     }
     $cacheRoot = Join-Path $fixtureHome ('plugins\cache\chronos\chronos\' + $expected.version)
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $cacheRoot '.codex-plugin\plugin.json') | ConvertFrom-Json
-    if ($manifest.hooks -ne './hooks/hooks.json' -or $manifest.extensions.'com.openai'.onboardingSkill -ne './skills/chronos/SKILL.md') {
+    $expectedOnboarding = if ([version]$expected.version -ge [version]'0.10.0') { './skills/chronos-control-room/SKILL.md' } else { './skills/chronos/SKILL.md' }
+    if ($manifest.hooks -ne './hooks/hooks.json' -or $manifest.extensions.'com.openai'.onboardingSkill -ne $expectedOnboarding) {
       throw 'The full install lost hooks or onboarding.'
     }
     foreach ($record in $expected.files) {

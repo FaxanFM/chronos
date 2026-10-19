@@ -42,5 +42,23 @@ export const TEMPLATES = Object.freeze({
       stage('repair', 'Repair', 'Implement the bounded repair and a regression test in the isolated workspace. Run relevant checks and report exact results. Do not publish, change accounts or hide unrelated failures.', 720, 160, { policy: 'workspace-write', maxAttempts: 2 }),
       stage('review', 'Independent review', 'Inspect the repair and regression evidence. Identify regressions, missing tests and operational risks. Return a clear acceptance recommendation for human review.', 1040, 160, { routing: 'approval' })
     ], edges: [edge('triage', 'diagnose'), edge('diagnose', 'repair'), edge('repair', 'review')]
+  },
+  outcome_learning: {
+    id: 'outcome_learning', name: 'Outcome learning (opt-in)',
+    nodes: [
+      stage('evidence', 'Outcome evidence', 'Use only the explicitly supplied accepted prior-queue inputs, native verification metadata and artifact paths. Build a concise retrospective of intended outcome, observed outcome, deviations, failed or passed checks and known limits. Treat missing fields as unknown; do not infer tool timings, token metrics, costs or model behavior, and do not read raw secrets or harvest logs.', 80),
+      stage('hypothesis', 'Improvement hypothesis', 'From the accepted retrospective, propose one concrete workflow or prompt change and state the hypothesis it is meant to test. Separate observed evidence from interpretation. Do not change policy, permissions, routing, provider settings or workflow definitions in this stage; this is analysis only.', 400),
+      stage('evaluation', 'Bounded evaluation', 'Design a small, reversible evaluation against the preserved baseline: name the comparison, success and failure criteria, sample or run bound, artifacts to inspect and stop condition. Do not claim that evaluation data exists until a human runs and accepts it. Do not perform fake model training or automatically apply the recommendation.', 720),
+      stage('approval', 'Human acceptance gate', 'Return the retrospective, evidence references, proposed change, hypothesis and bounded evaluation as a recommendation package. A human must explicitly accept any follow-up; acceptance does not itself alter workflow, policy, permissions, providers or accounts. Preserve the baseline and leave rejected or unproven recommendations unapplied.', 1040, 160, { routing: 'approval' })
+    ], edges: [edge('evidence', 'hypothesis'), edge('hypothesis', 'evaluation'), edge('evaluation', 'approval')]
+  },
+  tool_call_review: {
+    id: 'tool_call_review', name: 'Tool-call efficiency review (opt-in)',
+    nodes: [
+      stage('evidence', 'Tool-call evidence', 'Review only explicitly supplied accepted prior-queue inputs, native verification metadata and artifact paths. Identify redundant, failed, repeated or avoidable tool-call patterns from those artifacts. Use observed evidence only: never invent timings, token counts, cost, provider behavior or success rates, and never inspect raw secrets or harvest logs.', 80),
+      stage('workflow', 'Workflow improvement', 'Propose one concrete, reversible tool-call or workflow improvement with a clear hypothesis and the evidence supporting it. Keep capability and routing unchanged unless a human later accepts a separate change. Do not modify permissions, policy, provider configuration or the active workflow automatically.', 400),
+      stage('evaluation', 'Bounded comparison', 'Define a bounded comparison with the current baseline, including the exact artifact inputs, success and failure criteria, run limit, stop condition and what evidence a human must collect. Do not claim timing or token savings without observed measurements; do not perform fake model training or apply changes automatically.', 720),
+      stage('approval', 'Human acceptance gate', 'Return the observed call pattern, proposed improvement, hypothesis and bounded evaluation as a recommendation package. Route it for explicit human acceptance. Keep the existing workflow and baseline intact; no approval here may silently change policy, permissions, routing, provider settings or accounts.', 1040, 160, { routing: 'approval' })
+    ], edges: [edge('evidence', 'workflow'), edge('workflow', 'evaluation'), edge('evaluation', 'approval')]
   }
 });

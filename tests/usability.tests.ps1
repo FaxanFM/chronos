@@ -9,7 +9,9 @@ function Read-Text([string]$Path) { [IO.File]::ReadAllText((Join-Path $repo $Pat
 function Require([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 $manifest = Read-Text 'plugins/chronos/.codex-plugin/plugin.json' | ConvertFrom-Json
 $fullPrompt = [string]$manifest.interface.defaultPrompt[0]
-$directoryPrompt = 'Set up Chronos for my active chats: explain privacy, configure one Governor, and verify scope and Heartbeat coverage.'
+$directoryPrompt = 'Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.'
+$legacyPrompt = 'Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.'
+$controlRoom = Read-Text 'plugins/chronos/skills/chronos-control-room/SKILL.md'
 $core = Read-Text 'plugins/chronos/skills/chronos/SKILL.md'
 $governor = Read-Text 'plugins/chronos/skills/chronos-governor/SKILL.md'
 $onboarding = Read-Text 'docs/ONBOARDING.md'
@@ -27,13 +29,17 @@ foreach ($path in $docs) {
   }
   $normalized = ($text -replace '(?m)^\s*>\s*', '' -replace '\*\*', '' -replace '\s+', ' ')
   foreach ($match in [regex]::Matches($normalized, 'Set up Chronos[^.!?]*[.!?]')) {
-    Require ($match.Value -eq $fullPrompt -or $match.Value -eq $directoryPrompt) "Setup prompt differs from its edition: $path; $($match.Value)"
+    Require ($match.Value -eq $fullPrompt -or $match.Value -eq $directoryPrompt -or $match.Value -eq $legacyPrompt -or $match.Value -eq 'Set up Chronos for my active chats: explain privacy, configure one Governor, and verify scope and Heartbeat coverage.') "Setup prompt differs from its edition: $path; $($match.Value)"
   }
 }
 foreach ($text in @($core, $governor)) {
   Require ($text.Contains('automaticDiagnosticsAllowed=yes')) 'Missing affirmative diagnostics gate.'
   Require (($text -replace '\s+', ' ').Contains('setup chat before')) 'Onboarding must finish in the setup chat.'
 }
+Require (($controlRoom -replace '\s+', ' ').Contains('privacy')) 'Control Room onboarding must explain privacy.'
+Require (($controlRoom -replace '\s+', ' ').Contains('permission')) 'Control Room onboarding must explain permissions.'
+Require (($controlRoom -replace '\s+', ' ').Contains('local executor')) 'Control Room must use the local executor.'
+Require (($controlRoom -replace '\s+', ' ').Contains('scheduler') -eq $false) 'Control Room must not imply an unattended scheduler.'
 Require ($core.Contains('Skip briefing plus on-request')) 'Skipped briefing regression scenario missing.'
 Require ($core.Contains('A one-off briefing is not standing permission')) 'One-off consent must not become standing consent.'
 Require ($governor.Contains('Absent diagnostic permission means no')) 'Governor assignment must fail closed on missing diagnostic permission.'
@@ -57,7 +63,7 @@ foreach ($field in @('codex_version', 'edition', 'hook_state')) {
 }
 Require ($issue.Contains('installation failure')) 'Install failures must be reportable.'
 Require ((Read-Text 'PRIVACY.md').Contains('unsalted SHA-256 hashes of the Windows account SID')) 'Missing hash privacy disclosure.'
-Require ($manifest.description.Contains('Windows only')) 'Listing must disclose platform support.'
+Require ($manifest.requires_local_executor -and $manifest.interface.longDescription.Contains('Node 22+') -and $manifest.interface.longDescription.Contains('Windows diagnostics')) 'Listing must disclose local runtime prerequisites and Windows diagnostic scope.'
 Require ((Read-Text 'CHANGELOG.md').Contains('## v0.9.3')) 'Missing v0.9.3 changelog.'
 Require ((Read-Text 'CHANGELOG.md') -match '(?s)## v0\.9\.4.*?Hooks: unchanged') 'Missing current hook-change notice.'
 Require ($core.Contains('336-cycle or 14-day') -and $core.Contains('recurrence pauses')) 'Rotation disclosure missing.'

@@ -1,5 +1,27 @@
 # Chronos Control Room
 
+## Packaged v0.10.0 candidate
+
+The current plugin candidate packages this Control Room as the
+`chronos-control-room` onboarding skill. Users can ask Chronos to set up the room in
+one prompt; the skill launches the bundled runtime, discovers the authenticated local
+Codex executable, and returns a private loopback link. There is no separate server
+command for normal onboarding. The room starts paused and disconnected, with execution
+and workspace-write consent still explicit.
+
+The packaged desktop path requires the local executor, Node.js 22+, an authenticated
+Codex installation, and local Git for worktree-backed stages. It is tested locally on
+Windows with Node.js 24, Edge and Codex CLI 0.163.0-alpha.10.2. This is not a claim of
+compatibility with every Codex build or operating system. The package does not include
+hooks, an MCP server, a hosted dashboard, or publisher telemetry. The full source
+edition may include separately documented, opt-in hooks.
+
+The onboarding can select the software-factory, research, engineering, or marketing
+templates. `outcome_learning` and `tool_call_review` are optional read-only templates:
+they inspect bounded native execution evidence and produce recommendations without
+training models, changing permissions, or applying workflow changes automatically.
+Their timing, token and cost fields remain unknown when the host does not expose them.
+
 An open-source, opt-in local task queue with a browser control room. It is not included in the signed v0.9.4
 ZIP, installed into your Codex profile, or submitted to the Plugin Directory.
 It does not attach to existing desktop chats. It creates its own managed tasks

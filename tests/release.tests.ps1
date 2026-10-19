@@ -19,6 +19,7 @@ $sanitizedResultPath = Join-Path $repoRoot ".github\ISSUE_TEMPLATE\sanitized-res
 $version = [string](Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json).version
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 if ($manifest.hooks -ne './hooks/hooks.json') { throw 'Manifest must explicitly bind the audited hooks.' }
+if (-not $manifest.requires_local_executor) { throw 'Manifest must require the local executor for Control Room setup.' }
 $marketplace = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".agents\plugins\marketplace.json") | ConvertFrom-Json
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("chronos-release-tests-" + [guid]::NewGuid())
 $supervisionTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Chronos\Supervision\release-tests-" + [guid]::NewGuid())
@@ -43,7 +44,7 @@ try {
     throw "Inbox Windows PowerShell 5.1 was not found at its system path."
   }
   $onboardingSkill = [string]$manifest.extensions.'com.openai'.onboardingSkill
-  if ($onboardingSkill -ne './skills/chronos/SKILL.md') {
+  if ($onboardingSkill -ne './skills/chronos-control-room/SKILL.md') {
     throw 'Onboarding must resolve to the included core skill, not an external installer.'
   }
   $onboardingPath = Join-Path (Split-Path -Parent (Split-Path -Parent $manifestPath)) $onboardingSkill.Substring(2)
@@ -73,9 +74,9 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('set up chronos', 'active chats', 'privacy', 'optional hooks', 'one governor', 'verify') },
-    @{ Index = 1; Terms = @('chronos health briefing', 'inspect pc', 'quota', 'reviews', 'rules', 'sqlite', 'heartbeat coverage', 'evidence', 'unknowns') },
-    @{ Index = 2; Terms = @('chronos governor', 'repo review', 'bounded read tasks', 'verify each result', 'edits', 'decisions') }
+    @{ Index = 0; Terms = @('control room', 'workspace', 'template', 'privacy', 'permissions') },
+    @{ Index = 1; Terms = @('completed workflow', 'outcome learning', 'tool-call', 'improvements', 'without applying') },
+    @{ Index = 2; Terms = @('control room', 'health check', 'windows diagnostics', 'consent') }
   )
   foreach ($promptRequirement in $promptRequirements) {
     $promptIndex = [int]$promptRequirement.Index
@@ -89,7 +90,7 @@ try {
   $listingCopy = (([string]$manifest.description) + ' ' +
     ([string]$manifest.interface.shortDescription) + ' ' +
     ([string]$manifest.interface.longDescription)).ToLowerInvariant()
-  foreach ($required in @('one local codex governor', 'heartbeats', 'windows', 'read-only', 'no publisher telemetry')) {
+  foreach ($required in @('control room', 'completed workflows', 'windows diagnostics', 'no publisher telemetry')) {
     if (-not $listingCopy.Contains($required)) {
       throw "Directory listing copy is missing a core product value or boundary: $required"
     }
@@ -461,7 +462,7 @@ try {
       if ($entry.LastWriteTime.DateTime -ne [DateTime]::new(1980, 1, 1, 0, 0, 0, [DateTimeKind]::Unspecified)) {
         throw "Release entry has a non-reproducible timestamp: $($entry.FullName)"
       }
-      if ($entry.Name -eq 'LICENSE' -or [System.IO.Path]::GetExtension($entry.Name).ToLowerInvariant() -in @('.json', '.md', '.ps1', '.cmd', '.yaml', '.yml', '.txt')) {
+      if ($entry.Name -eq 'LICENSE' -or [System.IO.Path]::GetExtension($entry.Name).ToLowerInvariant() -in @('.json', '.md', '.ps1', '.cmd', '.yaml', '.yml', '.txt', '.mjs', '.js', '.css', '.html')) {
         $reader = [System.IO.StreamReader]::new($entry.Open(), [System.Text.Encoding]::UTF8)
         try { $entryText = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($entryText.Contains("`r")) { throw "Packaged text is not normalized to LF: $($entry.FullName)" }
@@ -478,7 +479,7 @@ try {
         }
       }
     }
-    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/hook-intake.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
+    foreach ($required in @('.codex-plugin/plugin.json', 'hooks/hooks.json', 'skills/chronos-control-room/SKILL.md', 'skills/chronos/SKILL.md', 'skills/chronos/scripts/chronos.cmd', 'skills/chronos/scripts/heartbeat.ps1', 'skills/chronos/scripts/hook-intake.ps1', 'skills/chronos/scripts/session-registry.ps1', 'skills/chronos-governor/SKILL.md')) {
       if ($names -notcontains $required) { throw "Release is missing $required." }
     }
     if ($names -contains '.gitignore' -or $names -match '^docs/' -or $names -match '^tests/') {
@@ -503,8 +504,8 @@ try {
       Sort-Object Name |
       ForEach-Object { $_.Name }
   )
-  if (($installedSkills -join "`n") -ne "chronos`nchronos-governor") {
-    throw "Extracted package must contain exactly the chronos and chronos-governor skills."
+  if (($installedSkills -join "`n") -ne "chronos`nchronos-control-room`nchronos-governor") {
+    throw "Extracted package must contain exactly the three core skills."
   }
 
   $directoryCodexHome = Join-Path $testRoot 'directory-clean-home'

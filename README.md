@@ -1,4 +1,4 @@
-# Chronos for Codex on Windows
+# Chronos for Codex
 
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
@@ -32,21 +32,35 @@ used to develop and distribute it.
 
 ## Chronos Control Room
 
-The separate [local Control Room](experimental/orchestrator/README.md) is an
-opt-in browser queue for its own managed tasks, independent of recurring
-Governor prompts. It supports read intake, isolated workspace-write builds,
-optional native verification, independent read-only review and human-approved
-release handoff. Defaults are disconnected, paused and consented per session;
-selected thread links create managed context forks, not control of original
-Desktop turns. The flow editor includes inbox/outbox queues, joins, templates
-and runtime resource evidence. This remains experimental source,
-not a new signed release or marketplace update, and is not included in v0.9.4.
+The **v0.10.0 candidate includes Control Room inside the plugin**, with a
+packaged launcher and onboarding skill. It is not yet a published marketplace
+update. After this candidate is installed, use one starter:
+
+> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+
+Chronos starts and opens the private local dashboard itself. No manual server
+command, repository clone, npm install, hook patch or scheduled Governor is
+needed. It prefers Codex's bundled Node/Git tools, checks prerequisites and
+keeps execution paused until session consent. A local Codex executor and Node
+22+ are required; Windows diagnostics remain Windows-only.
+
+Build visual pipelines with stage queues, bot pools, joins, isolated code
+changes, native checks and human review gates. Optional outcome-learning and
+tool-call review pipelines propose improvements from accepted evidence without
+silently applying them. Thread links create managed context forks, not control
+of original Desktop turns. [Plugin setup guide](docs/CONTROL-ROOM-PLUGIN.md).
+
+The [developer source](experimental/orchestrator/README.md) remains available
+for inspection and contribution. Existing v0.9.4 packages do not gain this
+feature until a new reviewed package is published.
 See the [go/no-go decision](docs/ORCHESTRATOR-DECISION-2026-10-18.md) for
 platform, privacy and distribution limits.
 
 ## Choose Your Edition
 
-Requires Windows, inbox Windows PowerShell 5.1, and a supported local Codex host.
+Control Room requires a supported local Codex executor and Node 22+, with Git
+for source worktrees. Existing diagnostics, protected Governor state and hooks
+require Windows and inbox Windows PowerShell 5.1.
 Check the version and source before installing; keep one Chronos source enabled.
 
 ### Current Versions
@@ -58,7 +72,8 @@ check; confirm the listing and release before installing.
 | --- | --- | --- |
 | Directory skills-only | Live listing v0.9.2; v0.9.4 submitted for review | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
 | GitHub full | Published v0.9.3 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.9.3); five optional hooks |
-| Preview for testers | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
+| Control Room preview | Unreleased v0.10.0 candidate; publication pending | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md); not in the current Directory package |
+| Legacy onboarding preview | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
 
 The current source is not the previously uploaded package. Audit repairs
 require a new signed candidate and review before publication.

@@ -1,19 +1,88 @@
 # Control Room Local Verification
 
-Tested October 18, 2026 (America/New_York), including runs after midnight UTC.
-Scope: the separate open-source `experimental/orchestrator` Control Room 0.2.0.
+## v0.10.0 candidate verification boundary
+
+This record covers the packaged Control Room candidate, not a marketplace submission.
+The candidate was checked locally on Windows with Node.js 24, Edge, an authenticated
+Codex CLI, and bundled Git. The current evidence is:
+
+- 67/67 unit and regression tests passed, including the exact packaged entrypoint
+  and native Git hook/filter isolation regressions.
+- The usability suite passed.
+- The deterministic skills-only package contained 29 files and zero hooks.
+- An extracted ZIP launched through the packaged onboarding entrypoint, discovered the
+  normal host Codex login, created the software-factory queue, and loaded the optional
+  `outcome_learning` and `tool_call_review` workflows. It returned a paused room with
+  zero active turns and no model turn on launch.
+- Reusing the same packaged command reused the existing instance; package and instance
+  identity checks remained bound.
+- Current desktop/mobile browser checks passed, including both opt-in learning
+  templates, observed execution evidence, unchanged turn counts on template creation,
+  consent, flow editing, queue acceptance and authenticated shutdown.
+- Full and Directory release gates passed; both editions reproduced byte-for-byte.
+  The current hashes are recorded in the submission packet, not the historical rows below.
+- A clean local-catalog plugin-manager installation in an isolated `CODEX_HOME`
+  installed version 0.10.0. All 29 installed files matched the exact Directory ZIP.
+  The installed onboarding path and local-executor marker were preserved; no hooks
+  were present. The installed launcher opened Research desk plus both learning
+  modules, paused with zero active turns and no execution/write consent. Instance
+  and package identities matched. Stop, plugin removal and catalog removal passed.
+  This fixture did not use or copy the production login or change hook trust.
+- The hardened replacement ZIP repeated that clean installation, all 29 file hashes,
+  installed launcher, paused Research plus both learning templates, identity binding,
+  stop and uninstall. Its hashes are the current ones in the submission packet.
+- Native Git regression fixtures installed post-checkout, fsmonitor and filter
+  marker commands. No marker ran during workspace setup, including when uncommitted
+  attributes would select a clean filter. A committed filter blocked before packet
+  workspace creation; the same packet succeeded after the fixture's reviewed repair.
+  An unrelated `GIT_DIR` override could not redirect source selection.
+
+This is local candidate evidence only. The clean installation used a local test
+catalog, not the public OpenAI Directory. There has been no new marketplace
+submission and no live certification on another OS.
+The sandbox forward test that could not see the normal credential store is retained as
+a boundary case; it must report a scoped authentication failure rather than claim the
+host is logged out.
+
+The host approval-review service recovered on October 19. A fresh normal-host run
+of the exact installed package discovered the existing Codex login and opened
+Research desk plus both learning workflows. It remained paused with zero active
+turns, execution and write consent both false, and matching package/instance
+identities. Authenticated shutdown passed. No credentials were copied.
+
+A subsequent fresh four-stage engineering run against the hardened runtime passed
+with four actual model turns. Native verification exited zero, the source fixture
+remained unchanged, independent review completed, and downstream work stayed held
+until human acceptance. These checks resolve the earlier execution blocker; they
+do not themselves establish a GitHub CI result or Directory publication.
+
+An initial legacy native recheck interrupted Heartbeat after about seven minutes
+without a verdict. The subsequent bounded rerun passed source and packaged
+Heartbeat. Source Inspector, packaged Inspector, source Supervision and source
+Governor have also passed in separate Windows PowerShell 5.1 processes.
+Packaged Supervision and Governor passed as well; both Governor runs validated
+49 scenarios. The earlier interruption was neither PASS nor an observed product
+FAIL. All six native script files are byte-identical between the first and
+hardened package records. Final native test processes exited with code zero.
+
+Core live execution tested October 18, 2026 (America/New_York). The packaged
+integration and 67-test/browser/package rerun continued on October 19.
+Scope: the separate open-source `experimental/orchestrator` Control Room 0.2.0 and its
+v0.10.0 packaged onboarding candidate.
 No marketplace submission, main-branch release or signed plugin ZIP was replaced.
 
 ## Environment
 
-- Windows, Node.js 24.15.0, Edge through Playwright.
+- Windows, Node.js 24.15.0 for the initial runs and bundled Node.js 24.19.0 for
+  the final authenticated package and live workflow checks; Edge through Playwright.
 - Installed Codex CLI `0.163.0-alpha.10.2`, normal ChatGPT login.
 - Effective model `gpt-6.1-sol`, approvals `never`.
 - Effective policies checked natively: `readOnly` and `workspaceWrite` with
   the explicit packet-owned root, shell network disabled.
-- Disposable fixtures only. No external account action or local plugin install.
+- Disposable workflow fixtures and an isolated local-catalog plugin installation
+  only. No production plugin install, hook-trust change or marketplace account action.
 
-## Current Results
+## Prior Core Runtime Results
 
 | Check | Result | Evidence boundary |
 | --- | --- | --- |
@@ -71,6 +140,7 @@ Private receipts and screenshots are ignored by Git:
 
 - `dist/control-room-live-workflow-20261018-a/report.json`: retained initial failure.
 - `dist/control-room-live-workflow-20261018-b/report.json`: repaired four-stage PASS.
+- `dist/control-room-final-live-20261019/report.json`: fresh hardened four-stage PASS.
 - `dist/control-room-live-recovery-20261018-expanded/report.json`.
 - `dist/control-room-live-browser-20261018-expanded/report.json`.
 - `experimental/orchestrator/dist/control-room-browser-check/`.

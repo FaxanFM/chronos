@@ -3,7 +3,32 @@
 See [Current Versions](../README.md#current-versions) for publication records.
 Source changes here do not update an installed or submitted package.
 
-## One Entry Prompt
+## Control Room Setup In v0.10.0
+
+The v0.10.0 candidate makes this the primary setup starter for both editions:
+
+> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+
+The packaged onboarding skill is `chronos-control-room`. It uses the current
+workspace, a Software factory template and one execution slot unless the user
+chooses otherwise. It resolves bundled or installed Node 22+ and local Codex,
+launches the included runtime, verifies its private health response and opens
+the dashboard. Users do not copy a command or manually keep a server terminal
+open. A repeat request reuses the same workspace instance. A different running
+payload is reported rather than silently claiming the upgrade loaded.
+
+Setup is not execution consent. Explain provider processing, normal Codex
+allowance, plaintext local queue/workspace state and the private session cookie.
+The publisher receives no runtime telemetry. Run, workspace-write permission,
+learning pipelines, Windows diagnostics and existing-chat monitoring remain
+independent opt-ins. No hooks or scheduled Governor are required for this UI.
+The process can continue after the setup chat ends; Stop Control Room closes
+only its owned runtime. It is not registered as a startup service.
+
+See [Control Room plugin setup](CONTROL-ROOM-PLUGIN.md) for the current release
+gate, prerequisites, privacy and optional learning workflow.
+
+## Legacy Governor Entry Prompt
 
 The separate [installation guide](INSTALLATION.md) covers pinned GitHub
 installation, the recommended optional hooks, restart, verification, and
@@ -19,9 +44,9 @@ The Directory skills-only starter is:
 
 It gives one hooks-absence disclosure, not a trust question for missing hooks.
 
-The packaged `extensions.com.openai.onboardingSkill` points to the existing
-`chronos` skill. No third skill, hidden installer, account signup, or new
-background service is added. The Governor uses the same onboarding contract
+Earlier packages pointed `extensions.com.openai.onboardingSkill` at `chronos`.
+The v0.10.0 candidate adds the visible Control Room skill and changes that
+onboarding entrypoint. The legacy Governor uses the same separate contract
 when it receives a completed user-authorized setup. All decisions remain in
 the setup chat before handoff. It does not send consent reminders
 from scheduled pulses or require the user to relay technical commands between

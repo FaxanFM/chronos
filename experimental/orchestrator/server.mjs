@@ -1,6 +1,6 @@
 import http from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFile, stat, lstat, writeFile, rename, unlink } from 'node:fs/promises';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CodexAdapter } from './lib/codex-adapter.mjs';
@@ -14,11 +14,11 @@ const files = new Map([
   ['/app.js', [join(root, 'public/app.js'), 'text/javascript; charset=utf-8']],
   ['/app.css', [join(root, 'public/app.css'), 'text/css; charset=utf-8']],
   ['/styles.css', [join(root, 'public/styles.css'), 'text/css; charset=utf-8']],
-  ['/assets/chronos-mark.png', [resolve(root, '../../plugins/chronos/assets/chronos-mark.png'), 'image/png']]
+  ['/assets/chronos-mark.png', [join(root, 'public/chronos-mark.png'), 'image/png']]
 ]);
 const safeCode = (error) => /^[a-z][a-z0-9_]{1,95}$/.test(error?.message || '') ? error.message : 'operation_failed';
 
-export async function createControlRoom({ engine, token = randomBytes(32).toString('hex'), port = 0, runtimeHealth, workspaceInfo } = {}) {
+export async function createControlRoom({ engine, token = randomBytes(32).toString('hex'), port = 0, runtimeHealth, workspaceInfo, instanceId = randomUUID(), packageId = null } = {}) {
   if (!engine || !/^[a-f0-9]{64}$/.test(token)) throw new Error('control_room_parameters_invalid');
   let origin;
   let cookieName;
@@ -31,7 +31,10 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
     if (evidence.host.freeMemoryBytes < 256 * 1048576) return 0;
     return Math.min(configured, evidence.recommendedConcurrency || 1);
   };
-  const snapshot = async () => ({ ...engine.snapshot(), heartbeat: await health.sample(), workspace: workspaceInfo || { sourceRoot: engine.adapter?.cwd || null, base: 'committed_HEAD', uncommittedChangesCopied: false } });
+  const snapshot = async () => {
+    const state = engine.snapshot();
+    return { ...state, runtime: { ...state.runtime, instanceId, packageId }, heartbeat: await health.sample(), workspace: workspaceInfo || { sourceRoot: engine.adapter?.cwd || null, base: 'committed_HEAD', uncommittedChangesCopied: false } };
+  };
   const matchesSecret = (value, expected) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
   const respond = (res, code, data) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
   const server = http.createServer(async (req, res) => {
@@ -95,30 +98,71 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
   };
 }
 
-async function main() {
-  const options = new Map();
-  for (let i = 2; i < process.argv.length; i += 2) {
-    if (process.argv[i] === '--recover-stale-lock') { options.set(process.argv[i], true); i -= 1; continue; }
-    if (!['--codex', '--cwd', '--state', '--port', '--codex-home'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('usage_node_server_mjs_--codex_absolute_executable_--cwd_repository');
-    options.set(process.argv[i], process.argv[i + 1]);
-  }
-  const cwd = resolve(options.get('--cwd') || process.cwd());
+export async function startLocalControlRoom({ codexPath, cwd, codexHome, statePath, port = 0, recoverStaleLock = false, instanceId = randomUUID(), packageId = null, template = 'software_factory', learningModules = [], maxConcurrency = 1, connect = false, gitExecutable = 'git' } = {}) {
+  cwd = resolve(cwd || process.cwd());
   if (!(await stat(cwd)).isDirectory()) throw new Error('workspace_directory_required');
-  const port = options.has('--port') ? Number(options.get('--port')) : 0;
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port_invalid');
-  const adapter = new CodexAdapter({ codexPath: options.get('--codex'), cwd, codexHome: options.get('--codex-home') });
-  const statePath = resolve(options.get('--state') || join(root, '.local', 'queue.json'));
-  const workspaces = new WorkspaceManager({ sourceRoot: cwd, storageRoot: join(dirname(statePath), 'workspaces') });
+  if (!['blank', 'software_factory', 'research', 'engineering', 'marketing', 'outcome_learning', 'tool_call_review'].includes(template) || !Array.isArray(learningModules) || learningModules.some((id) => !['outcome_learning', 'tool_call_review'].includes(id))) throw new Error('setup_template_invalid');
+  const adapter = new CodexAdapter({ codexPath, cwd, codexHome });
+  statePath = resolve(statePath || join(root, '.local', 'queue.json'));
+  const existing = await stat(statePath).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error));
+  const workspaces = new WorkspaceManager({ sourceRoot: cwd, storageRoot: join(dirname(statePath), 'workspaces'), gitExecutable });
   const prepareWorkspace = async (input) => {
     const prepared = await workspaces.prepare(input);
     if (prepared.workspacePath) await adapter.allowWorkspace(prepared.workspacePath);
     return prepared;
   };
-  const engine = await new Orchestrator({ adapter, statePath, prepareWorkspace, verifier: adapter, recoverStaleLock: options.has('--recover-stale-lock') }).initialize();
-  let room;
-  try { room = await createControlRoom({ engine, port }); }
-  catch (error) { await engine.close(); throw error; }
-  console.log('Chronos Control Room - experimental, not a marketplace release');
+  const engine = await new Orchestrator({ adapter, statePath, prepareWorkspace, verifier: adapter, recoverStaleLock }).initialize();
+  try {
+    if (!existing) {
+      if (template !== 'software_factory') {
+        await engine.action({ action: 'apply-template', templateId: template });
+        await engine.action({ action: 'delete-workflow', workflowId: 'software_factory-default' });
+      }
+      for (const templateId of [...new Set(learningModules)]) if (templateId !== template) await engine.action({ action: 'apply-template', templateId });
+      await engine.action({ action: 'configure', maxConcurrency });
+    }
+    if (connect) await engine.action({ action: 'connect' });
+    const room = await createControlRoom({ engine, port, instanceId, packageId });
+    return { ...room, engine, adapter, statePath, instanceId, cwd };
+  } catch (error) { await engine.close(); throw error; }
+}
+
+async function main() {
+  const options = new Map();
+  for (let i = 2; i < process.argv.length; i += 2) {
+    if (['--recover-stale-lock', '--connect'].includes(process.argv[i])) { options.set(process.argv[i], true); i -= 1; continue; }
+    if (!['--codex', '--git', '--cwd', '--state', '--port', '--codex-home', '--ready-file', '--instance-id', '--package-id', '--template', '--learning-modules', '--max-concurrency'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('control_room_arguments_invalid');
+    options.set(process.argv[i], process.argv[i + 1]);
+  }
+  const cwd = resolve(options.get('--cwd') || process.cwd());
+  const port = options.has('--port') ? Number(options.get('--port')) : 0;
+  const statePath = resolve(options.get('--state') || join(root, '.local', 'queue.json'));
+  const readyFile = options.has('--ready-file') ? resolve(options.get('--ready-file')) : null;
+  if (readyFile && readyFile !== join(dirname(statePath), 'session.json')) throw new Error('ready_file_must_share_queue_directory');
+  const instanceId = options.get('--instance-id') || randomUUID();
+  if (!/^[a-f0-9-]{36}$/.test(instanceId)) throw new Error('instance_id_invalid');
+  const packageId = options.get('--package-id') || null;
+  if (packageId && !/^[a-f0-9]{64}$/.test(packageId)) throw new Error('package_id_invalid');
+  const room = await startLocalControlRoom({ codexPath: options.get('--codex'), gitExecutable: options.get('--git') || 'git', codexHome: options.get('--codex-home'), cwd, statePath, port, instanceId, packageId, recoverStaleLock: options.has('--recover-stale-lock'), template: options.get('--template') || 'software_factory', learningModules: options.get('--learning-modules')?.split(',').filter(Boolean) || [], maxConcurrency: options.has('--max-concurrency') ? Number(options.get('--max-concurrency')) : 1, connect: options.has('--connect') });
+  const cleanupReady = async () => {
+    if (!readyFile) return;
+    const item = await lstat(readyFile).catch(() => null);
+    if (!item?.isFile() || item.isSymbolicLink() || item.nlink !== 1 || item.size > 16384) return;
+    const data = JSON.parse(await readFile(readyFile, 'utf8'));
+    if (data.instanceId === instanceId) await unlink(readyFile).catch(() => {});
+  };
+  if (readyFile) {
+    const item = await lstat(readyFile).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error));
+    if (item && (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1)) { await room.close(); throw new Error('ready_file_invalid'); }
+    const temporary = readyFile + '.' + instanceId + '.tmp';
+    try {
+      await writeFile(temporary, JSON.stringify({ schemaVersion: 1, protocol: 'chronos-control-room', instanceId, packageId, pid: process.pid, origin: room.origin, url: room.url, workspace: cwd, queueFile: statePath, startedAt: new Date().toISOString() }) + '\n', { flag: 'wx', mode: 0o600 });
+      await rename(temporary, readyFile);
+    } catch (error) { await room.close(); await unlink(temporary).catch(() => {}); throw error; }
+    room.server.once('close', () => cleanupReady().catch(() => {}));
+  }
+  console.log('Chronos Control Room - local managed workflow runtime');
   console.log('Workspace: ' + cwd);
   console.log('Private launch link (keep local): ' + room.url);
   console.log('Paused. No model turns, hooks, installations or recurrences start automatically.');

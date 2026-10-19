@@ -1,8 +1,10 @@
 # Privacy Policy
 
-Effective October 1, 2026. See the README's Current Versions for edition availability.
+Effective October 18, 2026, including the v0.10.0 candidate's Control Room.
+See the README's Current Versions for edition availability.
 
-Chronos is a local Windows plugin. Health inspection and Heartbeat evaluation
+Chronos includes a local Control Room; its legacy diagnostic components run on
+Windows. Health inspection and Heartbeat evaluation
 run when invoked with the user's authorization. Automatic Inspector diagnostics
 require separate standing permission; a one-off briefing does not grant it.
 Five reviewed monitoring hooks can record bounded task
@@ -12,10 +14,43 @@ Dravara, LLC publishes Chronos through its `FaxanFM` GitHub project account.
 
 ## Data handling
 
-Chronos does not use analytics, advertising, telemetry, cookies, remote APIs,
-or publisher-operated external storage. The local scripts make no network
-requests. Dravara, LLC does not receive, sell, or share data through the
-plugin.
+Chronos uses no publisher analytics, advertising, telemetry or publisher-operated
+external storage. Dravara, LLC does not receive, sell or share runtime data through
+the plugin. The legacy native diagnostic scripts make no network requests.
+Control Room uses loopback HTTP and a local session cookie; its Codex workers
+use the configured model provider as described below.
+
+### Control Room
+
+Control Room starts a user-requested local process. Its private loopback URL
+contains an access token, removed from browser history after opening. An
+HttpOnly same-site cookie supports reloads. Session/launcher metadata and private
+logs remain in the selected Codex profile or explicit local state directory;
+do not share launch links or raw state. Same-user software may access these
+files. No server command, hook patch or publisher account is required.
+
+The local queue stores plaintext assignments, selected and managed thread IDs,
+workspace paths, bounded result summaries, verification commands/receipts and
+bounded native execution aggregates. Worktrees contain the work's actual files.
+Execution aggregates include observed native item counts, explicit failure
+signals and turn wall time, not captured command arguments, transcripts, model
+costs or inferred token usage. Optional learning stages receive only the
+accepted evidence/artifacts explicitly selected for their work.
+
+When a managed task runs, its instructions, selected thread context and relevant
+workspace data are processed by Codex's configured provider under the user's
+account and policies. Provider web search is an optional per-stage capability;
+model usage consumes the user's allowance or configured billing. Chronos does
+not collect an API key or copy login credentials. Existing installed Codex
+authentication is used by its local runtime.
+
+Queue records, private metadata and worktrees remain until removed by the user
+or operating system. Disconnect/restart revoke session execution permission.
+Stop Control Room stops its owned runtime, not unrelated Codex processes. Queue
+archive does not delete worktree files. Learning recommendations do not train
+models or silently change active workflows or permissions.
+
+### Legacy Windows Diagnostics
 
 When requested, Chronos reads local aggregate resource information needed to assess Codex health, such as process counts, memory use, CPU activity, handle counts, and available disk space. It opens the known Codex diagnostic SQLite database in logical read-only mode to measure file allocation, reclaimable pages, WAL activity, insert-rate changes, and aggregate levels from up to 2,000 recent rows. It does not change rows or schemas. SQLite can create or update `-wal` or `-shm` coordination sidecars while opening a WAL-mode database, even with a read-only database handle. Chronos reports the open mode, journal mode, whether sidecar mutation was possible, and whether it observed such activity. Results remain in the active Codex task unless the user chooses to share them.
 
@@ -35,7 +70,7 @@ a bounded proposed-prefix array, approval correlation identifier,
 sandbox-permission category, `fork_turns`, worker effort, and task-complexity
 label. It converts prefixes and identifiers to ephemeral hashes and returns
 only counts and safe categories. Ephemeral hashes are discarded when the
-inspection exits. Chronos does not return or persist raw rollout lines, thread
+inspection exits. This Inspector diagnostic path does not return or persist raw rollout lines, thread
 IDs, approval IDs, prompts, responses, commands, prefixes, tool arguments, tool
 output, usernames, or absolute paths.
 

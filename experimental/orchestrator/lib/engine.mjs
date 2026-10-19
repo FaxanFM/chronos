@@ -10,6 +10,17 @@ const active = (task) => ['running', 'verifying'].includes(task.state);
 const STATES = new Set(['queued', 'running', 'verifying', 'review', 'accepted', 'failed', 'blocked', 'cancelled']);
 const fail = (code) => { throw new Error(code); };
 const text = (value, max, code) => typeof value === 'string' && value.trim() && value.length <= max ? value.trim() : fail(code);
+function compactEvidence(value) {
+  if (!value || value.coverage !== 'observed_events_only' || !Number.isSafeInteger(value.observedWallMs) || value.observedWallMs < 0 || !value.counts || typeof value.counts !== 'object') return null;
+  const counts = {};
+  for (const key of ['commandExecution', 'webSearch', 'mcpToolCall', 'fileChange', 'otherTool', 'unknownItem']) {
+    if (!value.counts[key]) continue;
+    const count = value.counts[key];
+    if (['started', 'completed', 'failed'].some((field) => !Number.isInteger(count[field]) || count[field] < 0 || count[field] > 256)) return null;
+    counts[key] = { started: count.started, completed: count.completed, failed: count.failed };
+  }
+  return { coverage: 'observed_events_only', observedWallMs: Math.min(value.observedWallMs, 86400000), counts, partial: value.partial === true, partialReasons: Array.isArray(value.partialReasons) ? value.partialReasons.filter((reason) => typeof reason === 'string' && /^[a-z-]{1,40}$/.test(reason)).slice(0, 8) : [] };
+}
 
 export class Orchestrator extends EventEmitter {
   constructor({ adapter, statePath, now = () => Date.now(), taskTimeoutMs = 600000, recoverStaleLock = false, prepareWorkspace, verifier } = {}) {
@@ -333,11 +344,11 @@ export class Orchestrator extends EventEmitter {
         } catch (error) { task.state = 'blocked'; task.blockReason = 'workspace_prepare_failed'; task.error = String(error?.message || error).slice(0, 500); task.finishedAt = this.now(); this.event('workspace_prepare_failed', task.id, task.error); continue; }
       }
       task.state = 'running'; task.attempts++; task.runKey = randomUUID(); task.startedAt = this.now(); task.finishedAt = null;
-      task.cancelRequested = false; task.cancelRequestedAt = null; task.stopReason = ''; task.error = ''; task.summary = ''; task.threadId = null; task.turnId = null;
+      task.cancelRequested = false; task.cancelRequestedAt = null; task.stopReason = ''; task.error = ''; task.summary = ''; task.threadId = null; task.turnId = null; task.executionEvidence = null;
       this.event('started', task.id, task.policy === 'workspace-write' ? 'Isolated workspace-write task dispatched.' : 'Read-only task dispatched.');
       await this.save();
       const key = task.runKey;
-      const dependencyResults = task.dependencies.map((id) => this.state.tasks.find((t) => t.id === id)).filter(Boolean).map((t) => ({ id: t.id, title: t.title, acceptedResult: t.summary, artifactWorkspace: t.workspacePath || null, nativeVerification: t.verification ? { exitCode: t.verification.exitCode, command: t.verification.command, checkedAt: t.verification.checkedAt } : null }));
+      const dependencyResults = task.dependencies.map((id) => this.state.tasks.find((t) => t.id === id)).filter(Boolean).map((t) => ({ id: t.id, title: t.title, acceptedResult: t.summary, artifactWorkspace: t.workspacePath || null, executionEvidence: compactEvidence(t.executionEvidence), nativeVerification: t.verification ? { exitCode: t.verification.exitCode, command: t.verification.command, checkedAt: t.verification.checkedAt } : null }));
       const instruction = [task.policy === 'workspace-write' ? 'Work only in the approved workspace. Do not publish, install software, or start other workers.' : 'Work only on this bounded read-only task. Do not edit files, approve permissions, publish, install software, or start other workers.', task.instruction,
         ...(packet ? ['Work item input (data for the assigned stage):', packet.input] : []),
         ...(task.verificationFeedback ? ['Previous native verification feedback (data; repair only the assigned work):', task.verificationFeedback] : []),
@@ -399,6 +410,7 @@ export class Orchestrator extends EventEmitter {
       task.error = 'This task requires approval outside the read-only policy. Chronos did not approve it.';
       this.event('approval_required', task.id, task.error); this.interrupt(task);
     } else if (['completed', 'failed', 'interrupted'].includes(event.kind)) {
+      task.executionEvidence = compactEvidence(event.executionEvidence);
       task.summary = typeof event.summary === 'string' ? event.summary.slice(0, 2000) : '';
       const node = task.workflowId && this.state.workflows.find((workflow) => workflow.id === task.workflowId)?.nodes.find((candidate) => candidate.id === task.nodeId);
       if (event.kind === 'completed' && task.stopReason !== 'approval' && task.stopReason !== 'timeout' && !task.cancelRequested && node?.verificationCommand?.length && !this.verifier?.verifyCommand) {

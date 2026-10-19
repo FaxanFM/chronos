@@ -1,6 +1,23 @@
 <p align="center"><img src="assets/chronos-mark.png" width="180" alt="Chronos hourglass and process-tree mark"></p>
 
-# Chronos for Codex - diagnostics, supervision, and read-task coordination
+# Chronos for Codex - Control Room and workflow orchestration
+
+The v0.10.0 candidate bundles the Control Room launcher and dashboard. After
+installation, start with:
+
+> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+
+Chronos launches its packaged local runtime and opens the UI; the user does not
+start a server manually. It requires a local Codex executor and Node 22+, prefers
+bundled host tools, and needs Git for source worktrees. No npm installation,
+API key, hook patch or scheduled Governor is needed. Model execution and
+isolated writes are separate session permissions. Learning modules are opt-in
+recommendation pipelines, not automatic changes or model training.
+
+This candidate is not a claim that the current Directory listing has already
+updated. See the repository's publication record before installing.
+
+## Existing Governance And Diagnostics
 
 Chronos gives Windows Codex users one local Governor for passive task
 supervision, actionable Heartbeats, exact-target intervention, and bounded
@@ -72,7 +89,7 @@ the result reports whether that activity was observed.
 Install from the Directory link above. As a fallback, install from Git:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.0
 codex.cmd plugin add chronos@chronos
 ```
 

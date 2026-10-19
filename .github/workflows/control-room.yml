@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - experimental/orchestrator/**
+      - plugins/chronos/.codex-plugin/plugin.json
+      - plugins/chronos/skills/chronos-control-room/**
+      - scripts/build-control-room-payload.mjs
       - .github/workflows/control-room.yml
   pull_request:
     paths:
       - experimental/orchestrator/**
+      - plugins/chronos/.codex-plugin/plugin.json
+      - plugins/chronos/skills/chronos-control-room/**
+      - scripts/build-control-room-payload.mjs
       - .github/workflows/control-room.yml
   workflow_dispatch:
 
@@ -36,3 +42,10 @@ jobs:
         run: |
           npm --prefix experimental/orchestrator run build
           git diff --exit-code -- experimental/orchestrator/public
+      - name: Verify committed plugin runtime payload
+        shell: bash
+        run: |
+          node scripts/build-control-room-payload.mjs
+          git diff --exit-code -- plugins/chronos/skills/chronos-control-room/scripts/runtime
+      - name: Verify packaged payload and entrypoint
+        run: node --test experimental/orchestrator/tests/packaging.test.mjs

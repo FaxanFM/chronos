@@ -1,5 +1,68 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.10.0 Control Room Candidate (Prepared, Not Submitted)
+
+Version: `0.10.0`. This is the current local candidate on the `codex/chronos-control-room`
+branch. It is not uploaded, submitted, approved, or published, and it does not replace
+the immutable v0.9.2 listing. The candidate adds a packaged, one-prompt Control Room
+onboarding skill. On a supported desktop host it discovers the authenticated local
+Codex executable, starts a private loopback UI, and leaves the queue paused until the
+user grants execution consent. No manual server command is required.
+
+The packaged path requires the local executor, Node.js 22 or newer, an authenticated
+Codex installation, and local Git when a workflow needs an isolated worktree. The
+skills-only edition contains no lifecycle hooks, hosted service, MCP server, publisher
+telemetry, or automatic model turns. The full hook-enabled source remains available on
+GitHub as a separately documented, opt-in edition; it is not silently installed by the
+Directory package.
+
+Two optional learning templates, `outcome_learning` and `tool_call_review`, add bounded
+read-only analysis stages. They summarize observed execution evidence and propose
+workflow improvements; they do not train a model, alter permissions, or apply changes
+automatically. The candidate has local evidence of 67 unit tests, usability PASS,
+deterministic 29-file skills-only packaging with zero hooks, and an extracted ZIP launch
+on the normal host with the software-factory workflow plus both learning templates,
+paused state, zero active turns, and package/instance identity binding. A subsequent
+clean local-catalog installation in an isolated Codex profile verified all 29 installed
+file hashes, the installed launcher, paused Research plus both learning modules,
+identity binding, stop and uninstall. No production profile or hook trust changed.
+These are local candidate results, not public Directory or all-OS certification.
+
+The next submission, if authorized after review, must use a freshly built
+skills-only ZIP bound to verified signed source, with its own immutable hash and receipt.
+Do not reuse historical hashes
+below or upload this working candidate by implication.
+
+Prepared artifacts: `chronos-v0.10.0.zip` (31 files), SHA-256
+`598f508c5d193fc9a1e5933ae142126797b3a88aa4072a74bc4766b01736ee88`;
+`chronos-v0.10.0-skills-only.zip` (29 files, no hooks), SHA-256
+`a99c292f95a015e050ecd23c36ce89317334c7ad528b87858ac0aef06b122aac`.
+Reserved release URL: https://github.com/FaxanFM/chronos/releases/tag/v0.10.0
+(not published). Source is under review in https://github.com/FaxanFM/chronos/pull/4.
+
+Native worktree setup also disables repository Git hooks, filesystem-monitor
+helpers and configured external filter commands. Committed checkout filters
+require separate review before writable materialization; no LFS download or
+repository helper is implicitly authorized. Marker regressions cover these
+guards and retry after a reviewed repository repair.
+
+Before submission:
+
+1. Local native verification and the final authenticated packaged launch passed.
+   A fresh hardened four-stage workflow also passed with four actual model turns,
+   native verification exit zero, unchanged source and a held human gate. No
+   credentials were copied and the production profile was not changed.
+2. Create and verify the signed source commit, push the existing Control Room
+   branch, and obtain the current-commit Windows and Control Room CI results.
+   The current local changes are not yet the published PR head.
+3. Build both editions from that clean signed identity and confirm these ZIP
+   hashes still reproduce. Review the commit and source/file-hash bindings.
+4. Obtain release approval before merging, tagging or publishing immutable assets.
+   The final Directory package must pin privacy/terms to public signed source;
+   a reserved, nonexistent release tag is not an upload-ready policy URL.
+5. Submit only the skills-only edition after explicit marketplace-update
+   authorization. Retain the full edition on GitHub; do not auto-patch hooks.
+
 ## Local Usability Remediation Build - Not Submitted
 
 October 6, 2026, after code-review corrections: the new local candidate adds native scoped removal, a tested

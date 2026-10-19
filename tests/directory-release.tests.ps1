@@ -1,4 +1,6 @@
-param()
+param(
+  [string]$PolicyCommit = ""
+)
 
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSEdition -ne 'Desktop') {
@@ -32,8 +34,13 @@ function Read-Supervision {
 }
 
 try {
-  & $builder -Version $version -Edition Directory -OutputDirectory $first
-  & $builder -Version $version -Edition Directory -OutputDirectory $second
+  if ($PolicyCommit) {
+    & $builder -Version $version -Edition Directory -OutputDirectory $first -PolicyCommit $PolicyCommit
+    & $builder -Version $version -Edition Directory -OutputDirectory $second -PolicyCommit $PolicyCommit
+  } else {
+    & $builder -Version $version -Edition Directory -OutputDirectory $first
+    & $builder -Version $version -Edition Directory -OutputDirectory $second
+  }
   $name = "chronos-v$version-skills-only"
   foreach ($extension in @('zip', 'sha256', 'release.json')) {
     if ((Get-FileHash (Join-Path $first "$name.$extension")).Hash -ne
@@ -47,7 +54,7 @@ try {
     throw 'Directory package contains excluded lifecycle hooks or app references.'
   }
   $skills = @(Get-ChildItem -LiteralPath (Join-Path $package 'skills') -Directory | Select-Object -ExpandProperty Name)
-  if (($skills | Sort-Object) -join ',' -ne 'chronos,chronos-governor') { throw 'Directory package lost a core skill.' }
+  if (($skills | Sort-Object) -join ',' -ne 'chronos,chronos-control-room,chronos-governor') { throw 'Directory package lost a core skill.' }
   foreach ($skill in $skills) {
     $text = Get-Content -Raw (Join-Path $package "skills/$skill/SKILL.md")
     if (-not $text.Contains('**Installed edition: skills-only.**') -or
@@ -55,7 +62,7 @@ try {
   }
   if (-not $manifest.interface.longDescription.Contains('Lifecycle hooks are not included or auto-installed') -or
       -not $manifest.description.StartsWith('Skills-only edition:') -or
-      $manifest.extensions.'com.openai'.onboardingSkill -ne './skills/chronos/SKILL.md') {
+      $manifest.extensions.'com.openai'.onboardingSkill -ne './skills/chronos-control-room/SKILL.md') {
     throw 'Directory listing or onboarding does not match the edition.'
   }
   $onboarding = Get-Content -Raw (Join-Path $package 'skills/chronos/SKILL.md')
@@ -70,12 +77,14 @@ try {
     if ($prompt.Length -gt 128 -or $prompt.Contains("`n")) { throw 'Directory starter exceeds submission limits.' }
   }
   $record = Get-Content -Raw (Join-Path $first "$name.release.json") | ConvertFrom-Json
-  if ($manifest.interface.privacyPolicyURL -notmatch "/blob/v$([regex]::Escape($version))/PRIVACY.md$" -or
-      $manifest.interface.termsOfServiceURL -notmatch "/blob/v$([regex]::Escape($version))/TERMS.md$") {
-    throw 'Directory policy links are not version-bound.'
+  $expectedPolicyRef = if ($PolicyCommit) { $PolicyCommit.ToLowerInvariant() } else { "v$version" }
+  if ($manifest.interface.privacyPolicyURL -notmatch "/blob/$([regex]::Escape($expectedPolicyRef))/PRIVACY.md$" -or
+      $manifest.interface.termsOfServiceURL -notmatch "/blob/$([regex]::Escape($expectedPolicyRef))/TERMS.md$") {
+    throw 'Directory policy links are not bound to the requested source ref.'
   }
-  if ($record.edition -ne 'skills_only' -or $record.lifecycle_hooks_included -or $record.packaged_files -ne 12) {
-    throw 'Directory release record does not bind its edition and 12-file package.'
+  if ($PolicyCommit -and $record.policy_source_ref -ne $expectedPolicyRef) { throw 'Directory release record lost policy_source_ref.' }
+  if ($record.edition -ne 'skills_only' -or $record.lifecycle_hooks_included -or $record.packaged_files -ne @($record.files).Count) {
+    throw 'Directory release record does not bind its edition and computed package file count.'
   }
   foreach ($file in $record.files) {
     if ((Get-FileHash (Join-Path $package $file.path)).Hash.ToLowerInvariant() -ne $file.sha256) { throw "Directory file hash mismatch: $($file.path)" }
@@ -118,7 +127,7 @@ try {
   if ($heartbeat -notmatch 'evaluation=unsupported' -or $heartbeat -notmatch 'coverageUnsupported=8') {
     throw 'No collector evidence was misrepresented as healthy.'
   }
-  [ordered]@{ result = 'PASS'; edition = 'skills_only'; files = 12; hooks = 0; model = 'gpt-6-sol'; effort = 'medium'
+  [ordered]@{ result = 'PASS'; edition = 'skills_only'; files = $record.packaged_files; hooks = 0; model = 'gpt-6-sol'; effort = 'medium'
     reproducible = $true; nativeScopedCycle = 'PASS'; restart = 'PASS'; coverageUnsupported = 8
     modelTurns = 0; recurrencesCreated = 0; liveScheduledExecution = 'not_evaluated' } | ConvertTo-Json -Compress
 } finally {

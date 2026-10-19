@@ -5,6 +5,12 @@ description: Use when the user explicitly requests Chronos governance or Chronos
 
 # Chronos Governor
 
+For Control Room launch or visual managed pipelines, use the sibling
+`chronos-control-room` skill. That user-started runtime owns its workers and
+does not need a scheduled Governor. The read-only delegation and no-daemon
+rules below govern this legacy host-chat coordination path, not an explicitly
+requested Control Room launch.
+
 Delegate small read-only side tasks while the coordinator retains all edits,
 architecture, safety decisions, verification, and acceptance. Use Codex native
 workers only. Do not create a daemon, operating-system scheduler, external
