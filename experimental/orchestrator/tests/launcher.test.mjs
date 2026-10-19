@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -41,6 +41,26 @@ test('state symlinks are rejected before queue state is created', async () => {
   const target = join(directory, 'target'), link = join(directory, 'link'); await mkdir(target);
   await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(launch({ workspace: directory, stateDir: join(link, 'state'), codex: process.execPath }), /control_room_state_link_rejected/);
+});
+
+test('repeated owned shutdown tolerates receipt removal without treating absence as corrupt JSON', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'chronos-stop-race-'));
+  const workspace = join(directory, 'workspace'), stateDir = join(directory, 'state');
+  await mkdir(workspace);
+  const options = { workspace, stateDir, codex: process.execPath };
+  try {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      assert.equal((await launch(options)).mode, 'paused');
+      assert.equal((await stop(options)).status, 'stopped');
+      assert.equal((await status(options)).status, 'stopped');
+    }
+    await writeFile(join(stateDir, 'session.json'), '{');
+    try { await assert.rejects(status(options), /control_room_state_json_invalid/); }
+    finally { await rm(join(stateDir, 'session.json'), { force: true }); }
+  } finally {
+    await stop(options).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('startup reports a bounded native prerequisite code without leaking stderr', async () => {

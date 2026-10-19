@@ -9,8 +9,8 @@
     },
     {
       "path": "launcher.mjs",
-      "bytes": 13308,
-      "sha256": "5337a1166b2d4b67a555f22e4a882b37727e3e347543608f5b71dced2b26691b"
+      "bytes": 13447,
+      "sha256": "1d28b642ca7cdbc0b18cfaaf5de5a485abc55a7cc0a45334222460b7e7f25af6"
     },
     {
       "path": "lib/codex-adapter.mjs",

@@ -22,7 +22,12 @@ async function readJson(path, maximum = 16384) {
   const item = await lstat(path).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error));
   if (!item) return null;
   if (!item.isFile() || item.nlink !== 1 || item.size > maximum) fail('control_room_state_file_invalid');
-  try { return JSON.parse(await readFile(path, 'utf8')); } catch { fail('control_room_state_json_invalid'); }
+  try { return JSON.parse(await readFile(path, 'utf8')); }
+  catch (error) {
+    // Owned shutdown can unlink the receipt between validation and reading.
+    if (error.code === 'ENOENT') return null;
+    fail('control_room_state_json_invalid');
+  }
 }
 function alive(pid) {
   if (!Number.isInteger(pid) || pid < 1) fail('control_room_owner_invalid');

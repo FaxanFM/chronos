@@ -12,7 +12,9 @@
   cases and separate permission boundaries.
 - Preserve selected context limits, existing work, human acceptance, session
   consent expiry and the separation between full and skills-only editions.
-- Verify 89 runtime tests and a local read-only GPT-6-Luna / low extraction:
+- Fix an owned-shutdown receipt removal race while preserving corrupt-state
+  rejection. Add repeated start/stop regression coverage.
+- Verify 90 runtime tests and a local read-only GPT-6-Luna / low extraction:
   one successful command and no observed file changes or network calls.
 - Hooks: unchanged. Existing trust is not a claim that Desktop dispatched them.
 
