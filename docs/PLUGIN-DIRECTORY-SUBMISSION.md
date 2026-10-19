@@ -19,7 +19,7 @@ Directory package.
 Two optional learning templates, `outcome_learning` and `tool_call_review`, add bounded
 read-only analysis stages. They summarize observed execution evidence and propose
 workflow improvements; they do not train a model, alter permissions, or apply changes
-automatically. The candidate has local evidence of 67 unit tests, usability PASS,
+automatically. The candidate has local evidence of 68 unit tests, usability PASS,
 deterministic 29-file skills-only packaging with zero hooks, and an extracted ZIP launch
 on the normal host with the software-factory workflow plus both learning templates,
 paused state, zero active turns, and package/instance identity binding. A subsequent
@@ -34,15 +34,15 @@ Do not reuse historical hashes
 below or upload this working candidate by implication.
 
 Signed package-source commit:
-[`e0bf2d95c104a9206bc41cee977c2d0fa7dc3766`](https://github.com/FaxanFM/chronos/commit/e0bf2d95c104a9206bc41cee977c2d0fa7dc3766).
+[`86d5b174bc8397461580d348ea5d114cbbc79233`](https://github.com/FaxanFM/chronos/commit/86d5b174bc8397461580d348ea5d114cbbc79233).
 Its SSH signature verifies against `docs/security/allowed_signers`. Documentation-only
 commits may follow on the same branch without changing the packaged source files.
 
-Prepared artifacts in `dist/chronos-v0.10.0-marketplace-ready/`:
+Prepared artifacts in `dist/chronos-v0.10.0-final/`:
 `chronos-v0.10.0.zip` (31 files), SHA-256
-`598f508c5d193fc9a1e5933ae142126797b3a88aa4072a74bc4766b01736ee88`;
+`03ab01788154a8f0b0a9b802caf95c925dda8f02620caea1369bb9ffe6842b07`;
 `chronos-v0.10.0-skills-only.zip` (29 files, no hooks), SHA-256
-`cf2370ffbb5418c0badbfe5e0acaa29f7372bbc1a73e3cf6cd4b498621ceda64`.
+`1dc88c3b16b78171eb8c0bc96801b58ef2fe191a6804723323d130561a6f4b9a`.
 Only the skills-only ZIP is the prepared Directory upload. Its policy URLs and
 `policy_source_ref` bind to the signed commit above, not a future release tag.
 The neighboring `.sha256` and `.release.json` files bind the artifact and each
@@ -55,7 +55,7 @@ Rebuild the prepared Directory bytes from this source history with Windows
 PowerShell 5.1:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Version 0.10.0 -Edition Directory -PolicyCommit e0bf2d95c104a9206bc41cee977c2d0fa7dc3766 -OutputDirectory dist/chronos-v0.10.0-marketplace-ready
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Version 0.10.0 -Edition Directory -PolicyCommit 86d5b174bc8397461580d348ea5d114cbbc79233 -OutputDirectory dist/chronos-v0.10.0-final
 ```
 
 The execution-policy flag applies only to that build process; it does not change
@@ -68,6 +68,13 @@ helpers and configured external filter commands. Committed checkout filters
 require separate review before writable materialization; no LFS download or
 repository helper is implicitly authorized. Marker regressions cover these
 guards and retry after a reviewed repository repair.
+
+The final bundle also includes complete license notices for all 18 bundled npm
+dependencies. This notice-only change leaves executable browser bytes unchanged
+but supersedes earlier v0.10.0 artifact hashes. The Windows signer test's expected
+bad-trust probe no longer leaks its failure code into the successful host wrapper;
+actual trust assertions remain enforced. Current-head CI must pass after both
+corrections; do not use the earlier red run as a release receipt.
 
 Before submission:
 
