@@ -1,0 +1,32 @@
+name: Control Room
+
+on:
+  push:
+    paths:
+      - experimental/orchestrator/**
+      - .github/workflows/control-room.yml
+  pull_request:
+    paths:
+      - experimental/orchestrator/**
+      - .github/workflows/control-room.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Node ${{ matrix.node }} / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Protocol, queue and loopback boundaries (no model usage)
+        run: node --test experimental/orchestrator/tests/*.test.mjs

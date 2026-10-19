@@ -2,3 +2,4 @@
 Thumbs.db
 *.log
 dist/
+experimental/orchestrator/.local/

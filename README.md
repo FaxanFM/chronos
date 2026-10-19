@@ -30,6 +30,22 @@ Routine unchanged cycles stay quiet.
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
 
+## Chronos Control Room
+
+Chronos remains worth building, but universal background control is not a
+verified capability of the current store package. The separate
+[local Control Room](experimental/orchestrator/README.md) provides
+an opt-in browser UI and event-driven queue for its own managed read-only Codex
+tasks, independent of recurring Governor prompts. Real local execution,
+acceptance-gated dependencies, cancellation after a shell command starts, and
+process-loss recovery have passed on the tested Windows/Codex build. It stays
+free and MIT licensed. This is experimental source, not a new signed release or
+marketplace update. It is not included in v0.9.4 and does not attach to existing
+desktop chats. See the [local test record](docs/CONTROL-ROOM-LOCAL-VERIFICATION.md)
+and the
+[go/no-go decision](docs/ORCHESTRATOR-DECISION-2026-10-18.md) for platform evidence,
+optional hooks, privacy and distribution limits.
+
 ## Choose Your Edition
 
 Requires Windows, inbox Windows PowerShell 5.1, and a supported local Codex host.
