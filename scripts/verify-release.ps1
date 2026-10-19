@@ -1,12 +1,17 @@
 param(
   [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
   [ValidateSet('Full', 'Directory')][string]$Edition = 'Directory',
-  [string]$CheckoutPath = (Split-Path -Parent $PSScriptRoot),
+  [string]$CheckoutPath,
   [string]$DownloadDirectory = (Join-Path ([IO.Path]::GetTempPath()) ('chronos-verify-' + [guid]::NewGuid().ToString('N'))),
   [string]$CodexPath,
   [switch]$SkipInstalledCheck
 )
 $ErrorActionPreference = 'Stop'
+$CheckoutPath = if ([string]::IsNullOrWhiteSpace($CheckoutPath)) {
+  Split-Path -Parent $PSScriptRoot
+} else {
+  $CheckoutPath
+}
 $repo = 'FaxanFM/chronos'
 $checkout = (Resolve-Path -LiteralPath $CheckoutPath).ProviderPath
 $signers = Join-Path $PSScriptRoot '..\docs\security\allowed_signers'

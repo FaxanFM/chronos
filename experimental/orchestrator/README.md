@@ -1,8 +1,8 @@
 # Chronos Control Room
 
-## Packaged v0.10.1 candidate
+## Packaged v0.10.1 release
 
-The current plugin candidate packages this Control Room as the
+The published v0.10.1 plugin packages this Control Room as the
 `chronos-control-room` onboarding skill. Users can ask Chronos to set up the room in
 one prompt; the skill launches the bundled runtime, discovers the authenticated local
 Codex executable, and returns a private loopback link. There is no separate server
@@ -23,7 +23,9 @@ training models, changing permissions, or applying workflow changes automaticall
 Their timing, token and cost fields remain unknown when the host does not expose them.
 
 An open-source, opt-in local task queue with a browser control room. It is not included in the signed v0.9.4
-ZIP, installed into your Codex profile, or submitted to the Plugin Directory.
+ZIP. Both the full and skills-only v0.10.1 editions include Control Room; only the full edition includes
+optional hooks. Both packages are available in the
+[v0.10.1 GitHub release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1).
 It does not attach to existing desktop chats. It creates its own managed tasks
 through an installed Codex App Server using local stdio, not recurring prompts.
 

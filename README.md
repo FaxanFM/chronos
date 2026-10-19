@@ -32,9 +32,10 @@ used to develop and distribute it.
 
 ## Chronos Control Room
 
-The **v0.10.1 candidate includes Control Room inside the plugin**, with a
-packaged launcher and onboarding skill. It is not yet a published marketplace
-update. After this candidate is installed, use one starter:
+The **published v0.10.1 GitHub release includes Control Room inside the
+plugin**, with a packaged launcher and onboarding skill. The skills-only
+marketplace update has been submitted and is In review, but is not approved or
+live in the store. After installation, use one starter:
 
 > Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
 
@@ -70,16 +71,17 @@ check; confirm the listing and release before installing.
 
 | Edition | Recorded version | Install route |
 | --- | --- | --- |
-| Directory skills-only | Live listing v0.9.2; v0.9.4 submitted for review | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
-| GitHub full | Published v0.9.3 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.9.3); five optional hooks |
-| Control Room preview | Unreleased v0.10.1 candidate; publication pending | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md); not in the current Directory package |
+| Directory skills-only | v0.10.1 submitted; In review (store remains v0.9.2) | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
+| GitHub full | Published v0.10.1 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1); five optional hooks |
+| Control Room | Published in v0.10.1 | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md) |
 | Legacy onboarding preview | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
 
 The signed v0.10.0 tag is retained as the original candidate history. The
-v0.10.1 candidate carries the support-metadata correction; it remains pending
-review and publication. The current source is not the previously uploaded
-package. Audit repairs require a new signed candidate and review before
-publication.
+published v0.10.1 release carries the support-metadata correction. The
+skills-only marketplace update has been submitted and is In review; it is not
+approved or published in the store yet, which remains on v0.9.2. Do not treat
+the GitHub release as marketplace publication.
+Version 1.0 is the next milestone.
 
 Chronos is available to eligible users
 across plans, including Free, subject to region, supported surface, workspace
@@ -89,7 +91,7 @@ OpenAI endorsement or support commitment.
 Manual Git marketplace fallback for environments where the Directory is not available:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.1
 codex.cmd plugin add chronos@chronos
 ```
 
