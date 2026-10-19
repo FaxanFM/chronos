@@ -31,15 +31,22 @@ its own supported authentication. Chronos never copies credentials. Optional
 `--port` chooses a local port, otherwise a free port is used. The launch link
 establishes a session cookie for reloads; a new server needs its new launch link.
 
-Connect the dedicated runtime, add a bounded read task, then authorize execution
-and start dispatch. Defaults are disconnected, paused and without execution
-permission. Model choice follows the host default; model turns use your normal
-Codex allowance/provider billing. Tasks and relevant workspace context go to
-Codex's configured provider, not to the Chronos publisher.
+Connect the dedicated runtime, add a work item, then authorize the session and
+start dispatch. Use **Permissions**, **Authorize session**, **Run** and
+**Add work item**; stage controls include accept, cancel, retry and archive.
+Defaults are disconnected, paused and without execution permission. A restart
+requires fresh consent. Model turns use your normal Codex allowance/provider
+billing.
 
-Completed tasks wait for **Accept result**. Dependencies run only after acceptance.
-Concurrency is one by default, at most two. Attempts are limited to three and
-retries are explicit. Task time is bounded to ten minutes. Pause stops new
+Stages configured for human acceptance wait for **Accept output**. Automatic
+stages route only after native turn completion and their configured check, if any.
+Neither automatic routing nor model completion proves that an answer is correct.
+Concurrency is one by default and configurable up to 16, subject to the native
+CPU/memory health ceiling. The contract allows 128 workflows, 512 nodes across
+them, 2,048 reserved stage-task records and 16 slots per stage. Stages support `join: all` and
+`join: any`, with accepted source task IDs bounded to 32. Attempts are limited
+to three. Failed native checks may trigger bounded repair up to the stage's
+attempt limit; other failures require explicit retry. Task time is bounded to ten minutes. Pause stops new
 dispatch, not an already-running task; Cancel requests an interruption and
 waits for its actual terminal event.
 
@@ -48,14 +55,63 @@ cannot be removed until their dependent tasks are removed. Result summaries are
 bounded to 2,000 characters; review the evidence before accepting them. The
 ten-minute limit and concurrency limit are not a monetary spending cap.
 
+## Design A Workflow
+
+Choose **New from template** for software delivery, research, engineering or
+marketing/SEO, or start blank. Drag stage connectors to form a directed acyclic
+graph. Select a stage to set its assignment, model, workspace access, bot slots,
+input join and output gate. Save before queueing work. A workflow with existing
+work items is immutable: duplicate it to change the process without rewriting
+history. Delete a selected connection with the graph's delete control/key.
+
+**Add work item** accepts a bounded assignment, an optional
+`codex://threads/<thread-id>` link and up to 32 accepted outbox inputs from any
+workflow. The link is checked through the supported native API; dispatch creates
+a new managed fork of its stored context, not control of its original Desktop
+turn. No full account inventory or task-list completeness assertion is needed.
+
+Each stage has an inbox, a bounded pool of execution slots and an accepted
+outbox. `all` joins wait for every incoming stage; `any` joins run once after the
+first accepted input and do not later rerun when other inputs arrive. Multiple
+independent work items can advance asynchronously. A packet's writers are
+serialized against all of its readers/writers; separate packets get separate
+workspaces. Accepted outputs passed between stages are compact 2,000-character
+summaries. For larger artifacts, later stages must inspect the shared packet
+workspace; there is no hidden full-report or cross-packet file merge.
+
+Configure a native check as an argument array, for example
+`["node", "--test"]`, using tools already installed on the machine. It runs in
+the same sandbox and workspace, without an extra model turn, with a 60-second
+command limit. Windows uses the host's output cap; Chronos bounds stored
+receipts. A failed check never opens the accepted outbox. The templates do not
+invent a universal test command for every project.
+
+Use **Queues** to inspect receipts and accept, cancel or retry tasks. Archive a
+whole work item to remove its stage history; its worktree and branch are kept.
+Accepted outputs with dependent work items cannot be archived until those
+dependents are archived. Release gates produce handoff material, not automatic
+merges, deployments or external-account publishing.
+
+**Runtime** shows the owned process, active turns, host free/total memory, CPU
+count, server RSS and dispatch limits. The native 15-second heartbeat does not
+call a model or require a scheduled chat. Low memory reduces dispatch capacity;
+below 256 MiB free, new work waits. These observations do not certify other
+Desktop chats, approvals, quota, context or all eight plugin Heartbeat families.
+
+Hundreds of stage definitions are supported; hundreds of simultaneous model
+workers are not claimed. The current hard execution ceiling is 16 and the
+default is one. Provider limits, costs and available machine resources still
+matter. Per-stage provider web search is opt-in; research/SEO templates select
+it visibly in their editable stage settings. Shell network access remains off.
+
 Results are not independently verified simply because the model finished.
-This edition supports read-only work, not autonomous code changes. Every new
-thread must confirm the effective `readOnly` sandbox and `never` approval policy.
-The dedicated process disables hooks, plugins, apps, browser automation and
-multi-agent features. Inherited MCP servers are explicitly disabled and checked
-before any model turn; only disabled metadata with empty catalogs is accepted.
-Chronos never automatically approves permission requests. These restrictions
-affect only its owned process, not your normal Desktop setup.
+Stages may be read-only or workspace-write. Writable stages use an owned
+isolated Git worktree from committed `HEAD`; uncommitted changes are not copied.
+Non-Git sources use an empty owned artifact directory. Native verification is
+optional and configured by the workflow author; automatic output is not
+semantic proof. The dedicated process disables hooks, plugins, apps, browser
+automation and multi-agent features. External MCP accounts/apps are never
+approved; inherited MCP metadata is disabled and checked before model turns.
 
 Read-only does not mean offline or limited to reading the selected directory.
 Codex controls the filesystem sandbox; model traffic still goes to its provider.
@@ -65,7 +121,7 @@ Do not paste secrets into task instructions.
 ## Stop And Recover
 
 Use **Disconnect** to stop the owned runtime and revoke session execution
-permission while keeping the dashboard open. Use **Shut down** or Ctrl+C to close
+permission while keeping the dashboard open. Use **Stop Control Room** or Ctrl+C to close
 the Control Room. Shutdown stops only the Codex subprocess this
 control room created, not your Desktop app or unrelated tasks. The queue is
 preserved locally and restores paused with execution permission revoked.
@@ -106,6 +162,11 @@ node .\experimental\orchestrator\tests\browser-check.mjs
 Fixtures simulate model events; they do not claim live inference or unattended
 desktop behavior. Screenshots go into ignored `dist/control-room-browser-check`.
 
+The committed frontend bundle makes normal use independent of npm. To change
+the ReactFlow UI as a developer, run `npm ci --prefix experimental/orchestrator`
+then `npm --prefix experimental/orchestrator run build`. ReactFlow owns the
+graph interaction; the native engine validates every saved DAG again.
+
 ## Verify Real Execution
 
 The isolation probe checks permissions and external-tool inventories, but
@@ -117,12 +178,13 @@ node .\experimental\orchestrator\tests\isolation-check.mjs `
 ```
 
 The following **uses your Codex allowance**. It creates a disposable fixture
-workspace under ignored `dist/`, runs real tasks, waits for human-acceptance
-gating, interrupts a task after its shell command starts, stops only its own
-runtime during another command, restores paused and explicitly retries:
+workspace under ignored `dist/` and runs the real four-stage writable workflow:
+read intake -> isolated workspace-write build with native verification ->
+independent read-only review with human approval -> release handoff with human
+approval. The source checkout remains unchanged:
 
 ```powershell
-node .\experimental\orchestrator\tests\live-check.mjs `
+node .\experimental\orchestrator\tests\live-workflow-check.mjs `
   --confirm-live-model-turns `
   --codex 'C:\absolute\path\to\codex.exe' `
   --output '.\dist\control-room-live-check'

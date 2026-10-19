@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CodexAdapter } from '../lib/codex-adapter.mjs';
 
-export async function checkIsolation({ codexPath, cwd } = {}) {
+export async function checkIsolation({ codexPath, cwd, policy = 'read-only', sourceThreadLink } = {}) {
   let modelRequests = 0;
-  const evidence = { isolationResponses: 0, serverCount: 0, cursorPages: 0, configMcpEntries: 0, configLayerMcpEntries: 0, toolCount: 0, disabledServers: 0 };
+  const evidence = { isolationResponses: 0, serverCount: 0, cursorPages: 0, configMcpEntries: 0, configLayerMcpEntries: 0, toolCount: 0, disabledServers: 0, errorSignals: [] };
   const spawnWithoutModelTurns = (...args) => {
     const child = spawn(...args);
     const write = child.stdin.write.bind(child.stdin);
@@ -18,6 +18,7 @@ export async function checkIsolation({ codexPath, cwd } = {}) {
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
         try {
           const message = JSON.parse(line);
+          if (message.error) evidence.errorSignals.push(['experimental', 'runtimeWorkspaceRoots', 'sandbox', 'permission', 'invalid', 'capability'].filter((signal) => String(message.error.message || '').toLowerCase().includes(signal.toLowerCase())));
           if (inventoryIds.has(message.id) && message.result) {
             evidence.isolationResponses += 1;
             evidence.serverCount += Array.isArray(message.result.data) ? message.result.data.length : -1;
@@ -50,16 +51,17 @@ export async function checkIsolation({ codexPath, cwd } = {}) {
   adapter.on('error', () => {});
   try {
     await adapter.connect();
-    try { await assert.rejects(adapter.startTask({ id: 'isolation-probe', instruction: 'This must never be sent to a model.' }), /probe_model_turn_blocked/); }
+    if (policy === 'workspace-write') await adapter.allowWorkspace(resolve(cwd));
+    try { await assert.rejects(adapter.startTask({ id: 'isolation-probe', instruction: 'This must never be sent to a model.', policy, sourceThreadLink }), /probe_model_turn_blocked/); }
     catch (error) { console.log('Isolation evidence:', JSON.stringify(evidence)); throw error; }
     assert.equal(modelRequests, 1, 'The probe must reach the pre-turn isolation checks.');
     assert.ok(evidence.isolationResponses > 0); assert.equal(evidence.toolCount, 0); assert.equal(evidence.disabledServers, evidence.serverCount);
-    return { result: 'PASS', modelTurnsSent: 0, isolationCheckedBeforeTurn: true, disabledMetadataRecords: evidence.disabledServers, availableExternalTools: evidence.toolCount };
+    return { result: 'PASS', policy, sourceHandling: sourceThreadLink ? 'fork' : 'new_thread', modelTurnsSent: 0, isolationCheckedBeforeTurn: true, disabledMetadataRecords: evidence.disabledServers, availableExternalTools: evidence.toolCount };
   } finally { await adapter.close(); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2);
   const get = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
-  console.log(JSON.stringify(await checkIsolation({ codexPath: get('--codex'), cwd: get('--cwd') || process.cwd() })));
+  console.log(JSON.stringify(await checkIsolation({ codexPath: get('--codex'), cwd: get('--cwd') || process.cwd(), policy: args.includes('--workspace-write') ? 'workspace-write' : 'read-only', sourceThreadLink: get('--source-thread') })));
 }

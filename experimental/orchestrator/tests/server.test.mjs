@@ -25,7 +25,7 @@ test('loopback control API requires session token, same origin and bounded JSON'
     assert.equal((await call('/api/actions', { method: 'POST', headers: { 'X-Chronos-Token': room.token, 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
     assert.equal((await call('/api/actions', { method: 'POST', headers, body: '{' })).status, 400);
     assert.equal((await call('/api/actions', { method: 'POST', headers, body: JSON.stringify({ action: 'add-task', title: 'A', instruction: 'Read', dependencies: [] }) })).status, 200);
-    assert.equal((await call('/api/actions', { method: 'POST', headers, body: ' '.repeat(65537) })).status, 413);
+    assert.equal((await call('/api/actions', { method: 'POST', headers, body: ' '.repeat(2097153) })).status, 413);
     const index = await call('/'); assert.match(index.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     assert.doesNotMatch(await index.text(), new RegExp(room.token));
     assert.equal((await call('/assets/chronos-mark.png')).status, 200);

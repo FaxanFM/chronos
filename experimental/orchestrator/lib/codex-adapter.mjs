@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events';
-import { stat } from 'node:fs/promises';
+import { stat, realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-const MAX_TASKS = 64 * 3;
+const MAX_TASKS = 2048 * 3;
 const MAX_LINE = 1024 * 1024;
 const MAX_SUMMARY = 2000;
 const REQUEST_TIMEOUT = 10000;
+const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const pathKey = (value) => process.platform === 'win32' ? resolve(value).toLowerCase() : resolve(value);
 
 export class CodexAdapter extends EventEmitter {
   constructor({ codexPath, cwd, codexHome, transportFactory, spawnProc = spawn } = {}) {
@@ -26,6 +28,9 @@ export class CodexAdapter extends EventEmitter {
     this.generation = 0;
     this.effectivePolicy = null;
     this.shutdownUnverified = false;
+    this.writeRoots = new Set();
+    this.verifications = new Set();
+    this.lastProtocolAt = null;
     this.diagnosticsState = { notifications: 0, responses: 0, errors: 0, lastMethod: null, lastStatus: null, lastErrorCode: null };
   }
 
@@ -43,9 +48,9 @@ export class CodexAdapter extends EventEmitter {
       if (!cwdInfo?.isDirectory()) throw new Error('adapter_cwd_not_found');
       const env = { ...process.env };
       if (this.codexHome !== undefined) env.CODEX_HOME = resolve(this.codexHome);
-      // The orchestrator is a read-only control plane. Hooks are a separate,
-      // explicit opt-in and must never be inherited from the user's profile.
-      const disabled = ['hooks', 'apps', 'plugins', 'multi_agent', 'multi_agent_v2', 'browser_use', 'computer_use', 'in_app_browser', 'in_app_local_automation'];
+      // Chronos owns dispatch and consent. Inherited automation must not start
+      // untracked turns, account tools or hook side effects in this process.
+      const disabled = ['hooks', 'apps', 'plugins', 'goals', 'multi_agent', 'multi_agent_v2', 'browser_use', 'computer_use', 'in_app_browser', 'in_app_local_automation'];
       const featureArgs = disabled.flatMap((feature) => ['--disable', feature]);
       this.child = this.spawnProc(path, ['app-server', ...featureArgs, '--config', 'mcp_servers={}', '--config', 'web_search="disabled"', '--listen', 'stdio://'], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       this.transport = this.#childTransport(this.child, generation);
@@ -56,7 +61,7 @@ export class CodexAdapter extends EventEmitter {
     this.transport.onError?.((error) => { if (generation === this.generation) this.#fail(error); });
     this.transport.onClose?.(() => { if (generation === this.generation) this.#fail(new Error('codex_app_server_closed')); });
     try {
-      await this.#request('initialize', { clientInfo: { name: 'chronos-orchestrator', version: '0.1.0-experimental' }, capabilities: { experimentalApi: false } });
+      await this.#request('initialize', { clientInfo: { name: 'chronos-orchestrator', version: '0.2.0-experimental' }, capabilities: { experimentalApi: true } });
     } catch (error) {
       await this.close();
       throw error;
@@ -96,20 +101,41 @@ export class CodexAdapter extends EventEmitter {
     if (!this.connected) throw new Error('adapter_not_connected');
     if (!task || typeof task.instruction !== 'string' || !task.instruction.trim()) throw new Error('task_instruction_required');
     if (this.owned.size >= MAX_TASKS) throw new Error('adapter_task_limit');
-    const started = await this.#request('thread/start', {
-      cwd: task.cwd || this.cwd,
+    const policy = task.policy || 'read-only';
+    if (!['read-only', 'workspace-write'].includes(policy)) throw new Error('task_policy_invalid');
+    const cwd = resolve(task.cwd || this.cwd || process.cwd());
+    if (policy === 'workspace-write' && !this.writeRoots.has(pathKey(cwd))) throw new Error('workspace_write_root_not_registered');
+    let sourceThreadId = task.sourceThreadId;
+    if (task.sourceThreadLink) {
+      if (!task.sourceThreadLink.startsWith('codex://threads/')) throw new Error('source_thread_link_invalid');
+      sourceThreadId = task.sourceThreadLink.slice('codex://threads/'.length);
+    }
+    if (sourceThreadId && !THREAD_ID.test(sourceThreadId)) throw new Error('source_thread_link_invalid');
+    const method = sourceThreadId ? 'thread/fork' : 'thread/start';
+    const started = await this.#request(method, {
+      ...(sourceThreadId ? { threadId: sourceThreadId, excludeTurns: true, deferGoalContinuation: true } : {}),
+      cwd,
       approvalPolicy: 'never',
-      sandbox: 'read-only',
-      config: { mcp_servers: this.configuredMcpServers },
+      sandbox: policy,
+      runtimeWorkspaceRoots: policy === 'workspace-write' ? [cwd] : [],
+      config: {
+        mcp_servers: this.configuredMcpServers,
+        features: { goals: false, multi_agent: false, multi_agent_v2: false, hooks: false, apps: false, plugins: false },
+        web_search: task.webSearch === true ? 'live' : 'disabled',
+        sandbox_workspace_write: { writable_roots: [], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true }
+      },
       ...(task.model ? { model: task.model } : {})
     });
-    if (started?.approvalPolicy !== 'never' || started?.sandbox?.type !== 'readOnly') {
+    const expectedType = policy === 'workspace-write' ? 'workspaceWrite' : 'readOnly';
+    const extraWriteRoots = policy === 'workspace-write' && (!Array.isArray(started?.sandbox?.writableRoots) || started.sandbox.writableRoots.some((root) => typeof root !== 'string' || pathKey(root) !== pathKey(cwd)));
+    if (started?.approvalPolicy !== 'never' || started?.sandbox?.type !== expectedType || started?.sandbox?.networkAccess === true || extraWriteRoots || (started.cwd && pathKey(started.cwd) !== pathKey(cwd))) {
       await this.close();
       throw new Error('codex_policy_mismatch');
     }
     this.effectivePolicy = {
       approvalPolicy: 'never',
-      sandbox: 'readOnly',
+      sandbox: expectedType,
+      cwd,
       model: typeof started.model === 'string' ? started.model : null,
       modelProvider: typeof started.modelProvider === 'string' ? started.modelProvider : null
     };
@@ -117,9 +143,9 @@ export class CodexAdapter extends EventEmitter {
     if (typeof threadId !== 'string' || !threadId) throw new Error('thread_start_missing_id');
     await this.#verifyIsolation(threadId);
     // Register before turn/start so an immediate notification cannot race ownership.
-    this.owned.set(threadId, { taskId: task.id || threadId, turnId: null });
+    this.owned.set(threadId, { taskId: task.id || threadId, turnId: null, active: true, policy: expectedType });
     try {
-      const turn = await this.#request('turn/start', { threadId, input: [{ type: 'text', text: task.instruction }] });
+      const turn = await this.#request('turn/start', { threadId, cwd, approvalPolicy: 'never', sandboxPolicy: this.sandboxPolicy(cwd, policy), input: [{ type: 'text', text: task.instruction }] });
       const turnId = turn?.turn?.id || turn?.turnId;
       if (typeof turnId !== 'string' || !turnId) throw new Error('turn_start_missing_id');
       this.owned.get(threadId).turnId = turnId;
@@ -128,6 +154,45 @@ export class CodexAdapter extends EventEmitter {
       await this.close();
       throw error;
     }
+  }
+
+  async allowWorkspace(cwd) {
+    const path = await realpath(cwd);
+    if (!(await stat(path)).isDirectory()) throw new Error('workspace_directory_invalid');
+    this.writeRoots.add(pathKey(path));
+  }
+
+  sandboxPolicy(cwd, policy) {
+    return policy === 'workspace-write' ? { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true } : { type: 'readOnly', networkAccess: false };
+  }
+
+  async inspectThread(sourceThreadLink) {
+    if (!this.connected) throw new Error('connect_runtime_first');
+    const threadId = typeof sourceThreadLink === 'string' && sourceThreadLink.startsWith('codex://threads/') ? sourceThreadLink.slice('codex://threads/'.length) : '';
+    if (!THREAD_ID.test(threadId)) throw new Error('source_thread_link_invalid');
+    const result = await this.#request('thread/read', { threadId, includeTurns: false });
+    if (result?.thread?.id !== threadId) throw new Error('source_thread_unavailable');
+    return { threadId, sourceThreadLink, title: String(result.thread.name || result.thread.preview || 'Selected thread').slice(0, 120), cwd: typeof result.thread.cwd === 'string' ? result.thread.cwd : null, status: result.thread.status?.type || 'unknown', handling: 'fork_on_dispatch' };
+  }
+
+  async verifyCommand({ command, cwd, policy = 'read-only', taskId } = {}) {
+    if (!this.connected || !Array.isArray(command) || command.length < 1 || command.length > 32 || command.some((arg) => typeof arg !== 'string' || !arg || arg.length > 2000)) throw new Error('verification_command_invalid');
+    cwd = resolve(cwd || this.cwd);
+    if (policy === 'workspace-write' && !this.writeRoots.has(pathKey(cwd))) throw new Error('workspace_write_root_not_registered');
+    this.verifications.add(taskId);
+    try {
+      // Windows sandbox rejects outputBytesCap; retain the host default there.
+      const result = await this.#request('command/exec', { command, cwd, sandboxPolicy: this.sandboxPolicy(cwd, policy), timeoutMs: 60000, ...(process.platform === 'win32' ? {} : { outputBytesCap: 16000 }) }, 70000);
+      if (!Number.isInteger(result?.exitCode)) throw new Error('verification_result_invalid');
+      return { exitCode: result.exitCode, stdout: String(result.stdout || '').slice(0, 8000), stderr: String(result.stderr || '').slice(0, 8000) };
+    } finally { this.verifications.delete(taskId); }
+  }
+
+  async cancelVerification(taskId) {
+    if (!this.verifications.has(taskId)) return;
+    // command/exec has no per-request cancellation in this protocol build.
+    // Closing our owned runtime is safer than claiming the command stopped.
+    await this.close();
   }
 
   async interruptTask(task) {
@@ -166,7 +231,7 @@ export class CodexAdapter extends EventEmitter {
 
   diagnostics() {
     return Object.freeze({ connected: this.connected, shutdownUnverified: this.shutdownUnverified,
-      ownedTaskCount: this.owned.size, effectivePolicy: this.effectivePolicy && { ...this.effectivePolicy },
+      ownedTaskCount: this.owned.size, activeTurns: [...this.owned.values()].filter((task) => task.active).length, verifyingCommands: this.verifications.size, lastProtocolAt: this.lastProtocolAt, effectivePolicy: this.effectivePolicy && { ...this.effectivePolicy },
       ...this.diagnosticsState });
   }
 
@@ -192,11 +257,11 @@ export class CodexAdapter extends EventEmitter {
     return { onMessage: (cb) => callbacks.add(cb), onError: () => {}, onClose: () => {}, send: (message) => child.stdin.write(`${JSON.stringify(message)}\n`), close: () => child.stdin.end() };
   }
 
-  #request(method, params) {
+  #request(method, params, timeout = REQUEST_TIMEOUT) {
     if (!this.transport?.send) return Promise.reject(new Error('adapter_transport_unavailable'));
     const id = this.nextId++;
     return new Promise((resolveRequest, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`codex_request_timeout:${method}`)); }, REQUEST_TIMEOUT);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`codex_request_timeout:${method}`)); }, timeout);
       this.pending.set(id, { resolve: resolveRequest, reject, timer });
       try { this.transport.send({ jsonrpc: '2.0', id, method, params }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
@@ -230,6 +295,7 @@ export class CodexAdapter extends EventEmitter {
   }
 
   #message(message) {
+    this.lastProtocolAt = new Date().toISOString();
     if (message?.id !== undefined && this.pending.has(message.id)) {
       this.diagnosticsState.responses++;
       const entry = this.pending.get(message.id); this.pending.delete(message.id); clearTimeout(entry.timer);
@@ -249,7 +315,13 @@ export class CodexAdapter extends EventEmitter {
       const owned = this.owned.get(params.threadId); if (owned) this.#emitTask(params.threadId, 'approval-required', params.turnId);
       return;
     }
-    const owned = this.owned.get(params.threadId); if (!owned) return;
+    const owned = this.owned.get(params.threadId);
+    if (method === 'turn/started' && (!owned || owned.active === false)) {
+      this.#fail(new Error('codex_untracked_turn_detected'));
+      void this.close();
+      return;
+    }
+    if (!owned) return;
     const turnId = params.turnId || params.turn?.id || params.item?.turnId || owned.turnId;
     if (owned.turnId && turnId && owned.turnId !== turnId) return;
     const nestedStatus = params.turn?.status?.type || params.turn?.status;
@@ -266,6 +338,7 @@ export class CodexAdapter extends EventEmitter {
 
   #emitTask(threadId, kind, turnId, text) {
     const owned = this.owned.get(threadId); if (!owned) return;
+    if (['completed', 'failed', 'interrupted'].includes(kind)) owned.active = false;
     this.emit('task-event', { taskId: owned.taskId, kind, turnId, ...(text ? { summary: text } : {}) });
   }
 

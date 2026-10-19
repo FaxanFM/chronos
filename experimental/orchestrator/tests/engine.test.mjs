@@ -94,7 +94,7 @@ test('stale events cannot settle a later attempt', async () => {
 test('three attempts maximum; dependency targets and concurrency validated', async () => {
   const a = new Adapter(), e = new Orchestrator({ adapter: a });
   await assert.rejects(add(e, 'Invalid', ['missing']), /dependencies_invalid/);
-  await assert.rejects(e.action({ action: 'configure', maxConcurrency: 3 }), /concurrency_must/);
+  await assert.rejects(e.action({ action: 'configure', maxConcurrency: 17 }), /concurrency_must/);
   const id = await add(e, 'A'); await start(e);
   for (let i = 0; i < 3; i++) { a.finish(i, 'failed'); await flush(e); if (i < 2) { await e.action({ action: 'start' }); await e.action({ action: 'retry', taskId: id }); await flush(e); } }
   await assert.rejects(e.action({ action: 'retry', taskId: id }), /attempt_limit/); assert.equal(a.starts.length, 3); await e.close();

@@ -13,7 +13,9 @@ function fakeTransport() {
       else if (message.method === 'account/read') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { requiresOpenaiAuth: false, account: null } });
       else if (message.method === 'config/read') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { config: { mcp_servers: {} }, origins: {} } });
       else if (message.method === 'mcpServerStatus/list') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { data: [], nextCursor: null } });
-      else if (message.method === 'thread/start') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: 'owned-thread' }, approvalPolicy: 'never', sandbox: { type: 'readOnly' }, model: 'host-default', modelProvider: 'host' } });
+      else if (['thread/start', 'thread/fork'].includes(message.method)) t.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: 'owned-thread' }, cwd: message.params.cwd, approvalPolicy: 'never', sandbox: message.params.sandbox === 'workspace-write' ? { type: 'workspaceWrite', writableRoots: [message.params.cwd], networkAccess: false } : { type: 'readOnly' }, model: 'host-default', modelProvider: 'host' } });
+      else if (message.method === 'thread/goal/clear') t.emit('message', { jsonrpc: '2.0', id: message.id, result: {} });
+      else if (message.method === 'command/exec') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { exitCode: 0, stdout: 'native verification', stderr: '' } });
       else if (message.method === 'turn/start') t.emit('message', { jsonrpc: '2.0', id: message.id, result: { turn: { id: 'owned-turn' } } });
       else if (message.method === 'turn/interrupt') t.emit('message', { jsonrpc: '2.0', id: message.id, result: {} });
     });
@@ -86,7 +88,44 @@ test('passes explicit per-thread disable overrides for inherited MCP names', asy
     original(message);
   };
   const adapter = new CodexAdapter({ transportFactory: async () => transport }); await adapter.connect(); await adapter.startTask({ id: 'task-1', instruction: 'read only' });
-  assert.deepEqual(config, { mcp_servers: { local: { enabled: false }, remote: { enabled: false } } }); await adapter.close();
+  assert.deepEqual(config.mcp_servers, { local: { enabled: false }, remote: { enabled: false } });
+  assert.equal(config.web_search, 'disabled'); assert.equal(config.sandbox_workspace_write.network_access, false); await adapter.close();
+});
+
+test('workspace writes require an explicitly registered root and constrain the native policy', async () => {
+  const transport = fakeTransport(); const adapter = new CodexAdapter({ cwd: process.cwd(), transportFactory: async () => transport });
+  await adapter.connect();
+  await assert.rejects(adapter.startTask({ id: 'write', policy: 'workspace-write', instruction: 'Write one fixture.' }), /workspace_write_root_not_registered/);
+  await adapter.allowWorkspace(process.cwd());
+  await adapter.startTask({ id: 'write', policy: 'workspace-write', instruction: 'Write one fixture.' });
+  const turn = transport.sent.find((message) => message.method === 'turn/start');
+  assert.equal(turn.params.sandboxPolicy.type, 'workspaceWrite');
+  assert.deepEqual(turn.params.sandboxPolicy.writableRoots, [process.cwd()]);
+  assert.equal(turn.params.sandboxPolicy.networkAccess, false);
+  assert.equal(adapter.diagnostics().effectivePolicy.sandbox, 'workspaceWrite');
+  await adapter.close();
+});
+
+test('a selected deep link forks context with native goal continuation disabled', async () => {
+  const transport = fakeTransport(); const adapter = new CodexAdapter({ transportFactory: async () => transport }); await adapter.connect();
+  const source = '01a151cc-f0c6-7572-aa76-7db9477460b1';
+  await adapter.startTask({ id: 'linked', instruction: 'Continue the bounded task.', sourceThreadLink: 'codex://threads/' + source });
+  const fork = transport.sent.find((message) => message.method === 'thread/fork');
+  assert.equal(fork.params.threadId, source); assert.equal(fork.params.excludeTurns, true); assert.equal(fork.params.deferGoalContinuation, true);
+  assert.equal(fork.params.config.features.goals, false);
+  assert.equal(transport.sent.some((message) => message.method === 'thread/goal/clear'), false);
+  assert.equal(transport.sent.some((message) => message.method === 'thread/resume'), false);
+  await adapter.close();
+});
+
+test('native verification uses explicit sandbox policy and bounded output', async () => {
+  const transport = fakeTransport(); const adapter = new CodexAdapter({ cwd: process.cwd(), transportFactory: async () => transport }); await adapter.connect();
+  const result = await adapter.verifyCommand({ command: ['node', '--test'], policy: 'read-only', taskId: 'verify' });
+  assert.equal(result.exitCode, 0);
+  const request = transport.sent.find((message) => message.method === 'command/exec');
+  assert.equal(request.params.sandboxPolicy.type, 'readOnly'); assert.equal(request.params.timeoutMs, 60000);
+  await assert.rejects(adapter.verifyCommand({ command: [], taskId: 'bad' }), /verification_command_invalid/);
+  await adapter.close();
 });
 
 test('accepts disabled MCP metadata only when its catalogs are empty', async () => {

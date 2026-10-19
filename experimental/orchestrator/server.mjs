@@ -5,22 +5,33 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CodexAdapter } from './lib/codex-adapter.mjs';
 import { Orchestrator } from './lib/engine.mjs';
+import { WorkspaceManager } from './lib/workspaces.mjs';
+import { RuntimeHealth } from './lib/runtime-health.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const files = new Map([
   ['/', [join(root, 'public/index.html'), 'text/html; charset=utf-8']],
   ['/app.js', [join(root, 'public/app.js'), 'text/javascript; charset=utf-8']],
+  ['/app.css', [join(root, 'public/app.css'), 'text/css; charset=utf-8']],
   ['/styles.css', [join(root, 'public/styles.css'), 'text/css; charset=utf-8']],
   ['/assets/chronos-mark.png', [resolve(root, '../../plugins/chronos/assets/chronos-mark.png'), 'image/png']]
 ]);
 const safeCode = (error) => /^[a-z][a-z0-9_]{1,95}$/.test(error?.message || '') ? error.message : 'operation_failed';
 
-export async function createControlRoom({ engine, token = randomBytes(32).toString('hex'), port = 0 } = {}) {
+export async function createControlRoom({ engine, token = randomBytes(32).toString('hex'), port = 0, runtimeHealth, workspaceInfo } = {}) {
   if (!engine || !/^[a-f0-9]{64}$/.test(token)) throw new Error('control_room_parameters_invalid');
   let origin;
   let cookieName;
   let closing;
   const session = randomBytes(32).toString('hex');
+  const health = runtimeHealth || new RuntimeHealth({ adapter: engine.adapter, engine });
+  engine.dispatchLimit = (configured) => {
+    const evidence = health.snapshot();
+    if (!evidence || !Number.isFinite(evidence.host?.freeMemoryBytes)) return Math.min(configured, 1);
+    if (evidence.host.freeMemoryBytes < 256 * 1048576) return 0;
+    return Math.min(configured, evidence.recommendedConcurrency || 1);
+  };
+  const snapshot = async () => ({ ...engine.snapshot(), heartbeat: await health.sample(), workspace: workspaceInfo || { sourceRoot: engine.adapter?.cwd || null, base: 'committed_HEAD', uncommittedChangesCopied: false } });
   const matchesSecret = (value, expected) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
   const respond = (res, code, data) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
   const server = http.createServer(async (req, res) => {
@@ -39,14 +50,14 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
         const launchAuthorized = matchesSecret(received, token);
         if (!launchAuthorized && !matchesSecret(cookie, session)) return respond(res, 401, { error: 'open_the_private_launch_link' });
         if (launchAuthorized) res.setHeader('Set-Cookie', cookieName + '=' + session + '; HttpOnly; SameSite=Strict; Path=/api/');
-        if (path === '/api/state' && req.method === 'GET') return respond(res, 200, engine.snapshot());
+        if (path === '/api/state' && req.method === 'GET') return respond(res, 200, await snapshot());
         if (path !== '/api/actions' || req.method !== 'POST') return respond(res, 404, { error: 'route_not_found' });
         if (req.headers.origin !== origin) return respond(res, 403, { error: 'origin_required' });
         if (req.headers['content-type']?.split(';')[0] !== 'application/json') return respond(res, 415, { error: 'json_required' });
         const chunks = []; let size = 0;
         for await (const chunk of req) {
           size += chunk.length;
-          if (size > 65536) { respond(res, 413, { error: 'request_too_large' }); req.resume(); return; }
+          if (size > 2097152) { respond(res, 413, { error: 'request_too_large' }); req.resume(); return; }
           chunks.push(chunk);
         }
         let input;
@@ -56,7 +67,9 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
           setImmediate(() => close().catch(() => {}));
           return;
         }
-        return respond(res, 200, await engine.action(input));
+        if (input?.action === 'inspect-thread') return respond(res, 200, await engine.adapter.inspectThread(input.sourceThreadLink));
+        await engine.action(input);
+        return respond(res, 200, await snapshot());
       }
       if (req.method !== 'GET' || !files.has(path)) return respond(res, 404, { error: 'route_not_found' });
       const [file, contentType] = files.get(path);
@@ -68,7 +81,7 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
   await new Promise((accept, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', accept); });
   origin = 'http://127.0.0.1:' + server.address().port;
   cookieName = 'chronos_session_' + server.address().port;
-  const timer = setInterval(() => engine.tick().catch(() => {}), 15000); timer.unref();
+  const timer = setInterval(() => { health.sample().catch(() => {}); engine.tick().catch(() => {}); }, 15000); timer.unref();
   const close = () => {
     if (!closing) closing = (async () => {
       clearInterval(timer);
@@ -95,7 +108,13 @@ async function main() {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port_invalid');
   const adapter = new CodexAdapter({ codexPath: options.get('--codex'), cwd, codexHome: options.get('--codex-home') });
   const statePath = resolve(options.get('--state') || join(root, '.local', 'queue.json'));
-  const engine = await new Orchestrator({ adapter, statePath, recoverStaleLock: options.has('--recover-stale-lock') }).initialize();
+  const workspaces = new WorkspaceManager({ sourceRoot: cwd, storageRoot: join(dirname(statePath), 'workspaces') });
+  const prepareWorkspace = async (input) => {
+    const prepared = await workspaces.prepare(input);
+    if (prepared.workspacePath) await adapter.allowWorkspace(prepared.workspacePath);
+    return prepared;
+  };
+  const engine = await new Orchestrator({ adapter, statePath, prepareWorkspace, verifier: adapter, recoverStaleLock: options.has('--recover-stale-lock') }).initialize();
   let room;
   try { room = await createControlRoom({ engine, port }); }
   catch (error) { await engine.close(); throw error; }

@@ -16,7 +16,7 @@ There are two distinct products to validate:
 - The existing plugin: selected/visible desktop-chat workflows, evidence-bound
   diagnostics, and bounded read-worker coordination through available host tools.
 - The proposed Control Room: a local task queue whose own Codex App Server runs
-  managed read-only tasks. Completion events advance the queue; accepted results
+  managed read-only and isolated workspace-write tasks. Completion events advance the queue; accepted results
   release dependencies. It does not secretly attach to the Desktop app.
 
 This is feasible, but it is not yet a full replacement for a human coordinator
@@ -77,10 +77,15 @@ Codex executable. It adds no package files or manifest changes to v0.9.4.
 
 - A working local control-room UI, not a screenshot or embedded-Codex UI claim.
 - Explicit session execution opt-in, initially disconnected and paused.
-- Up to 64 task records, concurrency one or two, at most three explicit attempts.
-- A dependency graph: completion means ready for review, not accepted.
-- Verified read-only task sessions, no approval escalation, no automatic publication,
-  installation, hook trust, arbitrary-thread takeover, or worker spawning.
+- Default concurrency one, configurable to 16 with CPU/memory health limits;
+  capacity is 128 workflows, 512 nodes, 2,048 reserved task records and 16 stage slots.
+- An editable DAG with automatic routing or explicit human acceptance per stage,
+  fan-out, all/any joins, inbox/outbox views and cross-workflow accepted inputs.
+- Verified managed task sessions with read-only and owned workspace-write stages;
+  writable Git worktrees start from committed HEAD and do not copy uncommitted
+  changes. Non-Git sources use empty artifact directories. No approval
+  escalation, external-account approval, arbitrary-thread takeover, or worker
+  spawning.
 - Terminal-event validation; tool/item completion cannot finish the whole task.
 - Pause stops new dispatch. Cancel waits for termination; acknowledgement alone
   does not release capacity. A bounded interruption failure closes only the
@@ -96,11 +101,14 @@ Codex executable. It adds no package files or manifest changes to v0.9.4.
 - Explicit owner-lock recovery only after a dead-PID check. Uncertain old workers
   block all replacement dispatch until the operator confirms they stopped.
 
-The model remains responsible for the quality of a report; the queue cannot
-prove that an LLM's answer is correct. Human acceptance is an explicit gate.
-Read-only execution is intentionally retained. Safe parallel edits, isolated
-worktrees, merge verification, spending controls and richer model selection
-require additional work before broad distribution.
+The model remains responsible for report quality. Automatic completion is not
+semantic proof. Optional native command checks and explicit human acceptance
+are separate gates. Selected thread links create managed forks, never takeover
+of the original Desktop turn. Same-packet workspace writers are serialized;
+separate packets use separate worktrees. Models and provider web search can be
+selected per stage. Automated merge/publication, monetary budgets, structured
+reviewer rejection/repair protocols and hundreds of concurrent turns remain
+outside this version's claims.
 
 ## Privacy And Cost
 
@@ -123,7 +131,7 @@ server names and account details are not exposed in the queue or diagnostics.
 
 ## Evidence And Release Gate
 
-Result: **33 automated tests passed**, plus the simulated browser workflow at
+The initial read-only milestone passed **33 automated tests**, plus the simulated browser workflow at
 1440x1000 and 390x844 with no horizontal overflow or JavaScript errors. The browser
 fixture also covers reload authentication, acceptance, cancellation, removal
 and shutdown. These browser events remain explicitly simulated.
@@ -142,12 +150,17 @@ consent dialog, effective-policy display, file result, acceptance, authenticated
 reload, mobile layout and shutdown. This is separate from the simulated browser
 suite and the five-turn runtime failure/recovery suite.
 
+The expanded version also passed a real four-turn workflow: intake, isolated
+implementation, native test verification, independent read-only review and a
+human-gated release handoff. The source checkout stayed unchanged. The native
+Windows verifier initially rejected a custom output cap; the adapter now omits
+that unsupported field on Windows and bounds stored receipts locally. Updated
+unit, browser and recovery results are recorded in the verification document.
+
 This supports publishing experimental source with these exact boundaries.
-Read-only configuration was verified through returned policy and protocol
-regression tests, not a real forbidden-write attempt. Cross-platform certification, autonomous
-edits, spending limits, native embedded UI and marketplace packaging remain
-separate gates. Do not change the submitted v0.9.4 artifact or announce the
-Control Room as already available in the store.
+Cross-platform live certification, monetary limits, native embedded UI and
+marketplace packaging remain separate gates. Do not replace the submitted
+v0.9.4 artifact or announce Control Room as already available in the store.
 
 **Go:** develop the user-started local orchestrator and optional UI integration.
 **No-go:** claim every Codex user gets universal background governance or a native
