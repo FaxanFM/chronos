@@ -1,6 +1,6 @@
 # OpenAI Plugin Directory Published Listing Record
 
-## v0.10.1 Patch Release And Submission Candidate
+## v0.10.1 Published Release And Review Submission
 
 Version: `0.10.1`.
 
@@ -17,15 +17,36 @@ Full edition: `chronos-v0.10.1.zip`, 31 files, five opt-in hooks, SHA-256
 `bc59db98bfc3bdbf8ef9d5fd496bf5dda6054c7b41cb7e4e8385354429148daf`.
 Directory edition: `chronos-v0.10.1-skills-only.zip`, 29 files, zero hooks, SHA-256
 `ab1d1fb2f61f2c80c25a80e5dafee69e9958ec5f7f1fd4cfba033afc8132956d`.
-Local artifacts and per-file receipts are in `dist/chronos-v0.10.1-final/`.
-Release destination: https://github.com/FaxanFM/chronos/releases/tag/v0.10.1.
+Published immutable release: https://github.com/FaxanFM/chronos/releases/tag/v0.10.1.
+Signed source commit: `9f3281c6151802be0c2816d444b1642420c8b4b9`.
+Signed annotated tag object: `8b09a0bea198e8ae8f75c624a9c67a7b5c79d377`.
+GitHub reports valid verified signatures for both. PR #5 merged with history
+preserved; the signed release commit is an ancestor of main with the same tree.
 
-Publication and review submission are pending. Require the signed tag, passing
-release workflow, immutable assets, matching hashes and attestation before final
-marketplace submission. Submit the published Directory asset to the existing
-Chronos listing, not a new listing or the older approved 0.9.4 package. Keep the
-full hook-enabled edition on GitHub. Record the publication and review receipts
-when complete; a draft upload is not a submitted or live update.
+Release workflow https://github.com/FaxanFM/chronos/actions/runs/39322224758 passed
+on windows-2022 and windows-latest, including source and exact packaged native
+suites, Governor scenarios, reproducibility, usability, lifecycle removal,
+signature trust, and Directory contracts. The Control Room Node 22/24 matrices
+passed on Windows and Linux. Publication produced six immutable assets: ZIP,
+checksum, and per-file release record for each edition.
+
+Independent post-publication verification downloaded both ZIPs, matched the hashes
+above, verified immutable release/asset bindings, verified the published SSH signer
+for tag and commit, and verified attestation bindings to the exact source digest,
+tag, and release workflow with self-hosted runners denied. Both editions returned
+PASS. Installed-state checks were explicitly skipped; no production installation
+or hook-trust change was part of this publication. Local receipts are in
+`dist/chronos-v0.10.1-verified-directory/` and `dist/chronos-v0.10.1-verified-full/`.
+
+The existing OpenAI draft `appsub_6ad633c8ddac81919c18de8361e9fde8` was updated to
+v0.10.1 using the exact published Directory ZIP. Metadata and all three skill
+scans passed with no findings. After the publisher explicitly accepted the final
+terms and compliance declarations, submission succeeded. OpenAI shows
+**v0.10.1 In review**, receipt `pluginrel_70891ebf268081918c13ff6288846049`:
+https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_70891ebf268081918c13ff6288846049.
+The marketplace update is not approved or published; the live listing remains
+0.9.2. Do not publish the older approved 0.9.4 package. The full hook-enabled
+edition remains on GitHub; the submitted Directory edition contains no hooks.
 
 ## v0.10.0 Publication Metadata Correction
 

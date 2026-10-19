@@ -68,5 +68,34 @@ try {
   if (-not $full.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Signature fixture escaped TEMP.' }
   Remove-Item -LiteralPath $full -Recurse -Force
 }
+# Exercise the verifier as a real -File invocation with its default checkout.
+# A local git shim stops before network access; reaching the fetch contract proves
+# the default path resolved from the script location instead of an empty value.
+$defaultFixture = Join-Path ([IO.Path]::GetTempPath()) ('chronos-verify-default-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $defaultFixture | Out-Null
+$bin = Join-Path $defaultFixture 'bin'
+New-Item -ItemType Directory -Path $bin | Out-Null
+Copy-Item -LiteralPath (Join-Path $repo 'scripts\verify-release.ps1') -Destination (Join-Path $defaultFixture 'verify-release.ps1')
+Set-Content -LiteralPath (Join-Path $bin 'git.cmd') -Value @('@echo off', 'exit /b 1')
+$priorPath = $env:PATH
+try {
+  $env:PATH = $bin + [IO.Path]::PathSeparator + $priorPath
+  $priorErrorAction = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $defaultFixture 'verify-release.ps1') -Version 0.0.0 -SkipInstalledCheck 2>&1 | Out-String
+  } finally {
+    $ErrorActionPreference = $priorErrorAction
+  }
+  if ($LASTEXITCODE -eq 0) { throw 'Default checkout regression unexpectedly succeeded.' }
+  if ($output -notmatch 'Release tag fetch failed') { throw ('Default checkout did not reach the fetch gate: ' + $output) }
+  if ($output -match 'Cannot bind argument|empty string|Resolve-Path') { throw ('Default checkout path was not initialized: ' + $output) }
+  [ordered]@{ result = 'PASS'; defaultCheckoutInvocation = $true; networkAvoided = $true } | ConvertTo-Json -Compress
+} finally {
+  $env:PATH = $priorPath
+  $full = [IO.Path]::GetFullPath($defaultFixture)
+  if (-not $full.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Default fixture escaped TEMP.' }
+  Remove-Item -LiteralPath $full -Recurse -Force
+}
 # The expected bad-trust probe must not become the host wrapper's exit status.
 $global:LASTEXITCODE = 0

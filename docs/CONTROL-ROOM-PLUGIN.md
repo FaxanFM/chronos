@@ -2,16 +2,22 @@
 
 ## Release Status
 
-Control Room is bundled in the **v0.10.1 candidate**, not retroactively added to
-v0.9.4. The v0.10.0 tag is retained as the original candidate; v0.10.1 carries
-the support-metadata correction and still needs review before the marketplace
-version is updated.
-Do not describe an upload, local candidate ZIP or GitHub source PR as a published
-Directory release. The Directory edition includes no lifecycle hooks.
+Control Room is bundled in the **published GitHub v0.10.1 release**, not
+retroactively added to v0.9.4. The v0.10.0 tag is retained as the original
+candidate; v0.10.1 carries the support-metadata correction. The skills-only
+Directory update has been submitted and is In review, but is not approved or
+published in the store; the current store version remains v0.9.2. The
+Directory edition includes no lifecycle hooks.
+
+Marketplace review receipt: https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_70891ebf268081918c13ff6288846049
+
+Published packages: [Full GitHub release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1) and
+[skills-only package](https://github.com/FaxanFM/chronos/releases/download/v0.10.1/chronos-v0.10.1-skills-only.zip).
 
 ## One Prompt
 
-After installing the reviewed version in a supported local Codex environment,
+After installing the published GitHub edition, or after the reviewed Directory
+update is available, in a supported local Codex environment,
 choose its setup starter or ask:
 
 > Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
