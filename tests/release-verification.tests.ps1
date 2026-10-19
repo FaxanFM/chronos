@@ -68,3 +68,5 @@ try {
   if (-not $full.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Signature fixture escaped TEMP.' }
   Remove-Item -LiteralPath $full -Recurse -Force
 }
+# The expected bad-trust probe must not become the host wrapper's exit status.
+$global:LASTEXITCODE = 0

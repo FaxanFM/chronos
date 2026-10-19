@@ -6,8 +6,12 @@ This record covers the packaged Control Room candidate, not a marketplace submis
 The candidate was checked locally on Windows with Node.js 24, Edge, an authenticated
 Codex CLI, and bundled Git. The current evidence is:
 
-- 67/67 unit and regression tests passed, including the exact packaged entrypoint
+- 68/68 unit and regression tests passed, including the exact packaged entrypoint
   and native Git hook/filter isolation regressions.
+- The browser bundle includes complete notices for all 18 bundled npm dependencies.
+  The build discovers them from esbuild's input graph and fails if a license is
+  missing. A source/runtime regression checks full MIT, ISC and BSD notices.
+  Browser executable bytes are unchanged by this notice-only correction.
 - The usability suite passed.
 - The deterministic skills-only package contained 29 files and zero hooks.
 - An extracted ZIP launched through the packaged onboarding entrypoint, discovered the
@@ -56,6 +60,15 @@ remained unchanged, independent review completed, and downstream work stayed hel
 until human acceptance. These checks resolve the earlier execution blocker; they
 do not themselves establish a GitHub CI result or Directory publication.
 
+The first GitHub Windows run passed runtime, Inspector, Heartbeat, Supervision,
+Governor, reproducibility and removal checks, then failed its signer-contract
+step despite printing PASS. Its intentional wrong-trust probe left a nonzero
+native exit status for GitHub's PowerShell wrapper. The test now clears that
+status only after all assertions and cleanup succeed. The exact wrapper was
+reproduced locally: trusted signature PASS, incorrect namespace rejected, exit
+zero. Signature verification was never bypassed. Current-head CI results belong
+to the PR receipt, not the earlier failed run.
+
 An initial legacy native recheck interrupted Heartbeat after about seven minutes
 without a verdict. The subsequent bounded rerun passed source and packaged
 Heartbeat. Source Inspector, packaged Inspector, source Supervision and source
@@ -66,7 +79,7 @@ FAIL. All six native script files are byte-identical between the first and
 hardened package records. Final native test processes exited with code zero.
 
 Core live execution tested October 18, 2026 (America/New_York). The packaged
-integration and 67-test/browser/package rerun continued on October 19.
+integration and 68-test/browser/package rerun continued on October 19.
 Scope: the separate open-source `experimental/orchestrator` Control Room 0.2.0 and its
 v0.10.0 packaged onboarding candidate.
 No marketplace submission, main-branch release or signed plugin ZIP was replaced.
