@@ -7,6 +7,7 @@ import { CodexAdapter } from './lib/codex-adapter.mjs';
 import { Orchestrator } from './lib/engine.mjs';
 import { WorkspaceManager } from './lib/workspaces.mjs';
 import { RuntimeHealth } from './lib/runtime-health.mjs';
+import { readSetupPlan } from './lib/setup-plan.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const files = new Map([
@@ -98,11 +99,12 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
   };
 }
 
-export async function startLocalControlRoom({ codexPath, cwd, codexHome, statePath, port = 0, recoverStaleLock = false, instanceId = randomUUID(), packageId = null, template = 'software_factory', learningModules = [], maxConcurrency = 1, connect = false, gitExecutable = 'git' } = {}) {
+export async function startLocalControlRoom({ codexPath, cwd, codexHome, statePath, port = 0, recoverStaleLock = false, instanceId = randomUUID(), packageId = null, template = 'software_factory', learningModules = [], maxConcurrency = 1, connect = false, gitExecutable = 'git', setupPlan, setupPlanHash } = {}) {
   cwd = resolve(cwd || process.cwd());
   if (!(await stat(cwd)).isDirectory()) throw new Error('workspace_directory_required');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port_invalid');
   if (!['blank', 'software_factory', 'research', 'engineering', 'marketing', 'outcome_learning', 'tool_call_review'].includes(template) || !Array.isArray(learningModules) || learningModules.some((id) => !['outcome_learning', 'tool_call_review'].includes(id))) throw new Error('setup_template_invalid');
+  const setup = setupPlan ? await readSetupPlan(resolve(setupPlan), { workspace: cwd, expectedHash: setupPlanHash }) : null;
   const adapter = new CodexAdapter({ codexPath, cwd, codexHome });
   statePath = resolve(statePath || join(root, '.local', 'queue.json'));
   const existing = await stat(statePath).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error));
@@ -122,6 +124,7 @@ export async function startLocalControlRoom({ codexPath, cwd, codexHome, statePa
       for (const templateId of [...new Set(learningModules)]) if (templateId !== template) await engine.action({ action: 'apply-template', templateId });
       await engine.action({ action: 'configure', maxConcurrency });
     }
+    if (setup) await engine.action({ action: 'apply-setup-plan', plan: setup.plan });
     if (connect) await engine.action({ action: 'connect' });
     const room = await createControlRoom({ engine, port, instanceId, packageId });
     return { ...room, engine, adapter, statePath, instanceId, cwd };
@@ -132,7 +135,7 @@ async function main() {
   const options = new Map();
   for (let i = 2; i < process.argv.length; i += 2) {
     if (['--recover-stale-lock', '--connect'].includes(process.argv[i])) { options.set(process.argv[i], true); i -= 1; continue; }
-    if (!['--codex', '--git', '--cwd', '--state', '--port', '--codex-home', '--ready-file', '--instance-id', '--package-id', '--template', '--learning-modules', '--max-concurrency'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('control_room_arguments_invalid');
+    if (!['--codex', '--git', '--cwd', '--state', '--port', '--codex-home', '--ready-file', '--instance-id', '--package-id', '--template', '--learning-modules', '--max-concurrency', '--setup-plan', '--setup-plan-sha256'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('control_room_arguments_invalid');
     options.set(process.argv[i], process.argv[i + 1]);
   }
   const cwd = resolve(options.get('--cwd') || process.cwd());
@@ -144,7 +147,7 @@ async function main() {
   if (!/^[a-f0-9-]{36}$/.test(instanceId)) throw new Error('instance_id_invalid');
   const packageId = options.get('--package-id') || null;
   if (packageId && !/^[a-f0-9]{64}$/.test(packageId)) throw new Error('package_id_invalid');
-  const room = await startLocalControlRoom({ codexPath: options.get('--codex'), gitExecutable: options.get('--git') || 'git', codexHome: options.get('--codex-home'), cwd, statePath, port, instanceId, packageId, recoverStaleLock: options.has('--recover-stale-lock'), template: options.get('--template') || 'software_factory', learningModules: options.get('--learning-modules')?.split(',').filter(Boolean) || [], maxConcurrency: options.has('--max-concurrency') ? Number(options.get('--max-concurrency')) : 1, connect: options.has('--connect') });
+  const room = await startLocalControlRoom({ codexPath: options.get('--codex'), gitExecutable: options.get('--git') || 'git', codexHome: options.get('--codex-home'), cwd, statePath, port, instanceId, packageId, recoverStaleLock: options.has('--recover-stale-lock'), template: options.get('--template') || 'software_factory', learningModules: options.get('--learning-modules')?.split(',').filter(Boolean) || [], maxConcurrency: options.has('--max-concurrency') ? Number(options.get('--max-concurrency')) : 1, connect: options.has('--connect'), setupPlan: options.get('--setup-plan'), setupPlanHash: options.get('--setup-plan-sha256') });
   const cleanupReady = async () => {
     if (!readyFile) return;
     const item = await lstat(readyFile).catch(() => null);

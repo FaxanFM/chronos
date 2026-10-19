@@ -32,18 +32,24 @@ used to develop and distribute it.
 
 ## Chronos Control Room
 
-The **published v0.10.1 GitHub release includes Control Room inside the
+The **v0.10.2 GitHub edition includes Control Room inside the
 plugin**, with a packaged launcher and onboarding skill. The skills-only
-marketplace update has been submitted and is In review, but is not approved or
-live in the store. After installation, use one starter:
+marketplace package uses the same guided setup and controls without lifecycle
+hooks. A GitHub release does not make a marketplace submission approved or live.
+After installation, use one starter:
 
-> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+> Turn my goal and selected framework files into a ready-to-review Chronos Control Room workflow. Recommend models and thinking levels, explain permissions, and open it paused.
 
 Chronos starts and opens the private local dashboard itself. No manual server
 command, repository clone, npm install, hook patch or scheduled Governor is
 needed. It prefers Codex's bundled Node/Git tools, checks prerequisites and
 keeps execution paused until session consent. A local Codex executor and Node
 22+ are required; Windows diagnostics remain Windows-only.
+
+Your setup chat prepares the workflow from your goal and selected context,
+including framework files or folders. Choose from host-advertised models and
+thinking levels per stage, with explicit task-based suggestions and hover/focus
+help. Nothing executes until you authorize the session and select Run.
 
 Build visual pipelines with stage queues, bot pools, joins, isolated code
 changes, native checks and human review gates. Optional outcome-learning and
@@ -66,11 +72,12 @@ Check the version and source before installing; keep one Chronos source enabled.
 
 ### Current Versions
 
-Last verified publication records: October 1, 2026. These are not a live status
+Last verified publication records: October 19, 2026. These are not a live status
 check; confirm the listing and release before installing.
 
 | Edition | Recorded version | Install route |
 | --- | --- | --- |
+| v0.10.2 update | Release and marketplace preparation | [Version notes](CHANGELOG.md); verify the release and listing status before installing |
 | Directory skills-only | v0.10.1 submitted; In review (store remains v0.9.2) | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
 | GitHub full | Published v0.10.1 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1); five optional hooks |
 | Control Room | Published in v0.10.1 | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md) |
@@ -91,7 +98,7 @@ OpenAI endorsement or support commitment.
 Manual Git marketplace fallback for environments where the Directory is not available:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.1
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.2
 codex.cmd plugin add chronos@chronos
 ```
 

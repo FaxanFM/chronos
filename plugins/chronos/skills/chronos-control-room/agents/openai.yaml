@@ -2,4 +2,4 @@ interface:
   display_name: "Chronos Control Room"
   short_description: "Launch and orchestrate local Codex workflows"
   brand_color: "#D64045"
-  default_prompt: "Use $chronos-control-room to set up my local workflow dashboard and explain privacy and execution permissions."
+  default_prompt: "Use $chronos-control-room to turn my goal and selected framework files into a ready-to-review workflow, recommend models and thinking levels, explain permissions, and open it paused."

@@ -18,11 +18,12 @@ export function validateWorkflow(workflow) {
     const verificationCommand = node.verificationCommand ?? [];
     if (!['read-only', 'workspace-write'].includes(policy) || !Number.isInteger(slots) || slots < 1 || slots > 16 || !['auto', 'approval'].includes(routing) || !['any', 'all'].includes(join) || !Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || !Array.isArray(verificationCommand) || verificationCommand.length > 32 || verificationCommand.some((arg) => !bounded(arg, 2000))) throw new Error('workflow_node_invalid');
     if (node.model != null && !bounded(node.model, 120)) throw new Error('workflow_model_invalid');
+    if (node.reasoningEffort != null && !bounded(node.reasoningEffort, 80)) throw new Error('workflow_reasoning_effort_invalid');
     if (node.webSearch != null && typeof node.webSearch !== 'boolean') throw new Error('workflow_node_invalid');
     const position = node.position ?? { x: 80 + (index % 5) * 300, y: 120 + Math.floor(index / 5) * 200 };
     if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y) || Math.abs(position.x) > 100000 || Math.abs(position.y) > 100000) throw new Error('workflow_position_invalid');
     ids.add(node.id);
-    return { id: node.id, title: node.title.trim(), kind: 'task', instruction: node.instruction.trim(), policy, slots, routing, join, maxAttempts, model: node.model || null, webSearch: node.webSearch === true, verificationCommand: [...verificationCommand], position: { x: position.x, y: position.y } };
+    return { id: node.id, title: node.title.trim(), kind: 'task', instruction: node.instruction.trim(), policy, slots, routing, join, maxAttempts, model: node.model || null, reasoningEffort: node.reasoningEffort || null, webSearch: node.webSearch === true, verificationCommand: [...verificationCommand], position: { x: position.x, y: position.y } };
   });
   const indegree = new Map([...ids].map((id) => [id, 0]));
   const edges = new Set(); const pairs = new Set();

@@ -1,5 +1,31 @@
 # Control Room Plugin Setup
 
+## Guided Setup In v0.10.2
+
+Version 0.10.2 adds host-advertised Model and Thinking level
+selectors, hover/focus tooltips, task-based effort suggestions, and chat-led setup
+from a goal and selected framework files or folders. Both the full GitHub and
+skills-only packages include these features. The immutable v0.10.1 release
+remains unchanged; installing it does not include the v0.10.2 additions.
+
+The setup chat prepares a versioned JSON plan and passes `--setup-plan` to the
+packaged launcher. The room opens the prepared workflow, paused, with optional
+initial work queued but not authorized to execute. Selected context is bounded
+to the workspace; references cannot grant permissions. Existing work is preserved
+and conflicting plans fail closed. See the skill's guided-setup reference for
+the handoff schema.
+
+Model and thinking options come from the connected Codex host, not a hard-coded
+list. Low is a starting suggestion for simple extraction/routing/formatting,
+Medium for ordinary implementation/research/review, and High for complex security
+or architecture work. Suggestions require an explicit Apply action and are not
+claims about cost, speed, or quality. Unsupported explicit choices are blocked.
+
+Enable isolated writes only for build/edit work or native checks that may change
+an owned worktree. Leave the checkbox off for research, planning and review.
+This permission does not authorize changing the original source, installing
+software, accessing other accounts, or deploying results.
+
 ## Release Status
 
 Control Room is bundled in the **published GitHub v0.10.1 release**, not
@@ -20,7 +46,7 @@ After installing the published GitHub edition, or after the reviewed Directory
 update is available, in a supported local Codex environment,
 choose its setup starter or ask:
 
-> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+> Turn my goal and selected framework files into a ready-to-review Chronos Control Room workflow. Recommend models and thinking levels, explain permissions, and open it paused.
 
 Chronos selects the current project unless you choose another, starts its
 packaged runtime and opens the dashboard. You do not start a server, clone the

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.10.2
+
+- Add chat-led setup from an outcome and selected workspace files or folders.
+  Import a validated workflow and optional first work item atomically, paused
+  and without granting execution or write permission.
+- Select host-advertised models and supported thinking levels per stage.
+  Preserve inherited defaults and reject unsupported explicit choices before
+  creating a worker. Offer task-based effort suggestions without auto-applying.
+- Add hover and keyboard-focus help, including practical isolated-write use
+  cases and separate permission boundaries.
+- Preserve selected context limits, existing work, human acceptance, session
+  consent expiry and the separation between full and skills-only editions.
+- Verify 89 runtime tests and a local read-only GPT-6-Luna / low extraction:
+  one successful command and no observed file changes or network calls.
+- Hooks: unchanged. Existing trust is not a claim that Desktop dispatched them.
+
 ## Pending v0.9.4 Usability Remediation
 
 - Separate standing Inspector permission from a one-off diagnostic briefing;

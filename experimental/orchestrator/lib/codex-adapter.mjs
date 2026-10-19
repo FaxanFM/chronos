@@ -35,6 +35,10 @@ export class CodexAdapter extends EventEmitter {
     this.verifications = new Set();
     this.lastProtocolAt = null;
     this.diagnosticsState = { notifications: 0, responses: 0, errors: 0, lastMethod: null, lastStatus: null, lastErrorCode: null };
+    this.modelCatalog = [];
+    this.modelCatalogStatus = 'unavailable';
+    this.defaultModel = null;
+    this.configuredModel = null;
   }
 
   async connect() {
@@ -90,6 +94,7 @@ export class CodexAdapter extends EventEmitter {
     let configuredMcpServers;
     try {
       const config = await this.#request('config/read', { cwd: resolve(this.cwd || process.cwd()), includeLayers: false });
+      this.configuredModel = typeof config?.config?.model === 'string' ? config.config.model : null;
       const servers = config?.config?.mcp_servers;
       if (servers != null && (typeof servers !== 'object' || Array.isArray(servers))) throw new Error('invalid');
       configuredMcpServers = Object.fromEntries(Object.keys(servers || {}).slice(0, 64).map((name) => [name, { enabled: false }]));
@@ -98,6 +103,7 @@ export class CodexAdapter extends EventEmitter {
       throw new Error('codex_external_tools_not_isolated');
     }
     this.configuredMcpServers = configuredMcpServers;
+    await this.#loadModelCatalog();
     this.connected = true;
     return this;
   }
@@ -108,6 +114,15 @@ export class CodexAdapter extends EventEmitter {
     if (this.owned.size >= MAX_TASKS) throw new Error('adapter_task_limit');
     const policy = task.policy || 'read-only';
     if (!['read-only', 'workspace-write'].includes(policy)) throw new Error('task_policy_invalid');
+    let selectedModel = task.model;
+    if (task.model != null || task.reasoningEffort != null) {
+      if (this.modelCatalogStatus !== 'available') throw new Error('model_catalog_unavailable');
+      const choice = this.modelCatalog.find((entry) => entry.id === (task.model ?? this.defaultModel) || entry.model === (task.model ?? this.defaultModel));
+      if (task.model != null && !choice) throw new Error('model_not_advertised');
+      if (task.reasoningEffort != null && (!choice || !choice.supportedReasoningEfforts.some((effort) => effort.reasoningEffort === task.reasoningEffort))) throw new Error('reasoning_effort_not_advertised');
+      if (!choice) throw new Error('default_model_not_advertised');
+      selectedModel = choice.model;
+    }
     const cwd = resolve(task.cwd || this.cwd || process.cwd());
     if (policy === 'workspace-write' && !this.writeRoots.has(pathKey(cwd))) throw new Error('workspace_write_root_not_registered');
     let sourceThreadId = task.sourceThreadId;
@@ -129,7 +144,7 @@ export class CodexAdapter extends EventEmitter {
         web_search: task.webSearch === true ? 'live' : 'disabled',
         sandbox_workspace_write: { writable_roots: [], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true }
       },
-      ...(task.model ? { model: task.model } : {})
+      ...(selectedModel ? { model: selectedModel } : {})
     });
     const expectedType = policy === 'workspace-write' ? 'workspaceWrite' : 'readOnly';
     const extraWriteRoots = policy === 'workspace-write' && (!Array.isArray(started?.sandbox?.writableRoots) || started.sandbox.writableRoots.some((root) => typeof root !== 'string' || pathKey(root) !== pathKey(cwd)));
@@ -150,7 +165,7 @@ export class CodexAdapter extends EventEmitter {
     // Register before turn/start so an immediate notification cannot race ownership.
     this.owned.set(threadId, { taskId: task.id || threadId, turnId: null, active: true, policy: expectedType, evidence: this.#newEvidence() });
     try {
-      const turn = await this.#request('turn/start', { threadId, cwd, approvalPolicy: 'never', sandboxPolicy: this.sandboxPolicy(cwd, policy), input: [{ type: 'text', text: task.instruction }] });
+      const turn = await this.#request('turn/start', { threadId, cwd, approvalPolicy: 'never', sandboxPolicy: this.sandboxPolicy(cwd, policy), ...(task.reasoningEffort ? { effort: task.reasoningEffort } : {}), input: [{ type: 'text', text: task.instruction }] });
       const turnId = turn?.turn?.id || turn?.turnId;
       if (typeof turnId !== 'string' || !turnId) throw new Error('turn_start_missing_id');
       this.owned.get(threadId).turnId = turnId;
@@ -237,7 +252,42 @@ export class CodexAdapter extends EventEmitter {
   diagnostics() {
     return Object.freeze({ connected: this.connected, shutdownUnverified: this.shutdownUnverified,
       ownedTaskCount: this.owned.size, activeTurns: [...this.owned.values()].filter((task) => task.active).length, verifyingCommands: this.verifications.size, lastProtocolAt: this.lastProtocolAt, effectivePolicy: this.effectivePolicy && { ...this.effectivePolicy },
+      modelCatalogStatus: this.modelCatalogStatus, models: structuredClone(this.modelCatalog), defaultModel: this.defaultModel,
       ...this.diagnosticsState });
+  }
+
+  async #loadModelCatalog() {
+    this.modelCatalog = [];
+    this.modelCatalogStatus = 'unavailable';
+    this.defaultModel = null;
+    let cursor = null;
+    const cursors = new Set();
+    let complete = false;
+    try {
+      for (let page = 0; page < 16; page++) {
+        const result = await this.#request('model/list', { ...(cursor ? { cursor } : {}), limit: 100 }, 3000);
+        const rows = Array.isArray(result?.data) ? result.data : null;
+        if (!rows || rows.length + this.modelCatalog.length > 256) throw new Error('model_catalog_invalid');
+        for (const row of rows) {
+          const id = typeof row?.id === 'string' ? row.id : typeof row?.model === 'string' ? row.model : null;
+          if (!id || id.length > 120 || this.modelCatalog.some((entry) => entry.id === id)) throw new Error('model_catalog_invalid');
+          const efforts = Array.isArray(row.supportedReasoningEfforts) ? row.supportedReasoningEfforts : Array.isArray(row.reasoningEfforts) ? row.reasoningEfforts : [];
+          if (efforts.length > 32) throw new Error('model_catalog_invalid');
+          const supportedReasoningEfforts = efforts.map((effort) => typeof effort === 'string' ? { reasoningEffort: effort, description: '' } : { reasoningEffort: effort?.reasoningEffort, description: typeof effort?.description === 'string' ? effort.description.slice(0, 240) : '' });
+          if (supportedReasoningEfforts.some((effort) => typeof effort.reasoningEffort !== 'string' || !effort.reasoningEffort.trim() || effort.reasoningEffort.length > 80) || new Set(supportedReasoningEfforts.map((effort) => effort.reasoningEffort)).size !== supportedReasoningEfforts.length) throw new Error('model_catalog_invalid');
+          this.modelCatalog.push({ id, model: typeof row.model === 'string' ? row.model : id, displayName: typeof row.displayName === 'string' ? row.displayName.slice(0, 120) : id, description: typeof row.description === 'string' ? row.description.slice(0, 240) : '', isDefault: row.isDefault === true, defaultReasoningEffort: typeof row.defaultReasoningEffort === 'string' ? row.defaultReasoningEffort : null, supportedReasoningEfforts });
+        }
+        const next = result?.nextCursor ?? result?.next_cursor ?? null;
+        if (next == null) { complete = true; break; }
+        if (typeof next !== 'string' || !next || next.length > 4096 || cursors.has(next)) throw new Error('model_catalog_pagination_invalid');
+        cursors.add(next);
+        cursor = next;
+      }
+      if (!complete || !this.modelCatalog.length) throw new Error('model_catalog_empty_or_partial');
+      this.modelCatalogStatus = 'available';
+      const configured = this.modelCatalog.find((entry) => entry.id === this.configuredModel || entry.model === this.configuredModel);
+      this.defaultModel = this.configuredModel ? configured?.id || null : this.modelCatalog.find((entry) => entry.isDefault)?.id || null;
+    } catch { this.modelCatalog = []; this.modelCatalogStatus = 'unavailable'; this.defaultModel = null; /* catalog is optional; Codex-default execution remains valid */ }
   }
 
   #childTransport(child, generation) {

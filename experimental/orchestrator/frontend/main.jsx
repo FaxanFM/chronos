@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { ReactFlow, Background, Controls, MiniMap, Handle, Position, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import { Play, Pause, Power, Plug, Unplug, Plus, Save, Trash2, X, Check, RotateCcw, Square, ShieldCheck, GitBranch, Inbox, Activity, Copy, Archive, ArrowRight, Search, Settings2 } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
@@ -7,6 +8,7 @@ import './styles.css';
 
 const fragment = new URLSearchParams(location.hash.slice(1));
 const launchToken = fragment.get('token') || '';
+const launchWorkflow = fragment.get('workflow') || '';
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 const emptyPacket = () => ({ title: '', input: '', sourceThreadLink: '', sourceTaskIds: [] });
 const uuid = () => crypto.randomUUID();
@@ -24,21 +26,129 @@ const errorText = {
   archive_work_item_instead: 'Archive the whole work item to preserve its stage and output history.'
 };
 
-function Button({ icon: Icon, children, title, ...props }) {
-  return <button title={title || (typeof children === 'string' ? children : undefined)} {...props}>{Icon && <Icon size={16} aria-hidden="true" />}{children}</button>;
+function Tooltip({ label, children, disabled = false }) {
+  if (!label || !React.isValidElement(children)) return children;
+  return disabled ? <span className="tooltip-disabled" tabIndex={0} data-tooltip={label}>{children}</span> : React.cloneElement(children, { 'data-tooltip': label });
 }
-function Status({ value }) { return <span className={`status status-${value}`}>{human(value)}</span>; }
+function Button({ icon: Icon, children, title, ...props }) {
+  const childText = React.Children.toArray(children).filter((child) => typeof child === 'string').join(' ');
+  const label = title || childText || props['aria-label'];
+  const button = <button {...props}>{Icon && <Icon size={16} aria-hidden="true" />}{children}</button>;
+  return <Tooltip label={label} disabled={props.disabled}>{button}</Tooltip>;
+}
+function Status({ value }) { return <Tooltip label={`Status: ${human(value)}. This is the latest reported state.`}><span tabIndex={0} className={`status status-${value}`}>{human(value)}</span></Tooltip>; }
+function effortRecommendation(stage) {
+  const text = `${stage?.title || ''} ${stage?.instruction || ''}`.toLowerCase();
+  if (/security|threat|architecture|risk|deep verification|formal verification/.test(text)) return 'high';
+  if (/implement|build|research|debug|design|test|code|review/.test(text)) return 'medium';
+  if (/extract|extraction|route|routing|format|formatting|classif/.test(text)) return 'low';
+  return 'medium';
+}
+function modelOptions(runtime) {
+  return Array.isArray(runtime?.models) ? runtime.models : [];
+}
+function modelLabel(model) { return model?.displayName || model?.model || model?.id || 'Host model'; }
+function selectedModel(stage, runtime) {
+  const models = modelOptions(runtime);
+  if (stage?.model) return models.find((item) => item.id === stage.model || item.model === stage.model);
+  return models.find((item) => item.id === runtime?.defaultModel || item.model === runtime?.defaultModel);
+}
+function effortOptions(stage, runtime) {
+  const model = selectedModel(stage, runtime);
+  return Array.isArray(model?.supportedReasoningEfforts) ? model.supportedReasoningEfforts : [];
+}
+function effortName(item) { return item?.displayName || item?.reasoningEffort || 'Inherited'; }
 function Stage({ data, selected }) {
-  return <div className={`stage ${selected ? 'selected' : ''}`}>
-    <Handle type="target" position={Position.Left} />
+  return <div className={`stage ${selected ? 'selected' : ''}`} data-tooltip={`${data.title}. ${data.policy === 'workspace-write' ? 'Isolated workspace write' : 'Read only'} stage. Select to edit its assignment, model and thinking level.`}>
+    <Handle type="target" position={Position.Left} data-tooltip="Connect an upstream stage here. This stage receives accepted outputs according to its input-join setting." />
     <div className="stage-heading"><span className={`capability ${data.policy === 'workspace-write' ? 'write' : ''}`} /><strong>{data.title}</strong></div>
     <div className="stage-meta">{data.policy === 'workspace-write' ? 'Workspace write' : 'Read only'}<span>{data.slots} {data.slots === 1 ? 'slot' : 'slots'}</span></div>
     <div className="stage-counts"><span>{data.queue?.inbox.length || 0} in</span><span className={data.queue?.running ? 'working' : ''}>{data.queue?.running || 0} working</span><span>{data.queue?.outbox.length || 0} out</span></div>
     <footer>{data.routing === 'approval' ? 'Human acceptance' : 'Auto-route'}<span>{data.join === 'all' ? 'Join all' : 'First accepted'}</span></footer>
-    <Handle type="source" position={Position.Right} />
+    <Handle type="source" position={Position.Right} data-tooltip="Drag to another stage's input to route accepted output to that stage." />
   </div>;
 }
 const nodeTypes = { stage: Stage };
+
+function ControlHelp() {
+  const [tip, setTip] = useState(null);
+  useEffect(() => {
+    let active = null, previousDescription = null;
+    const hints = {
+      Model: 'Choose one of the connected Codex host models, or inherit your current Codex default.',
+      'Thinking level': 'Choose an effort supported by this model. Higher is not always better; simple tasks can use a lower level.',
+      'Stage name': 'A short name for this bot stage in the workflow.',
+      Assignment: 'The bounded task, selected context and acceptance criteria for this work.',
+      'Bot slots': 'Maximum concurrent turns for this stage, still bounded by the room limit.',
+      'Max attempts': 'Maximum bounded attempts before the work requires your attention.',
+      'Input join': 'Wait for all selected upstream outputs, or use the first accepted output.',
+      'Output routing': 'Send a completed result onward automatically, or hold it for human acceptance.',
+      'Native check': 'A JSON argument array such as ["node","--test"]. The command runs in the owned workspace; write-capable checks need separate consent.',
+      'Source Codex thread': 'An optional Codex thread deep link. Chronos forks its context; it does not control the original chat.',
+      'Allow isolated': 'Enable for implementation, document edits or tests in an owned worktree. Leave off for research, planning and review. No deployment permission is granted.',
+      'Allow provider': 'Allow the configured model provider to search the web for this stage. Native shell network access remains off.',
+      'Concurrent turns': 'The room-wide maximum. Start with one; capacity checks may reduce dispatch further.',
+      'Selected workflow': 'Choose which saved process to view. This does not start its work.',
+      'Create from template': 'Create another editable workflow without changing existing tasks.',
+      'Workflow name': 'Rename this process, then save while dispatch is paused.',
+      Title: 'A short name for the work item moving through this workflow.',
+      Connect: 'Connect the local managed Codex runtime. This does not grant execution or start work.',
+      Disconnect: 'Pause dispatch and disconnect the managed runtime. Execution permission expires; queue records and files are preserved.',
+      Permissions: 'Review this session\'s execution and isolated-write permissions, data use and limits.',
+      Run: 'Dispatch eligible queued work within the configured limits. Separate session authorization is required.',
+      Pause: 'Stop dispatching new work. Already-running work continues until it finishes or you cancel it.',
+      'Stop Control Room': 'Stop this local room and its managed runtime. Queue records and workspace files are preserved.',
+      'Add work item': 'Queue an assignment for the selected workflow. Adding it does not grant execution permission.',
+      'Add stage': 'Add a bot stage, then set its assignment, access, model and output routing.',
+      Save: 'Save workflow changes while dispatch is paused. Workflows with queued work must be duplicated to edit.',
+      'Apply suggestion': 'Apply the suggested thinking level to this stage only. It does not start a model turn.',
+      'Authorize session': 'Allow managed execution for this connection, with isolated writes only if you checked that option.',
+      'Queue work item': 'Add this assignment and selected context to the workflow inbox.',
+      'Accept output': 'Approve this result for downstream stages. This does not merge, publish or deploy files.',
+      'Fit View': 'Fit all stages into the workflow canvas.',
+      'Zoom In': 'Zoom in on the workflow canvas.',
+      'Zoom Out': 'Zoom out on the workflow canvas.',
+    };
+    const hide = () => {
+      if (active) {
+        if (previousDescription) active.setAttribute('aria-describedby', previousDescription);
+        else active.removeAttribute('aria-describedby');
+      }
+      active = null; previousDescription = null; setTip(null);
+    };
+    const show = (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const control = target?.closest('[data-tooltip],button,input,select,textarea,a,[role="button"],.react-flow__handle');
+      if (!control || control === active) return;
+      hide();
+      const label = control.closest('label');
+      const labelText = label?.cloneNode(true);
+      labelText?.querySelectorAll('input,select,textarea').forEach((item) => item.remove());
+      const name = control.getAttribute('aria-label') || labelText?.textContent?.trim() || control.textContent?.trim() || '';
+      const known = hints[name] || (control.matches('input,select,textarea') ? Object.entries(hints).find(([prefix]) => name.startsWith(prefix))?.[1] : null);
+      const explicit = control.dataset.tooltip;
+      const content = (explicit && explicit !== name ? explicit : null) || label?.dataset.tooltip || label?.getAttribute('title') || known || explicit || control.getAttribute('title') || name;
+      if (!content) return;
+      active = control; previousDescription = control.getAttribute('aria-describedby');
+      control.setAttribute('aria-describedby', [previousDescription, 'chronos-control-help'].filter(Boolean).join(' '));
+      const rect = control.getBoundingClientRect();
+      const width = Math.min(280, window.innerWidth - 24);
+      setTip({ content: content.slice(0, 700), left: Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 12), width, top: rect.bottom + 7 > window.innerHeight - 120 ? Math.max(8, rect.top - 108) : rect.bottom + 7 });
+    };
+    const leave = (event) => { if (active && !(event.relatedTarget instanceof Node && active.contains(event.relatedTarget))) hide(); };
+    const escape = (event) => { if (event.key === 'Escape') hide(); };
+    document.addEventListener('pointerover', show); document.addEventListener('focusin', show);
+    document.addEventListener('pointerout', leave); document.addEventListener('focusout', hide);
+    document.addEventListener('keydown', escape); document.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    return () => {
+      hide(); document.removeEventListener('pointerover', show); document.removeEventListener('focusin', show);
+      document.removeEventListener('pointerout', leave); document.removeEventListener('focusout', hide);
+      document.removeEventListener('keydown', escape); document.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide);
+    };
+  }, []);
+  return tip ? createPortal(<div id="chronos-control-help" role="tooltip" className="control-help" style={{ left: tip.left, top: tip.top, width: tip.width }}>{tip.content}</div>, document.body) : null;
+}
 
 function App() {
   const [snapshot, setSnapshot] = useState(null);
@@ -66,7 +176,8 @@ function App() {
     receivedRevision.current = data.revision;
     setSnapshot(data);
     if (!selectedRef.current || !data.workflows.some((workflow) => workflow.id === selectedRef.current)) {
-      if (data.workflows[0]) selectWorkflow(data.workflows[0]);
+      const initial = launchWorkflow && data.workflows.find((workflow) => workflow.id === launchWorkflow);
+      if (initial || data.workflows[0]) selectWorkflow(initial || data.workflows[0]);
     }
   };
   async function request(action) {
@@ -121,7 +232,7 @@ function App() {
     const result = await act({ action: 'apply-template', templateId }); if (result) selectWorkflow(result.workflows.at(-1));
   }
   function addStage() {
-    const id = uuid(), data = { id, title: 'New stage', kind: 'task', instruction: 'Complete the assigned work item and report evidence.', policy: 'read-only', slots: 1, routing: 'auto', join: 'all', maxAttempts: 1, model: null, webSearch: false, verificationCommand: [] };
+    const id = uuid(), data = { id, title: 'New stage', kind: 'task', instruction: 'Complete the assigned work item and report evidence.', policy: 'read-only', slots: 1, routing: 'auto', join: 'all', maxAttempts: 1, model: null, reasoningEffort: null, webSearch: false, verificationCommand: [] };
     setNodes((current) => [...current, { id, type: 'stage', position: { x: 100 + (current.length % 4) * 290, y: 100 + Math.floor(current.length / 4) * 220 }, data }]); setNodeId(id); setInspector(true); setDirty(true);
   }
   function verify(value) {
@@ -137,7 +248,7 @@ function App() {
   }
   const graphNodes = nodes.map((item) => ({ ...item, selected: item.id === nodeId, data: { ...item.data, queue: snapshot?.stageQueues.find((queue) => queue.workflowId === selectedId && queue.nodeId === item.id) } }));
   if (stopped) return <main className="end-state"><img src="/assets/chronos-mark.png" alt="" /><h1>Control Room stopped</h1><p>Managed execution is paused. Work items and workspace files are preserved.</p></main>;
-  return <div className="room">
+  return <div className="room"><ControlHelp />
     <header className="topbar"><div className="brand"><img src="/assets/chronos-mark.png" alt="Chronos" /><div><strong>CHRONOS</strong><span>Control Room <small>Experimental</small></span></div></div>
       <div className="session"><Status value={snapshot?.mode || 'loading'} /><span>{snapshot?.activeCount || 0} / {snapshot?.maxConcurrency || 1} working</span></div>
       <div className="top-actions">
@@ -170,7 +281,7 @@ function App() {
         {inspector && node && <aside className="inspector"><div className="panel-heading"><h2>Stage settings</h2><Button icon={X} aria-label="Close stage settings" onClick={() => setInspector(false)} /></div>
           <label>Stage name<input value={node.data.title} maxLength={120} onChange={(event) => changeNode({ title: event.target.value })} /></label>
           <label>Assignment<textarea aria-label="Assignment" rows={6} value={node.data.instruction} maxLength={12000} onChange={(event) => changeNode({ instruction: event.target.value })} /></label>
-          <label>Workspace access<select value={node.data.policy} onChange={(event) => changeNode({ policy: event.target.value })}><option value="read-only">Read only</option><option value="workspace-write">Isolated workspace write</option></select></label>
+          <label data-tooltip="Read-only stages can inspect inputs. Isolated workspace writes are used for implementation, document edits, tests, and native checks in a packet-owned worktree.">Workspace access<select value={node.data.policy} onChange={(event) => changeNode({ policy: event.target.value })}><option value="read-only">Read only</option><option value="workspace-write">Isolated workspace write</option></select></label>
           <div className="field-pair"><label>Bot slots<input type="number" min="1" max="16" value={node.data.slots} onChange={(event) => changeNode({ slots: Number(event.target.value) })} /></label><label>Max attempts<input type="number" min="1" max="3" value={node.data.maxAttempts} onChange={(event) => changeNode({ maxAttempts: Number(event.target.value) })} /></label></div>
           <label>Output routing<select value={node.data.routing} onChange={(event) => changeNode({ routing: event.target.value })}><option value="auto">Automatic after completion</option><option value="approval">Require human acceptance</option></select></label>
           <label>Input join<select value={node.data.join} onChange={(event) => changeNode({ join: event.target.value })}><option value="all">Wait for all input stages</option><option value="any">First accepted input</option></select></label>
@@ -178,14 +289,18 @@ function App() {
             {edges.filter((edge) => edge.target === nodeId).map((edge) => <div key={edge.id}><span>{nodes.find((item) => item.id === edge.source)?.data.title}</span><Button icon={X} title="Remove input connection" aria-label={`Remove input ${edge.source}`} onClick={() => { setEdges((current) => current.filter((item) => item.id !== edge.id)); setDirty(true); }} /></div>)}
             <select aria-label="Add input stage" value="" onChange={(event) => { if (event.target.value) { setEdges((current) => [...current, { id: uuid(), source: event.target.value, target: nodeId }]); setDirty(true); } }}><option value="">Add input stage</option>{nodes.filter((item) => item.id !== nodeId && !edges.some((edge) => edge.source === item.id && edge.target === nodeId)).map((item) => <option key={item.id} value={item.id}>{item.data.title}</option>)}</select>
           </fieldset>
-          <label>Model<input value={node.data.model || ''} placeholder="Codex default" maxLength={120} onChange={(event) => changeNode({ model: event.target.value || null })} /></label>
+          <label data-tooltip="Choose a model exposed by the connected Codex host. Inherit host default keeps the workflow portable.">Model<select value={node.data.model || ''} disabled={!snapshot?.connected || !modelOptions(snapshot?.runtime).length} onChange={(event) => changeNode({ model: event.target.value || null })}><option value="">Inherit host default{snapshot?.runtime?.defaultModel ? ` (${snapshot.runtime.defaultModel})` : ''}</option>{node.data.model && !modelOptions(snapshot?.runtime).some((model) => (model.id || model.model) === node.data.model) && <option value={node.data.model}>Unavailable legacy choice: {node.data.model}</option>}{modelOptions(snapshot?.runtime).map((model) => <option key={model.id || model.model} value={model.id || model.model}>{modelLabel(model)}{model.isDefault ? ' (default)' : ''}</option>)}</select></label>
+          {!snapshot?.connected && <p className="field-hint">Connect Control Room to load the host model catalog.</p>}
+          {snapshot?.connected && !modelOptions(snapshot?.runtime).length && <p className="field-hint">The host did not expose a model catalog. Existing explicit choices remain unchanged.</p>}
+          <label data-tooltip="Choose a thinking level supported by this model. Inherit uses its host default. A lower level can suit simple tasks; recommendations are not quality guarantees.">Thinking level<select value={node.data.reasoningEffort || ''} disabled={!snapshot?.connected || !effortOptions(node.data, snapshot?.runtime).length} onChange={(event) => changeNode({ reasoningEffort: event.target.value || null })}><option value="">Inherit model default{selectedModel(node.data, snapshot?.runtime)?.defaultReasoningEffort ? ` (${selectedModel(node.data, snapshot?.runtime).defaultReasoningEffort})` : ''}</option>{node.data.reasoningEffort && !effortOptions(node.data, snapshot?.runtime).some((item) => item.reasoningEffort === node.data.reasoningEffort) && <option value={node.data.reasoningEffort}>Unavailable legacy choice: {node.data.reasoningEffort}</option>}{effortOptions(node.data, snapshot?.runtime).map((effort) => <option key={effort.reasoningEffort} value={effort.reasoningEffort}>{effortName(effort)}{effort.description ? ` - ${effort.description}` : ''}</option>)}</select></label>
+          {node.data.reasoningEffort !== effortRecommendation(node.data) && effortOptions(node.data, snapshot?.runtime).some((item) => item.reasoningEffort === effortRecommendation(node.data)) && <div className="recommendation" title="Heuristic based on the stage title and assignment; it is never applied automatically.">Suggested for this stage: <strong>{effortRecommendation(node.data)}</strong><Button type="button" onClick={() => changeNode({ reasoningEffort: effortRecommendation(node.data) })}>Apply suggestion</Button></div>}
           <label className="check-label"><input type="checkbox" checked={node.data.webSearch} onChange={(event) => changeNode({ webSearch: event.target.checked })} />Allow provider web search</label>
           <label>Native check: JSON command arguments<textarea aria-label="Native check: JSON command arguments" className="code-input" rows={3} value={verifyDraft} placeholder={'["node", "--test"]'} onChange={(event) => verify(event.target.value)} /></label>{verifyError && <p className="field-error">{verifyError}</p>}
           <Button className="danger-text" icon={Trash2} onClick={() => { setNodes((current) => current.filter((item) => item.id !== nodeId)); setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)); setNodeId(''); setDirty(true); }}>Delete stage</Button>
         </aside>}
       </div>}
-      {view === 'queues' && <section className="queues-view">
-        <div className="queue-summary">{(workflow?.nodes || []).map((item) => { const queue = snapshot.stageQueues.find((entry) => entry.workflowId === selectedId && entry.nodeId === item.id); return <button key={item.id} className={taskFilter === item.id ? 'queue-stage active' : 'queue-stage'} onClick={() => setTaskFilter(taskFilter === item.id ? 'all' : item.id)}><strong>{item.title}</strong><span>{queue?.inbox.length || 0} inbox <ArrowRight size={12} /> {queue?.outbox.length || 0} outbox</span><small>{queue?.running || 0} working / {queue?.review || 0} review</small></button>; })}</div>
+          {view === 'queues' && <section className="queues-view">
+        <div className="queue-summary">{(workflow?.nodes || []).map((item) => { const queue = snapshot.stageQueues.find((entry) => entry.workflowId === selectedId && entry.nodeId === item.id); return <Tooltip key={item.id} label={`Filter managed tasks for ${item.title}. ${queue?.running || 0} currently working.`}><button className={taskFilter === item.id ? 'queue-stage active' : 'queue-stage'} onClick={() => setTaskFilter(taskFilter === item.id ? 'all' : item.id)}><strong>{item.title}</strong><span>{queue?.inbox.length || 0} inbox <ArrowRight size={12} /> {queue?.outbox.length || 0} outbox</span><small>{queue?.running || 0} working / {queue?.review || 0} review</small></button></Tooltip>; })}</div>
         <div className="queue-body"><div className="task-list"><div className="panel-heading"><h2>Managed tasks</h2><Button onClick={() => setTaskFilter('all')}>All stages</Button></div>
           {tasks.filter((task) => task.workflowId === selectedId && (taskFilter === 'all' || task.nodeId === taskFilter)).map((task) => <button key={task.id} className={`task-row ${task.id === taskId ? 'selected' : ''}`} onClick={() => setTaskId(task.id)}><span><strong>{task.title}</strong><small>{workflow?.nodes.find((item) => item.id === task.nodeId)?.title || 'Standalone'} / attempt {task.attempts}</small></span><Status value={task.state} /></button>)}
           {!tasks.some((task) => task.workflowId === selectedId) && <div className="empty-state"><Inbox size={28} /><h3>The inbox is clear</h3><p>Add a work item to queue this workflow.</p></div>}
@@ -218,7 +333,7 @@ function App() {
         <fieldset><legend>Accepted outbox inputs (optional)</legend><div className="source-options">{tasks.filter((task) => task.state === 'accepted').map((task) => <label className="check-label" key={task.id}><input type="checkbox" checked={packet.sourceTaskIds.includes(task.id)} onChange={(event) => setPacket({ ...packet, sourceTaskIds: event.target.checked ? [...packet.sourceTaskIds, task.id] : packet.sourceTaskIds.filter((id) => id !== task.id) })} />{task.title}</label>)}{!tasks.some((task) => task.state === 'accepted') && <span className="muted">No accepted outputs yet.</span>}</div></fieldset>
         <p className="muted">Write stages create an isolated worktree from committed HEAD. Uncommitted source changes are not copied. Native checks run only when configured on the stage.</p>
         <div className="dialog-actions"><Button type="button" onClick={() => setModal(null)}>Cancel</Button><Button type="submit" className="primary" icon={Plus} disabled={busy}>Queue work item</Button></div>
-      </form> : <><p>Managed bots use your existing Codex login and allowance. Work item inputs, selected thread history and workspace context may be processed by your configured model provider under its terms.</p><p>Chronos sends no publisher telemetry. Queue state, workspaces and results stay on this machine unless you share or publish them. External account tools, hooks and worker-created agents are disabled.</p><label className="check-label permission"><input id="write-consent" type="checkbox" checked={allowWrites} onChange={(event) => setAllowWrites(event.target.checked)} /><span><strong>Allow isolated workspace writes and native checks</strong><small>Commands can change the packet-owned workspace. Shell network access stays off. Read-only stages stay read only.</small></span></label><p className="muted">Permission expires when Control Room restarts or disconnects. Publication, installation and access to other accounts are not included.</p><div className="dialog-actions"><Button onClick={() => setModal(null)}>Cancel</Button><Button className="primary" icon={ShieldCheck} disabled={busy} onClick={async () => { const result = await act({ action: 'authorize', confirmed: true, allowWrites }); if (result) setModal(null); }}>Authorize session</Button></div></>}
+      </form> : <><p>Managed bots use your existing Codex login and allowance. Work item inputs, selected thread history and workspace context may be processed by your configured model provider under its terms.</p><p>Chronos sends no publisher telemetry. Queue state, workspaces and results stay on this machine unless you share or publish them. External account tools, hooks and worker-created agents are disabled.</p><label className="check-label permission"><input id="write-consent" type="checkbox" checked={allowWrites} onChange={(event) => setAllowWrites(event.target.checked)} /><span><strong>Allow isolated workspace writes and native checks</strong><small>Use this for implementation, editing documents, running tests, or native checks inside an isolated packet-owned worktree. Leave it off for research, planning, review, or read-only work. Your original workspace remains untouched until you review and transfer changes.</small></span></label><p className="muted">Permission expires when Control Room restarts or disconnects. It does not grant deployment, publication, installation, account access, or permission to change the original workspace.</p><div className="dialog-actions"><Button onClick={() => setModal(null)}>Cancel</Button><Button className="primary" icon={ShieldCheck} disabled={busy} onClick={async () => { const result = await act({ action: 'authorize', confirmed: true, allowWrites }); if (result) setModal(null); }}>Authorize session</Button></div></>}
     </section></div>}
   </div>;
 }

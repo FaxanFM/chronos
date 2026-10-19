@@ -10,7 +10,7 @@ const version = JSON.parse(await readFile(join(repo, 'plugins/chronos/.codex-plu
 const files = [
   'server.mjs', 'launcher.mjs', 'lib/codex-adapter.mjs', 'lib/engine.mjs',
   'lib/runtime-health.mjs', 'lib/runtime-discovery.mjs', 'lib/templates.mjs',
-  'lib/workflow-contracts.mjs', 'lib/workspaces.mjs', 'public/app.js',
+  'lib/workflow-contracts.mjs', 'lib/workspaces.mjs', 'lib/setup-plan.mjs', 'public/app.js',
   'public/app.css', 'public/index.html', 'public/chronos-mark.png'
 ];
 const record = { schemaVersion: 1, pluginVersion: version, files: [] };

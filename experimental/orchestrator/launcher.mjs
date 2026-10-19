@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { discoverCodex, defaultStateDir, pathIdentity } from './lib/runtime-discovery.mjs';
+import { readSetupPlan } from './lib/setup-plan.mjs';
 
 const runtimeRoot = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -91,7 +92,14 @@ async function inspect(options) {
   if (state.runtime?.instanceId !== session.instanceId) fail('control_room_session_identity_mismatch');
   return { session, state };
 }
-const receipt = (found, status) => ({ ok: true, status, url: found.session.url, origin: found.session.origin, pid: found.session.pid, workspace: found.session.workspace, mode: found.state.mode, activeCount: found.state.activeCount });
+const receipt = (found, status, workflowId) => {
+  const url = new URL(found.session.url);
+  if (workflowId) {
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    fragment.set('workflow', workflowId); url.hash = fragment.toString();
+  }
+  return { ok: true, status, url: url.href, origin: found.session.origin, pid: found.session.pid, workspace: found.session.workspace, mode: found.state.mode, activeCount: found.state.activeCount, ...(workflowId ? { workflowId } : {}) };
+};
 async function startupFailure(directory) {
   const path = join(directory, 'launcher.stderr.log');
   const item = await lstat(path).catch(() => null);
@@ -104,8 +112,13 @@ export async function launch(options = {}) {
   const payload = await verifyPayload(options.runtimeRoot || runtimeRoot, { required: options.requirePayload === true });
   const packageId = payload ? createHash('sha256').update(JSON.stringify(payload)).digest('hex') : null;
   const settings = await resolveOptions(options);
+  const setup = settings.setupPlan ? await readSetupPlan(resolve(settings.setupPlan), { workspace: settings.workspace }) : null;
   await noLinks(settings.stateDir); await mkdir(settings.stateDir, { recursive: true, mode: 0o700 }); await noLinks(settings.stateDir);
-  const reuse = (found) => { if (packageId && found.session.packageId !== packageId) fail('control_room_running_version_differs'); return receipt(found, 'reused'); };
+  const reuse = async (found) => {
+    if (packageId && found.session.packageId !== packageId) fail('control_room_running_version_differs');
+    if (setup) found.state = await request(found.session, { action: 'apply-setup-plan', plan: setup.plan });
+    return receipt(found, 'reused', setup?.plan.workflow.id);
+  };
   let found = await inspect(settings); if (found) return reuse(found);
   const unlock = await acquireLaunchLock(settings.stateDir);
   try {
@@ -118,6 +131,7 @@ export async function launch(options = {}) {
     if (settings.maxConcurrency != null) args.push('--max-concurrency', String(settings.maxConcurrency));
     if (settings.connect) args.push('--connect');
     if (settings.gitExecutable) args.push('--git', settings.gitExecutable);
+    if (setup) args.push('--setup-plan', resolve(settings.setupPlan), '--setup-plan-sha256', setup.sha256);
     if (packageId) args.push('--package-id', packageId);
     const handles = [];
     let child;
@@ -135,7 +149,7 @@ export async function launch(options = {}) {
         if (spawnError || child.exitCode != null || child.signalCode != null) fail(await startupFailure(settings.stateDir));
         const data = await readJson(join(settings.stateDir, 'session.json'));
         if (data?.instanceId === instanceId) {
-          found = await inspect(settings); if (found) return receipt(found, 'started');
+          found = await inspect(settings); if (found) return receipt(found, 'started', setup?.plan.workflow.id);
         }
         await sleep(150);
       }
@@ -162,7 +176,7 @@ export async function stop(options = {}) {
 }
 export async function runLauncherCli(argv = process.argv.slice(2), defaults = {}) {
   const options = { ...defaults, action: 'launch' };
-  const values = { '--workspace': 'workspace', '--codex': 'codex', '--git': 'gitExecutable', '--state-dir': 'stateDir', '--template': 'template', '--learning-modules': 'learningModules', '--max-concurrency': 'maxConcurrency', '--action': 'action' };
+  const values = { '--workspace': 'workspace', '--codex': 'codex', '--git': 'gitExecutable', '--state-dir': 'stateDir', '--template': 'template', '--learning-modules': 'learningModules', '--max-concurrency': 'maxConcurrency', '--setup-plan': 'setupPlan', '--action': 'action' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--connect') options.connect = true;
     else if (argv[i] === '--confirm-stop-active') options.confirmStopActive = true;
@@ -172,6 +186,7 @@ export async function runLauncherCli(argv = process.argv.slice(2), defaults = {}
   if (typeof options.learningModules === 'string') options.learningModules = options.learningModules.split(',').filter(Boolean);
   if (options.maxConcurrency != null) options.maxConcurrency = Number(options.maxConcurrency);
   if (!['launch', 'status', 'stop'].includes(options.action)) fail('control_room_action_invalid');
+  if (options.setupPlan && options.action !== 'launch') fail('setup_plan_requires_launch');
   const result = await ({ launch, status, stop }[options.action])(options); console.log(JSON.stringify(result)); return result;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runLauncherCli().catch((error) => { console.error(JSON.stringify({ ok: false, error: /^[a-z0-9_]+$/.test(error.message) ? error.message : 'control_room_launch_failed' })); process.exitCode = 1; });

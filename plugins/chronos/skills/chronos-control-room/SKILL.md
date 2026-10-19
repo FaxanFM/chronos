@@ -19,6 +19,12 @@ purpose is supplied. Choose `research`, `marketing` or `engineering` when that i
 the requested workflow. Respect explicit template, model, concurrency and
 workspace choices already supplied.
 
+When the user describes an outcome or supplies a framework file/folder, do the
+configuration work in this chat. Read [guided setup](references/guided-setup.md),
+prepare a bounded plan from the selected context, and launch with `--setup-plan`.
+Open the prepared workflow for review; do not require the user to learn the
+editor first. Reopening an existing room without a new assignment needs no plan.
+
 Before launching, briefly disclose:
 
 Explain privacy and execution permissions in plain language:
@@ -91,7 +97,13 @@ Stopping active work requires the user's explicit authorization and
 The dashboard provides editable stages, connections, bot-slot pools, inboxes,
 accepted outboxes, all/first-accepted joins and per-stage model/search controls.
 Defaults use the Codex model, not a hard-coded model or promised token saving.
-Use available host model names for explicit overrides; never silently substitute.
+Each stage has a Model and Thinking level selector from the connected host's
+advertised catalog. Keep explicit choices unchanged; unavailable choices block
+dispatch rather than silently substituting. Recommend Low for bounded extraction,
+classification or formatting, Medium for ordinary implementation/research/review,
+and High for genuinely complex security, architecture or verification. These are
+starting heuristics, not measured efficiency or quality guarantees. Apply an
+explicit requested model/effort only when the host advertises that combination.
 
 Users can add assignments and `codex://threads/<id>` sources. A source creates a
 managed context fork; it does not take control of the original Desktop turn.

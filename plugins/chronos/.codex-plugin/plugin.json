@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Launch a local Codex workflow dashboard with one setup prompt, isolated task execution, optional outcome and tool-call learning, and Windows diagnostics.",
   "requires_local_executor": true,
   "author": {
@@ -21,16 +21,16 @@
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Local Control Room for Codex",
-    "longDescription": "Launch Chronos Control Room with one setup prompt. Design visual Codex workflows with bot pools, inboxes and outboxes, joins, isolated workspace writes, native checks and human review gates. Add optional outcome-learning and tool-call review pipelines to improve completed workflows without silently changing them. Uses a local Codex executor and Node 22+; bundled host tools are preferred. Windows diagnostics and existing-chat Governor monitoring remain separate opt-ins. No publisher telemetry.",
+    "longDescription": "Describe your goal and select framework files or a folder. Your setup chat prepares a paused Chronos Control Room workflow with clear handoffs and human review gates. Choose models and supported thinking levels per stage, with task-based suggestions and hover/focus help. Design visual workflows with bot pools, inboxes, outboxes, joins, isolated workspace writes and native checks. Optional learning pipelines propose improvements from completed workflows without silently applying them. Uses a local Codex executor and Node 22+; Windows diagnostics and existing-chat Governor monitoring remain separate opt-ins. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
-    "capabilities": ["One-prompt Control Room setup", "Visual workflow editor", "Bot pools and stage queues", "Isolated workspace execution", "Native verification and review gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
+    "capabilities": ["Guided goal and framework setup", "Visual workflows and stage queues", "Model and thinking-level controls", "Isolated workspace execution", "Native checks and human gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "supportURL": "https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.",
+      "Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.",
       "Review my completed workflow with outcome learning and tool-call analysis; propose improvements without applying them.",
       "Run a Control Room health check; optionally include Windows diagnostics with my consent."
     ],

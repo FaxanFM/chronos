@@ -77,7 +77,7 @@ try {
     }
   }
   $promptRequirements = @(
-    @{ Index = 0; Terms = @('control room', 'workspace', 'template', 'privacy', 'permissions') },
+    @{ Index = 0; Terms = @('control room', 'goal', 'framework', 'models', 'thinking', 'privacy', 'permissions', 'paused') },
     @{ Index = 1; Terms = @('completed workflow', 'outcome learning', 'tool-call', 'improvements', 'without applying') },
     @{ Index = 2; Terms = @('control room', 'health check', 'windows diagnostics', 'consent') }
   )

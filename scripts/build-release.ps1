@@ -115,7 +115,7 @@ function Get-PackagedBytes {
       if ($relative -eq '.codex-plugin/plugin.json') {
         $directoryManifest = $content | ConvertFrom-Json
         $directoryManifest.PSObject.Properties.Remove('hooks')
-        $directoryManifest.description = 'Skills-only edition: one-prompt local Control Room setup, managed workflow execution and optional outcome/tool-call learning, with Windows diagnostics. No lifecycle hooks.'
+        $directoryManifest.description = 'Skills-only edition: guided local Control Room setup, model and thinking-level controls, managed workflows and optional learning, with Windows diagnostics. No lifecycle hooks.'
         $directoryManifest.interface.longDescription = $directoryManifest.interface.longDescription + ' Lifecycle hooks are not included or auto-installed.'
         $directoryManifest.extensions.'com.openai'.onboardingSkill = './skills/chronos-control-room/SKILL.md'
         $content = ($directoryManifest | ConvertTo-Json -Depth 12) + "`n"
@@ -129,14 +129,18 @@ diagnostics. It has no
 lifecycle hook definitions or hook installer. Core governance uses current
 local host statuses; missing health evidence remains partial or unsupported.
 
-Start with: Set up the Chronos Control Room for this workspace and template:
-explain privacy and permissions before starting.
+Start with: Turn my goal and selected framework files into a ready-to-review
+Chronos Control Room workflow. Recommend models and thinking levels, explain
+permissions, and open it paused.
 
 Setup starts and reopens the local dashboard without a manual server command.
 It needs a local Codex executor and Node 22+; the onboarding skill prefers bundled
 host tools and reports unsupported prerequisites explicitly. No npm install,
 hook patch or scheduled Governor is needed for Control Room. Execution and
 isolated writes require session consent; learning pipelines are optional.
+Model and thinking-level options come from the connected Codex host. Suggestions
+are explicit choices, not cost or quality guarantees. Hover or focus a control
+for help; guided setup can prepare the process before you use the editor.
 Existing-chat Governor monitoring and Windows diagnostics are separate opt-ins.
 
 Chronos sends no publisher runtime telemetry. Bounded local metadata stays on

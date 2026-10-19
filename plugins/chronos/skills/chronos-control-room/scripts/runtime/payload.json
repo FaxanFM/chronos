@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "pluginVersion": "0.10.1",
+  "pluginVersion": "0.10.2",
   "files": [
     {
       "path": "server.mjs",
-      "bytes": 12339,
-      "sha256": "c5991f20a5cd138f3866c30cc1a949774a98d924f0aa9d59947f3891d0cec415"
+      "bytes": 12760,
+      "sha256": "2aa8c2486f71166ab226246b8c6793ab0d74891d3de8f92f405189181aeb8f2d"
     },
     {
       "path": "launcher.mjs",
-      "bytes": 12466,
-      "sha256": "d03c956f5e7832e74ef6642b278fd16ac7f2cae9933b20db8993fe0b213676c0"
+      "bytes": 13308,
+      "sha256": "5337a1166b2d4b67a555f22e4a882b37727e3e347543608f5b71dced2b26691b"
     },
     {
       "path": "lib/codex-adapter.mjs",
-      "bytes": 23151,
-      "sha256": "e803662c01593de4e5bcf3033b1b3f07c2f29169e3fe6c4e736402dd51905ffc"
+      "bytes": 27458,
+      "sha256": "6fe91214720a3abaf55c839e9ad9abea21b8e911a99dbf3111573d7dfae85b55"
     },
     {
       "path": "lib/engine.mjs",
-      "bytes": 41885,
-      "sha256": "ba1446fae6ec256197af94c24ca521c6e7f640ff51232bb3679253adb0c021a6"
+      "bytes": 45332,
+      "sha256": "3fc85bc8713820986fa41efce1652538b8014984b2f6d85a08445d6f8fa2f692"
     },
     {
       "path": "lib/runtime-health.mjs",
@@ -39,8 +39,8 @@
     },
     {
       "path": "lib/workflow-contracts.mjs",
-      "bytes": 3967,
-      "sha256": "eebeb7aa7ca3ebc9dbdba6fcc798068e4d906807a3e8d254cd0c4e762ecb5c88"
+      "bytes": 4144,
+      "sha256": "7bcaac429cbc0644cfe66b6558f9e6ff4c900d79d8ca7964ba121394dcf185a5"
     },
     {
       "path": "lib/workspaces.mjs",
@@ -48,14 +48,19 @@
       "sha256": "7c4ab66cf991f86862fd068e7d1650af9fe95edba8047086f235d65ce6ccf82b"
     },
     {
+      "path": "lib/setup-plan.mjs",
+      "bytes": 4806,
+      "sha256": "3acbfae3349f41b92eac609c608bd39908f42019eb658c78f452d915753c7da7"
+    },
+    {
       "path": "public/app.js",
-      "bytes": 416890,
-      "sha256": "ff438a8f172cefcd943089b89c2d7847150c7dc7a11f4ca2e4d018f3bfcfc248"
+      "bytes": 426774,
+      "sha256": "b531cfce7fea342a2ae9c43dff53a41c19262d8462c175cecffc3f11f1b17576"
     },
     {
       "path": "public/app.css",
-      "bytes": 30326,
-      "sha256": "509dd107f551551510c8851763076518a80b79938e657d95734248f775e6cd3e"
+      "bytes": 32109,
+      "sha256": "001dfb25e66db499e49563bb2062fa7c8ae5d30abd9a7893b287c062f2901de3"
     },
     {
       "path": "public/index.html",
