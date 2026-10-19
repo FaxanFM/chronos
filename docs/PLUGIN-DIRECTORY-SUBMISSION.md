@@ -1,5 +1,55 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.10.1 Patch Release And Submission Candidate
+
+Version: `0.10.1`.
+
+The user chose to preserve the original v0.10.0 tag and release the public-support
+metadata correction as v0.10.1. Version 1.0 remains a later milestone. The original
+v0.10.0 tag object is `2f431005de342f388fe4badd923b10c320337cb9`, pointing to
+`63399c5190dc2162c46d86aa021fbda3f9365a64`; it must not be replaced.
+
+The patch adds the public support guide required by the live portal, plus explicit
+source and Directory-package regressions. Runtime executable files are unchanged.
+The plugin manifest and runtime payload version are 0.10.1.
+
+Full edition: `chronos-v0.10.1.zip`, 31 files, five opt-in hooks, SHA-256
+`bc59db98bfc3bdbf8ef9d5fd496bf5dda6054c7b41cb7e4e8385354429148daf`.
+Directory edition: `chronos-v0.10.1-skills-only.zip`, 29 files, zero hooks, SHA-256
+`ab1d1fb2f61f2c80c25a80e5dafee69e9958ec5f7f1fd4cfba033afc8132956d`.
+Local artifacts and per-file receipts are in `dist/chronos-v0.10.1-final/`.
+Release destination: https://github.com/FaxanFM/chronos/releases/tag/v0.10.1.
+
+Publication and review submission are pending. Require the signed tag, passing
+release workflow, immutable assets, matching hashes and attestation before final
+marketplace submission. Submit the published Directory asset to the existing
+Chronos listing, not a new listing or the older approved 0.9.4 package. Keep the
+full hook-enabled edition on GitHub. Record the publication and review receipts
+when complete; a draft upload is not a submitted or live update.
+
+## v0.10.0 Publication Metadata Correction
+
+The first portal upload created draft `appsub_6ad633c8ddac81919c18de8361e9fde8`
+on the existing Chronos listing. Its live metadata check requires a support URL,
+even though the skills-only documentation does not require every MCP listing URL.
+The manifest now includes the existing public `SUPPORT.md` guide, with source and
+Directory-package regressions. No runtime, hooks, permissions or version changed.
+
+Corrected full ZIP SHA-256:
+`8bb96eff6694570cd9275d111c23898012bc5ca96fdf0726f7f87d43351142d5`.
+Corrected Directory ZIP SHA-256:
+`d1cc4615050e8de9604514c15031b794f288d9573034f0ff732305c092d389f6`.
+Both are in `dist/chronos-v0.10.0-support-fix/` and supersede the earlier candidate
+hashes below. The Directory build uses the release-tag policy URLs.
+
+PR #4 was merged. The first signed v0.10.0 tag points to
+`63399c5190dc2162c46d86aa021fbda3f9365a64`; its release workflow was stopped before
+publication after the portal finding. No immutable v0.10.0 release asset exists
+yet. Correcting that unpublished tag requires explicit user approval; do not
+silently replace a public tag or describe this draft as submitted or published.
+The original source remains in Git history. Version 1.0 is the next milestone,
+not the current release.
+
 ## v0.10.0 Control Room Candidate (Prepared, Not Submitted)
 
 Version: `0.10.0`. This is the prepared candidate on the `codex/chronos-control-room`

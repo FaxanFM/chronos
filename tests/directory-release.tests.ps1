@@ -78,6 +78,9 @@ try {
   }
   $record = Get-Content -Raw (Join-Path $first "$name.release.json") | ConvertFrom-Json
   $expectedPolicyRef = if ($PolicyCommit) { $PolicyCommit.ToLowerInvariant() } else { "v$version" }
+  if ($manifest.interface.supportURL -ne 'https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md') {
+    throw 'Directory package must retain the public support URL.'
+  }
   if ($manifest.interface.privacyPolicyURL -notmatch "/blob/$([regex]::Escape($expectedPolicyRef))/PRIVACY.md$" -or
       $manifest.interface.termsOfServiceURL -notmatch "/blob/$([regex]::Escape($expectedPolicyRef))/TERMS.md$") {
     throw 'Directory policy links are not bound to the requested source ref.'

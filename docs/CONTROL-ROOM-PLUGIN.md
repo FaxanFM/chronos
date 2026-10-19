@@ -2,8 +2,10 @@
 
 ## Release Status
 
-Control Room is bundled in the **v0.10.0 candidate**, not retroactively added to
-v0.9.4. The candidate needs review before the marketplace version is updated.
+Control Room is bundled in the **v0.10.1 candidate**, not retroactively added to
+v0.9.4. The v0.10.0 tag is retained as the original candidate; v0.10.1 carries
+the support-metadata correction and still needs review before the marketplace
+version is updated.
 Do not describe an upload, local candidate ZIP or GitHub source PR as a published
 Directory release. The Directory edition includes no lifecycle hooks.
 

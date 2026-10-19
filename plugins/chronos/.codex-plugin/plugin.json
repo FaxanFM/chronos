@@ -1,6 +1,6 @@
 {
   "name": "chronos",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Launch a local Codex workflow dashboard with one setup prompt, isolated task execution, optional outcome and tool-call learning, and Windows diagnostics.",
   "requires_local_executor": true,
   "author": {
@@ -26,6 +26,7 @@
     "category": "Developer Tools",
     "capabilities": ["One-prompt Control Room setup", "Visual workflow editor", "Bot pools and stage queues", "Isolated workspace execution", "Native verification and review gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
+    "supportURL": "https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
