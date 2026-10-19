@@ -11,8 +11,10 @@ Include:
 
 - Your Windows version.
 - Your Codex version.
-- The compact `CHRONOS` summary.
-- For Governor issues, the action and compact `CHRONOS GOVERNOR` result.
+- Your Chronos edition and hook configuration/execution observation.
+- The plain-language health summary. Native supervision status can contain raw
+  task IDs; do not paste it unredacted. A native share-safe mode is not yet available.
+- For Governor issues, the action and reviewed aggregate result without IDs.
 - Whether Codex was fully closed and a fresh task was opened after the latest
   plugin installation or upgrade.
 - What you were doing when degradation appeared.
@@ -31,3 +33,8 @@ For an unexplained Governor `internal_error`, include its `failure_stage`,
 to code-boundary metadata and do not contain local paths or exception text.
 
 Chronos is an independent community plugin and is not supported by OpenAI.
+
+Use the public question template for non-sensitive usage or policy questions.
+The repository's private security advisory route is for vulnerabilities.
+No general private privacy-contact channel is currently published; do not send
+personal records to a public issue as a substitute.

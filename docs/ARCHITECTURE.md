@@ -74,7 +74,10 @@ an unrelated payload does not count.
 The rooted installed `chronos.cmd` launcher with `-Action heartbeat` invokes an internal deterministic transition
 engine. The Codex host supplies one bounded normalized snapshot across the
 monitored task set and chooses the recurring cadence. The recommended topology
-uses one Governor task on `gpt-5.6-terra` with Medium reasoning. Monitored tasks
+uses one Governor task on `gpt-6-sol` with Medium reasoning. An explicitly
+selected `gpt-6-luna` with Medium reasoning is an alternative only when the host
+advertises it. Recommendations do not verify the effective host model or cost.
+Monitored tasks
 remain model-agnostic and do not run Heartbeats. Chronos does not create the
 recurring automation, call a model, contact a task, or make a network request.
 It does not infer cost or quota impact from a model name.
@@ -176,9 +179,8 @@ must match the model persisted by `plan`. A difference fails with
 
 The installed plugin bundles five monitoring hooks: `SessionStart`,
 `SessionEnd`, `SubagentStart`, `SubagentStop`, and `Stop`. Codex applies its
-normal hash-based trust review before these non-managed hooks can run. Start,
-subagent, and completed-turn handlers request asynchronous execution where the
-host supports it; `SessionEnd` remains synchronous as required by Codex. Some
+normal hash-based trust review before these non-managed hooks can run. All five
+handlers use bounded synchronous intake as defined in `hooks.json`. Some
 current Windows Codex and `codex exec` paths do not dispatch trusted hooks.
 When invoked, all return exit zero without output, add no model context, and
 fail silent on a registry error.

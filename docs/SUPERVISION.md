@@ -11,11 +11,11 @@ After installing or upgrading Chronos, fully quit and reopen Codex. Then open a
 fresh task and ask:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
-This request opts in to one host-managed recurring Governor turn: at most 24
+This request begins onboarding; a separate recurring choice opts in to one
+host-managed recurring Governor turn: at most 24
 turns per day while monitored work is active and four per day while idle at the
 default cadence. Worker tasks receive no recurring turns. Chronos requires a
 fresh Governor or pauses after 336 cycles or 14 days, whichever comes first.
@@ -229,11 +229,15 @@ characters>`. It contains no raw hostname, username, path, machine GUID, task ID
 or workspace data. It is a persistent pseudonymous installation identifier,
 not a secret or authentication credential.
 
-The host requests `gpt-5.6-terra` with Medium reasoning when that exact choice is
+The host requests `gpt-6-sol` with Medium reasoning when that exact choice is
 available. Chronos cannot change a task's model itself and does not silently
 substitute another model. This preference applies only to the Governor;
 monitored tasks remain model-agnostic. Chronos does not infer cost, quota impact,
-or efficiency from a model name.
+or efficiency from a model name. `gpt-6-luna` with Medium reasoning is an
+explicit user-selected alternative, not a silent fallback. Existing Governors
+keep their model until the user authorizes a supported host change; verify the
+effective model before reporting an upgrade. An unavailable setting remains
+`governor_model_change_unverified`, not a reason to create a duplicate Governor.
 
 ## Runtime Contract
 

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "pluginVersion": "0.10.0",
+  "files": [
+    {
+      "path": "server.mjs",
+      "bytes": 12339,
+      "sha256": "c5991f20a5cd138f3866c30cc1a949774a98d924f0aa9d59947f3891d0cec415"
+    },
+    {
+      "path": "launcher.mjs",
+      "bytes": 12466,
+      "sha256": "d03c956f5e7832e74ef6642b278fd16ac7f2cae9933b20db8993fe0b213676c0"
+    },
+    {
+      "path": "lib/codex-adapter.mjs",
+      "bytes": 23151,
+      "sha256": "e803662c01593de4e5bcf3033b1b3f07c2f29169e3fe6c4e736402dd51905ffc"
+    },
+    {
+      "path": "lib/engine.mjs",
+      "bytes": 41885,
+      "sha256": "ba1446fae6ec256197af94c24ca521c6e7f640ff51232bb3679253adb0c021a6"
+    },
+    {
+      "path": "lib/runtime-health.mjs",
+      "bytes": 2802,
+      "sha256": "b8b68e8a07d23003cab63ab2322ef2584d76fef505d76414644d72d1355b0c58"
+    },
+    {
+      "path": "lib/runtime-discovery.mjs",
+      "bytes": 2435,
+      "sha256": "e8a91dff21fb434281e811267b60e8045ad33ae0712a877a1d4e9bd0d5762c72"
+    },
+    {
+      "path": "lib/templates.mjs",
+      "bytes": 9453,
+      "sha256": "a4dd7f1c78cc7e060c3a14b4c387b84f2d3b3daaa04d4e07bb85c9b5d2abeebd"
+    },
+    {
+      "path": "lib/workflow-contracts.mjs",
+      "bytes": 3967,
+      "sha256": "eebeb7aa7ca3ebc9dbdba6fcc798068e4d906807a3e8d254cd0c4e762ecb5c88"
+    },
+    {
+      "path": "lib/workspaces.mjs",
+      "bytes": 9045,
+      "sha256": "7c4ab66cf991f86862fd068e7d1650af9fe95edba8047086f235d65ce6ccf82b"
+    },
+    {
+      "path": "public/app.js",
+      "bytes": 416890,
+      "sha256": "ff438a8f172cefcd943089b89c2d7847150c7dc7a11f4ca2e4d018f3bfcfc248"
+    },
+    {
+      "path": "public/app.css",
+      "bytes": 30326,
+      "sha256": "509dd107f551551510c8851763076518a80b79938e657d95734248f775e6cd3e"
+    },
+    {
+      "path": "public/index.html",
+      "bytes": 325,
+      "sha256": "0809164ddbb25cecae54a30bac81bc3f0c424dc68d182f3d250e8caa5a39f10c"
+    },
+    {
+      "path": "public/chronos-mark.png",
+      "bytes": 944725,
+      "sha256": "d5afdb395dba5d8ca784f9a215e0359c2db0664dd8f5943a6d12c57155f9f5e4"
+    }
+  ]
+}

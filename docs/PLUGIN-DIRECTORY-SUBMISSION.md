@@ -1,5 +1,162 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.10.0 Control Room Candidate (Prepared, Not Submitted)
+
+Version: `0.10.0`. This is the prepared candidate on the `codex/chronos-control-room`
+branch. It is not uploaded, submitted, approved, or published, and it does not replace
+the immutable v0.9.2 listing. The candidate adds a packaged, one-prompt Control Room
+onboarding skill. On a supported desktop host it discovers the authenticated local
+Codex executable, starts a private loopback UI, and leaves the queue paused until the
+user grants execution consent. No manual server command is required.
+
+The packaged path requires the local executor, Node.js 22 or newer, an authenticated
+Codex installation, and local Git when a workflow needs an isolated worktree. The
+skills-only edition contains no lifecycle hooks, hosted service, MCP server, publisher
+telemetry, or automatic model turns. The full hook-enabled source remains available on
+GitHub as a separately documented, opt-in edition; it is not silently installed by the
+Directory package.
+
+Two optional learning templates, `outcome_learning` and `tool_call_review`, add bounded
+read-only analysis stages. They summarize observed execution evidence and propose
+workflow improvements; they do not train a model, alter permissions, or apply changes
+automatically. The candidate has local evidence of 68 unit tests, usability PASS,
+deterministic 29-file skills-only packaging with zero hooks, and an extracted ZIP launch
+on the normal host with the software-factory workflow plus both learning templates,
+paused state, zero active turns, and package/instance identity binding. A subsequent
+clean local-catalog installation in an isolated Codex profile verified all 29 installed
+file hashes, the installed launcher, paused Research plus both learning modules,
+identity binding, stop and uninstall. No production profile or hook trust changed.
+These are local candidate results, not public Directory or all-OS certification.
+
+The next submission, if authorized after review, must use a freshly built
+skills-only ZIP bound to verified signed source, with its own immutable hash and receipt.
+Do not reuse historical hashes
+below or upload this working candidate by implication.
+
+Signed package-source commit:
+[`86d5b174bc8397461580d348ea5d114cbbc79233`](https://github.com/FaxanFM/chronos/commit/86d5b174bc8397461580d348ea5d114cbbc79233).
+Its SSH signature verifies against `docs/security/allowed_signers`. Documentation-only
+commits may follow on the same branch without changing the packaged source files.
+
+Prepared artifacts in `dist/chronos-v0.10.0-final/`:
+`chronos-v0.10.0.zip` (31 files), SHA-256
+`03ab01788154a8f0b0a9b802caf95c925dda8f02620caea1369bb9ffe6842b07`;
+`chronos-v0.10.0-skills-only.zip` (29 files, no hooks), SHA-256
+`1dc88c3b16b78171eb8c0bc96801b58ef2fe191a6804723323d130561a6f4b9a`.
+Only the skills-only ZIP is the prepared Directory upload. Its policy URLs and
+`policy_source_ref` bind to the signed commit above, not a future release tag.
+The neighboring `.sha256` and `.release.json` files bind the artifact and each
+packaged/source file hash. The ZIP itself has no separate detached signature.
+The full ZIP retains the default future-tag policy URLs and is not upload-ready
+until a separately authorized release creates that tag. Neither artifact is a
+published release asset.
+
+Rebuild the prepared Directory bytes from this source history with Windows
+PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Version 0.10.0 -Edition Directory -PolicyCommit 86d5b174bc8397461580d348ea5d114cbbc79233 -OutputDirectory dist/chronos-v0.10.0-final
+```
+
+The execution-policy flag applies only to that build process; it does not change
+the user's saved PowerShell policy or grant Control Room execution consent.
+Reserved release URL: https://github.com/FaxanFM/chronos/releases/tag/v0.10.0
+(not published). Source is under review in https://github.com/FaxanFM/chronos/pull/4.
+
+Native worktree setup also disables repository Git hooks, filesystem-monitor
+helpers and configured external filter commands. Committed checkout filters
+require separate review before writable materialization; no LFS download or
+repository helper is implicitly authorized. Marker regressions cover these
+guards and retry after a reviewed repository repair.
+
+The final bundle also includes complete license notices for all 18 bundled npm
+dependencies. This notice-only change leaves executable browser bytes unchanged
+but supersedes earlier v0.10.0 artifact hashes. The Windows signer test's expected
+bad-trust probe no longer leaks its failure code into the successful host wrapper;
+actual trust assertions remain enforced. Current-head CI must pass after both
+corrections; do not use the earlier red run as a release receipt.
+
+Before submission:
+
+1. Local native verification and the final authenticated packaged launch passed.
+   A fresh hardened four-stage workflow also passed with four actual model turns,
+   native verification exit zero, unchanged source and a held human gate. No
+   credentials were copied and the production profile was not changed.
+2. Verify the signed source commit and the existing Control Room PR's current
+   head. Require passing Windows and Control Room CI results for that head;
+   historical green checks are not approval of a later commit.
+3. Rebuild the Directory edition with the exact `PolicyCommit` above and confirm
+   its ZIP hash reproduces. Review the signed commit and source/file-hash bindings.
+4. Obtain release approval before merging, tagging or publishing immutable assets.
+   The final Directory package must pin privacy/terms to public signed source;
+   a reserved, nonexistent release tag is not an upload-ready policy URL.
+5. Submit only the skills-only edition after explicit marketplace-update
+   authorization. Retain the full edition on GitHub; do not auto-patch hooks.
+
+## Local Usability Remediation Build - Not Submitted
+
+October 6, 2026, after code-review corrections: the new local candidate adds native scoped removal, a tested
+global hooks feature-control procedure and public signing trust/verification.
+Full ZIP SHA-256 `02cadf9e23f489329268055ff211621970a607362884efb8f1e0034561281d42`
+(14 files); Directory ZIP SHA-256
+`c51e02198f00c95c8449c8608cfc6cadc2ce06d8e054f84eeb5f381f3f0c9402`
+(12 files, no hooks). These bytes are not uploaded or published. Local removal,
+Inspector, Heartbeat, Supervision, Governor (49 scenarios), reproducibility,
+Directory contracts, hook configuration control and signing-trust checks pass.
+Compatibility evidence for unchanged module hashes is detailed in the audit
+response. The maintainer code review caught and corrected an unresolved-lease
+removal guard, stale-backup precedence and the distinction between source and
+packaged file hashes.
+This is not an independent external audit or live desktop certification; do not use
+the October 1 review receipt as approval of these different bytes.
+
+October 5, 2026: the modified working tree builds a different full
+`chronos-v0.9.4.zip`, SHA-256
+`7738563b03186cdf82ca4ab62fb67cd002d0ee90a98c234b8a645d4e69b6ba9b`.
+Two local builds matched. This is not the signed source pin or uploaded package
+recorded below. It has not been installed, signed as a new candidate, uploaded,
+or published. Release remains HOLD under
+[the usability response](V0.9.4-USABILITY-AUDIT-RESPONSE.md).
+Keep the previous submission receipt and hashes as historical evidence; a new
+candidate needs its own signed identity, gates, review and submission.
+
+## v0.9.4 Submission Candidate
+
+Version: `0.9.4`
+
+Local full draft: `chronos-v0.9.4.zip`, SHA-256
+`8ede0807119bf2c25a6432acc80ba8137d315bd3fec3d11391a898d95c1114ae`.
+It retains 14 release files and five optional hooks. Reserved future release
+destination: https://github.com/FaxanFM/chronos/releases/tag/v0.9.4 (not published).
+
+The separately labeled Directory ZIP is `chronos-v0.9.4-skills-only.zip`, SHA-256
+`c734284e71bc84da12f30566ed09af8fa8548d6deea76496a32c3d0913c17bbb`.
+It contains 12 release files, both skills, and no lifecycle hook configuration
+or hook-intake launcher. Its manifest, skill notices, and README disclose the
+skills-only edition. It does not auto-install GitHub hooks or patch managed caches.
+Both artifacts prefer GPT-6 Sol with Medium reasoning; GPT-6 Luna is an
+explicit supported choice, not a silent fallback or measured token-saving claim.
+
+Uploaded to the existing Dravara, LLC listing on October 1, 2026 as draft
+`appsub_6abed40a3b14819199513100bddb7e69`. Metadata and both skill checks passed.
+The user accepted the submission terms and declarations, and the portal
+confirmed **In review** under release record
+`pluginrel_48e56ed7ffe08191be06cf0a5ab40871` on October 1, 2026.
+Review receipt: https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_48e56ed7ffe08191be06cf0a5ab40871.
+The public listing remains v0.9.2. This candidate is not installed in the
+production account or published. It adds a packaged onboarding
+entrypoint to the existing core skill, separate consent decisions, verified
+setup receipts, and explicit local/publisher/provider data disclosures. See
+[ONBOARDING.md](ONBOARDING.md). It changes no v0.9.3 release identity.
+
+The full hook-enabled source still cannot be uploaded under the documented
+hook exclusion. Optional GitHub hooks must not be installed covertly after a
+skills-only review. The Directory-to-GitHub automation route is unverified;
+the candidate reports that boundary and offers useful core setup instead. The
+skills-only artifact has deterministic-build, edition-disclosure, hook-exclusion,
+native scoped-cycle, process-restart, and unsupported-coverage checks. These
+fixture checks do not establish live unattended scheduled execution.
+
 ## v0.9.3 Release Candidate
 
 Version: `0.9.3`

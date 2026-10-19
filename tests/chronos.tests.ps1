@@ -127,24 +127,34 @@ try {
   & $PythonPath $fixtureScript verify $databasePath
   if ($LASTEXITCODE -ne 0) { throw "SQLite fixture verification failed." }
 
+  $writerReady = Join-Path $fixtureHome 'writer-ready'
+  $writerStop = Join-Path $fixtureHome 'writer-stop'
   $writerArguments = @(
     "`"$fixtureScript`"",
     "write",
     "`"$databasePath`"",
     "--duration",
-    "4"
+    "120",
+    '--ready-path', "`"$writerReady`"",
+    '--stop-path', "`"$writerStop`""
   )
   $writer = Start-Process -FilePath $PythonPath -ArgumentList $writerArguments `
     -PassThru -WindowStyle Hidden
-  Start-Sleep -Milliseconds 500
-
-  $activeOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-    -File $chronosScript -Action inspect -CodexHome $fixtureHome -SampleSeconds 1
-  if ($LASTEXITCODE -ne 0) { throw "Chronos active-WAL inspection failed." }
-  Assert-Match $activeOutput " logWalActive=true " "Active WAL writes were not detected."
-  Assert-Match $activeOutput " logRate=([1-9][0-9]*)([.,][0-9]+)? " "Active insert rate was not detected."
-
-  $writer.WaitForExit()
+  try {
+    $readyDeadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    while (-not (Test-Path -LiteralPath $writerReady)) {
+      if ($writer.HasExited -or [DateTimeOffset]::UtcNow -gt $readyDeadline) { throw 'SQLite fixture writer did not become ready.' }
+      Start-Sleep -Milliseconds 50
+    }
+    $activeOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+      -File $chronosScript -Action inspect -CodexHome $fixtureHome -SampleSeconds 1
+    if ($LASTEXITCODE -ne 0) { throw "Chronos active-WAL inspection failed." }
+    Assert-Match $activeOutput " logWalActive=true " "Active WAL writes were not detected."
+    Assert-Match $activeOutput " logRate=([1-9][0-9]*)([.,][0-9]+)? " "Active insert rate was not detected."
+  } finally {
+    [IO.File]::WriteAllText($writerStop, 'stop')
+    if (-not $writer.WaitForExit(15000)) { $writer.Kill(); $writer.WaitForExit(); throw 'SQLite fixture writer failed to stop.' }
+  }
   if ($writer.ExitCode -ne 0) { throw "SQLite fixture writer failed." }
 
   $missingOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
@@ -450,6 +460,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Chronos token-health inspection failed." }
   Assert-Match $tokenOutput " quotaRisk=HIGH " `
     "High-effort, high-context token fixture should report high quota risk."
+  Assert-Match $tokenOutput '^CHRONOS CRITICAL advisory=true ' `
+    'High quota risk must lead with overall severity, not machine health.'
   Assert-Match $tokenOutput " tokenFiles=1 " "Token fixture file was not counted."
   Assert-Match $tokenOutput " tokenSamples=1 " "Token event was not counted."
   Assert-Match $tokenOutput " tokenCachedReadPct=80([.,]0)? " `

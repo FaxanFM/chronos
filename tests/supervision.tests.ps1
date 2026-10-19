@@ -867,7 +867,7 @@ try {
   Assert-True ($emptyData.hookExecutionObservation -eq 'not_observed' -and $emptyData.hookTrustObservation -eq 'host_verification_required' -and $emptyData.registryCoverage -eq 'host_active_inventory_required') 'Empty hook observability must distinguish no evidence from disabled or trusted hooks.'
   Assert-True ($emptyData.hookRole -eq 'optional_acceleration' -and -not $emptyData.hookRequiredForAutonomy -and $emptyData.taskDiscoveryAuthority -eq 'visible_or_specified_inventory_each_governor_cycle') 'Autonomy incorrectly depended on lifecycle-hook execution.'
   Assert-True ($emptyData.catalogRefreshAction -eq 'fully_restart_codex_then_start_fresh_task' -and $emptyData.loadedTaskCatalogHotSwap -eq 'unsupported_by_host') 'Install refresh guidance did not preserve the host catalog boundary.'
-  Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-5.6-terra' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select Terra Medium.'
+  Assert-True ($emptyData.recommendedGovernorModel -eq 'gpt-6-sol' -and $emptyData.recommendedGovernorReasoningEffort -eq 'medium') 'Governor model guidance did not select GPT-6 Sol Medium.'
   $scopePath = Join-Path (Split-Path -Parent $state) 'installation-scope.json'
   Assert-True (Test-Path -LiteralPath $scopePath -PathType Leaf) 'Status did not create a stable installation-scope anchor.'
   $scopeText = Get-Content -Raw -LiteralPath $scopePath

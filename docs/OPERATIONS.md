@@ -11,6 +11,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps
 The builder packages only tracked plugin files, rejects untracked plugin input
 and reparse ancestors, sorts entries, assigns a fixed ZIP timestamp, and writes
 the ZIP, SHA-256 checksum, and a per-file hash/size manifest to `dist`.
+Each current file record separates `sha256` (packaged bytes) from
+`source_sha256` (LF-normalized tracked source). The builder pins README and policy
+links, and the Directory edition also changes its metadata and skill notices.
+Do not compare a Git-manager source install with a transformed ZIP hash; the
+installation-guide test checks source hashes, while release tests check ZIP
+hashes. Neither comparison replaces signature or attestation verification.
 `tests/release.tests.ps1` builds twice and requires identical artifact hashes.
 This proves same-environment reproducibility for the tested Windows runtime. It
 does not claim byte identity across arbitrary ZIP implementations or operating
@@ -103,19 +109,22 @@ check, or attestation prevents publication.
 See GitHub's [artifact-attestation documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 for the provenance and verification model.
 
-Verify a downloaded artifact:
+Verify a published artifact and its installation (requires Git and `gh`):
 
 ```powershell
-Get-FileHash .\chronos-v0.9.2.zip -Algorithm SHA256
-gh attestation verify .\chronos-v0.9.2.zip -R FaxanFM/chronos
-gh release verify v0.9.2 -R FaxanFM/chronos
-gh release verify-asset v0.9.2 .\chronos-v0.9.2.zip -R FaxanFM/chronos
+$version = [string](Get-Content -Raw plugins/chronos/.codex-plugin/plugin.json | ConvertFrom-Json).version
+& .\scripts\verify-release.ps1 -Version $version -Edition Directory -CodexPath $codex
+if ($LASTEXITCODE -ne 0) { throw 'Release verification failed.' }
 ```
 
 The `gh release` checks follow GitHub's [release-integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 procedure.
 
-Compare the first command with `chronos-v0.9.2.sha256`. These controls prove
+Use the manager-verified absolute desktop CLI path for `$codex`; choose
+`-Edition Full` for GitHub. The script checks the selected release's checksum,
+signed tag/commit against `docs/security/allowed_signers`, immutable asset
+binding and attestation bound to that source commit/ref/workflow. A preview
+without a published attestation is not a verified release. These controls prove
 different things: commit and tag signatures identify the signer; reproducible
 builds and checksums bind source to bytes; artifact attestations record the
 GitHub Actions build provenance; and release immutability binds the published
@@ -129,7 +138,7 @@ or update Chronos through the Directory listing. Use the Git marketplace only
 as a fallback when the Directory is unavailable:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
 codex.cmd plugin add chronos@chronos
 ```
 
@@ -181,15 +190,16 @@ enabled; the status output states this limitation.
 
 After upgrading, fully quit and reopen Codex before opening a fresh task. This
 is required because a running host can retain a removed versioned skill
-locator. Then review the exact Chronos lifecycle hook through `/hooks`. Hook
+locator. Then review the exact Chronos lifecycle hook through the host's
+supported review controls, following [hook review](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks). Hook
 trust is bound to the definition hash and cannot be
 bypassed by the plugin. Then ask Codex to enable Chronos supervision once.
 
-The `/hooks` installed, active, and trusted labels do not prove the command ran.
+Installed, active, and trusted labels do not prove the command ran.
 Check `hookExecutionObservation`, `hookRuns`, and `lastHookUtc` in supervision
 status. Where the host dispatches hooks, capture the baseline and prove those
 values advance. Some current Windows Codex and `codex exec` paths can omit hook
-dispatch even while `/hooks` reports active and trusted. Chronos therefore uses
+dispatch even while the host reports active and trusted. Chronos therefore uses
 one scoped current-host inventory per Governor cycle as its autonomous
 discovery authority. It does not enumerate inactive task history. v0.9.2 keeps
 the Windows launcher inside Codex's PowerShell hook shell, without starting a
@@ -269,7 +279,7 @@ first can orphan a recurrence and is prohibited. See [Supervision](SUPERVISION.m
 ## Heartbeat Recovery
 
 Use one recurring Governor task for the monitored task set. Configure that task
-with `gpt-5.6-terra` and Medium reasoning when the host offers it. The default is
+with `gpt-6-sol` and Medium reasoning when the host offers it. The default is
 60 minutes while work is active and 360 minutes while idle, at most 24 or four
 Governor turns per day. Rotate or pause after 336 cycles or 14 days. Do not
 create a recurrence in every monitored task. Monitored tasks can use any

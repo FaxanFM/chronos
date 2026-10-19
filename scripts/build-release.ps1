@@ -1,6 +1,8 @@
 param(
   [string]$Version = "",
-  [string]$OutputDirectory = ""
+  [string]$OutputDirectory = "",
+  [ValidateSet('Full', 'Directory')][string]$Edition = 'Full',
+  [string]$PolicyCommit = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,14 +16,33 @@ if (-not $Version) { $Version = $manifestVersion }
 $Version = $Version.TrimStart('v')
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must use semantic version form." }
 if ($Version -ne $manifestVersion) { throw "Requested version does not match plugin manifest version $manifestVersion." }
+$policySourceRef = "v$Version"
+if ($PolicyCommit) {
+  $PolicyCommit = $PolicyCommit.Trim()
+  if ($PolicyCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'PolicyCommit must be a full 40-hex commit SHA.' }
+  $resolvedPolicyCommit = (& git -C $repoRoot rev-parse --verify "$PolicyCommit^{commit}" 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or $resolvedPolicyCommit -notmatch '^[0-9a-f]{40}$') { throw "PolicyCommit does not resolve to a commit: $PolicyCommit" }
+  & git -C $repoRoot merge-base --is-ancestor $resolvedPolicyCommit HEAD 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "PolicyCommit must be an ancestor of the current HEAD: $resolvedPolicyCommit" }
+  foreach ($policyFile in @('PRIVACY.md', 'TERMS.md')) {
+    & git -C $repoRoot cat-file -e "${resolvedPolicyCommit}:$policyFile" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "PolicyCommit is missing ${policyFile}: $resolvedPolicyCommit" }
+  }
+  $policySourceRef = $resolvedPolicyCommit
+}
+$payload = Get-Content -Raw -LiteralPath (Join-Path $pluginRoot 'skills\chronos-control-room\scripts\runtime\payload.json') | ConvertFrom-Json
+if ($payload.schemaVersion -ne 1 -or [string]$payload.pluginVersion -ne $manifestVersion) {
+  throw 'Control Room payload must be regenerated for the declared plugin version.'
+}
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot "dist" }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
-$artifactName = "chronos-v$Version.zip"
+$artifactStem = if ($Edition -eq 'Directory') { "chronos-v$Version-skills-only" } else { "chronos-v$Version" }
+$artifactName = "$artifactStem.zip"
 $artifactPath = Join-Path $OutputDirectory $artifactName
-$checksumPath = Join-Path $OutputDirectory "chronos-v$Version.sha256"
-$releaseManifestPath = Join-Path $OutputDirectory "chronos-v$Version.release.json"
+$checksumPath = Join-Path $OutputDirectory "$artifactStem.sha256"
+$releaseManifestPath = Join-Path $OutputDirectory "$artifactStem.release.json"
 Remove-Item -LiteralPath $artifactPath, $checksumPath, $releaseManifestPath -Force -ErrorAction SilentlyContinue
 
 Add-Type -AssemblyName System.IO.Compression
@@ -36,6 +57,12 @@ $files = @($trackedPaths | Where-Object { $_ -and $_ -notmatch '/\.gitignore$' }
 } | Sort-Object {
   $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
 })
+if ($Edition -eq 'Directory') {
+  $files = @($files | Where-Object {
+    $relative = $_.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+    $relative -ne 'hooks/hooks.json' -and $relative -ne 'skills/chronos/scripts/hook-intake.ps1'
+  })
+}
 if ($files.Count -eq 0) { throw "Plugin package has no files." }
 $maximumFiles = 256
 $maximumFileBytes = 8MB
@@ -56,13 +83,90 @@ foreach ($file in $files) {
   }
 }
 
+function Get-NormalizedSourceBytes {
+  param([System.IO.FileInfo]$File)
+  if ($File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @('.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt', '.mjs', '.js', '.css', '.html')) {
+    $text = [IO.File]::ReadAllText($File.FullName).Replace("`r`n", "`n").Replace("`r", "`n")
+    return ,([Text.UTF8Encoding]::new($false).GetBytes($text))
+  }
+  return ,([IO.File]::ReadAllBytes($File.FullName))
+}
+
 function Get-PackagedBytes {
   param([System.IO.FileInfo]$File)
   $isText = $File.Name -eq 'LICENSE' -or $File.Extension.ToLowerInvariant() -in @(
-    '.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt'
+    '.cmd', '.json', '.md', '.ps1', '.yaml', '.yml', '.txt', '.mjs', '.js', '.css', '.html'
   )
   if ($isText) {
     $content = [System.IO.File]::ReadAllText($File.FullName)
+    $relative = $File.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+    if ($relative -eq 'README.md') {
+      $content = $content.Replace('https://github.com/FaxanFM/chronos/blob/main/', "https://github.com/FaxanFM/chronos/blob/$policySourceRef/")
+      $content = $content.Replace('--ref v0.9.3', "--ref v$Version")
+    }
+    if ($relative -eq '.codex-plugin/plugin.json') {
+      $versionedManifest = $content | ConvertFrom-Json
+      $versionedManifest.interface.privacyPolicyURL = "https://github.com/FaxanFM/chronos/blob/$policySourceRef/PRIVACY.md"
+      $versionedManifest.interface.termsOfServiceURL = "https://github.com/FaxanFM/chronos/blob/$policySourceRef/TERMS.md"
+      $content = ($versionedManifest | ConvertTo-Json -Depth 12) + "`n"
+    }
+    if ($Edition -eq 'Directory') {
+      $relative = $File.FullName.Substring($pluginRoot.Length + 1).Replace('\', '/')
+      if ($relative -eq '.codex-plugin/plugin.json') {
+        $directoryManifest = $content | ConvertFrom-Json
+        $directoryManifest.PSObject.Properties.Remove('hooks')
+        $directoryManifest.description = 'Skills-only edition: one-prompt local Control Room setup, managed workflow execution and optional outcome/tool-call learning, with Windows diagnostics. No lifecycle hooks.'
+        $directoryManifest.interface.longDescription = $directoryManifest.interface.longDescription + ' Lifecycle hooks are not included or auto-installed.'
+        $directoryManifest.extensions.'com.openai'.onboardingSkill = './skills/chronos-control-room/SKILL.md'
+        $content = ($directoryManifest | ConvertTo-Json -Depth 12) + "`n"
+      } elseif ($relative -eq 'README.md') {
+        $content = @"
+# Chronos for Codex - Skills-Only Edition
+
+Version $Version. This Plugin Directory candidate contains the packaged local
+Control Room, chronos, and chronos-governor skills plus optional Windows
+diagnostics. It has no
+lifecycle hook definitions or hook installer. Core governance uses current
+local host statuses; missing health evidence remains partial or unsupported.
+
+Start with: Set up the Chronos Control Room for this workspace and template:
+explain privacy and permissions before starting.
+
+Setup starts and reopens the local dashboard without a manual server command.
+It needs a local Codex executor and Node 22+; the onboarding skill prefers bundled
+host tools and reports unsupported prerequisites explicitly. No npm install,
+hook patch or scheduled Governor is needed for Control Room. Execution and
+isolated writes require session consent; learning pipelines are optional.
+Existing-chat Governor monitoring and Windows diagnostics are separate opt-ins.
+
+Chronos sends no publisher runtime telemetry. Bounded local metadata stays on
+this host; compact chat summaries use OpenAI's account data controls. Downloads
+and voluntary public support reports reach GitHub. No signup or API key is needed.
+
+The separate GitHub full edition includes five optional reviewed hooks. This
+Directory skill does not download or install them after review. Choose that
+edition independently through supported controls; never enable both sources.
+See https://github.com/FaxanFM/chronos for source, privacy, and installation guidance.
+Fully quit and reopen Codex, then use a fresh chat after an install or upgrade.
+"@ + "`n"
+      } elseif ($relative -like 'skills/*/SKILL.md') {
+        if ($relative -eq 'skills/chronos/SKILL.md') {
+          $pattern = '(?s)<!-- FULL_EDITION_HOOK_CHOICE_START -->.*?<!-- FULL_EDITION_HOOK_CHOICE_END -->'
+          if ([regex]::Matches($content, $pattern).Count -ne 1) { throw 'Missing edition-specific hook choice boundary.' }
+          $content = [regex]::Replace($content, $pattern,
+            'Directory hook disclosure: no lifecycle hooks are included; fresh session, completed-turn, and subagent event evidence is unavailable. Do not ask the full-edition hook trust question.')
+        }
+        $heading = ($content -split "`n" | Where-Object { $_ -match '^# ' } | Select-Object -First 1)
+        if (-not $heading) { throw "Skill is missing a top-level heading: $relative" }
+        $notice = "**Installed edition: skills-only.** No lifecycle hooks or hook installer are included. Use current-host task status and compatible authorized Inspector evidence for core governance. Missing coverage stays partial or unsupported. Do not download or auto-install GitHub hooks from this Directory skill; optional hooks require a separate independent user-directed installation. Hook trust and execution are unavailable in this edition.`n"
+        if ($relative -eq 'skills/chronos-control-room/SKILL.md') {
+          $notice = "**Installed edition: skills-only.** Control Room and its local launcher are included; lifecycle hooks and a hook installer are not. No hooks or scheduled Governor are needed for this dashboard. Do not download or auto-install GitHub hooks from this Directory skill. Local execution prerequisites and session consent still apply.`n"
+        }
+        if (-not $content.Contains('**Installed edition: skills-only.**')) {
+          $content = $content.Replace("$heading`r`n", "$heading`r`n`r`n$notice").Replace("$heading`n", "$heading`n`n$notice")
+        }
+      }
+    }
     return ,([System.Text.UTF8Encoding]::new($false).GetBytes(
       $content.Replace("`r`n", "`n").Replace("`r", "`n")
     ))
@@ -104,6 +208,7 @@ try {
           path = $relative
           bytes = [long]$bytes.Length
           sha256 = Get-BytesHash $bytes
+          source_sha256 = Get-BytesHash (Get-NormalizedSourceBytes $file)
         })
       } finally {
         $entryStream.Dispose()
@@ -126,6 +231,8 @@ $releaseManifest = [ordered]@{
   schema_version = 3
   plugin = "chronos"
   version = $Version
+  edition = if ($Edition -eq 'Directory') { 'skills_only' } else { 'full' }
+  lifecycle_hooks_included = ($Edition -eq 'Full')
   artifact = $artifactName
   sha256 = $artifactHash
   packaged_files = $files.Count
@@ -146,6 +253,7 @@ $releaseManifest = [ordered]@{
   reproducible_timestamp = "1980-01-01T00:00:00Z"
   packaged_text_line_endings = "LF"
 }
+if ($PolicyCommit) { $releaseManifest.policy_source_ref = $policySourceRef }
 [System.IO.File]::WriteAllText(
   $releaseManifestPath,
   (($releaseManifest | ConvertTo-Json -Depth 4) + "`n"),

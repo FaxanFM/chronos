@@ -1,7 +1,8 @@
 {
   "name": "chronos",
-  "version": "0.9.3",
-  "description": "Set up one local Codex Governor for passive task supervision, actionable Heartbeats, Windows diagnostics, and bounded read-only worker coordination.",
+  "version": "0.10.0",
+  "description": "Launch a local Codex workflow dashboard with one setup prompt, isolated task execution, optional outcome and tool-call learning, and Windows diagnostics.",
+  "requires_local_executor": true,
   "author": {
     "name": "Dravara, LLC",
     "url": "https://github.com/FaxanFM/chronos"
@@ -12,20 +13,25 @@
   "keywords": ["codex", "openai", "windows", "diagnostics", "powershell", "ai-agents", "sqlite", "approval-workflows", "resource-health", "productivity"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/chronos-control-room/SKILL.md"
+    }
+  },
   "interface": {
     "displayName": "Chronos for Codex",
-    "shortDescription": "Diagnose and govern Codex",
-    "longDescription": "Run one local Governor for active chats in a visible window of up to 50, plus chats you explicitly select. Evaluate evidence-bound Heartbeats and contact only the affected active chat when intervention is justified. Optional silent hooks add lifecycle evidence without creating model turns. Chronos also diagnoses Windows degradation, quota and context pressure, approval and review loops, permission-rule problems, rollout duplication, and SQLite churn. No publisher telemetry.",
+    "shortDescription": "Local Control Room for Codex",
+    "longDescription": "Launch Chronos Control Room with one setup prompt. Design visual Codex workflows with bot pools, inboxes and outboxes, joins, isolated workspace writes, native checks and human review gates. Add optional outcome-learning and tool-call review pipelines to improve completed workflows without silently changing them. Uses a local Codex executor and Node 22+; bundled host tools are preferred. Windows diagnostics and existing-chat Governor monitoring remain separate opt-ins. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
-    "capabilities": ["One-Governor setup", "Passive task discovery", "Actionable Heartbeats", "Verified task intervention", "Windows resource diagnostics", "Token and approval analysis", "SQLite churn detection", "Bounded read-worker coordination"],
+    "capabilities": ["One-prompt Control Room setup", "Visual workflow editor", "Bot pools and stage queues", "Isolated workspace execution", "Native verification and review gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/FaxanFM/chronos/blob/main/TERMS.md",
     "defaultPrompt": [
-      "Set up Chronos: verify source, create one Governor, explain hooks, and prove Heartbeat coverage and zero worker recurrences.",
-      "Run a Chronos health briefing: inspect PC, quota, reviews, rules, SQLite, Heartbeat coverage; separate evidence from unknowns.",
-      "Use Chronos Governor to split this repo review into bounded read tasks, verify each result, and keep edits and decisions here."
+      "Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.",
+      "Review my completed workflow with outcome learning and tool-call analysis; propose improvements without applying them.",
+      "Run a Control Room health check; optionally include Windows diagnostics with my consent."
     ],
     "brandColor": "#D64045",
     "composerIcon": "./assets/chronos-mark.png",

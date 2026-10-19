@@ -21,11 +21,10 @@ idle hours, at most 24 or four turns per day. The host rotates or pauses the
 Governor after 336 cycles or 14 days so recurring context cannot grow without a
 bound.
 
-The normal first-use request enables supervision and Heartbeats together:
+The normal first-use request begins consent-led setup for supervision and Heartbeats:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
 Do not create a separate Heartbeat task or recurrence. A complete setup result
@@ -39,7 +38,7 @@ quota, test, Git, or machine evidence and cannot prove liveness. Worker tasks
 need no prompt or recurrence. See [Supervision](SUPERVISION.md).
 
 Monitored tasks can use different models and reasoning levels. The recommended
-Governor configuration is `gpt-5.6-terra` with Medium reasoning when the host
+Governor configuration is `gpt-6-sol` with Medium reasoning when the host
 advertises it. Field validation found that the Governor needs reliable tool use
 and recovery judgment more than minimum model cost. The host must select this
 setting. Chronos cannot select or enforce a task model. Chronos does not infer
@@ -122,7 +121,7 @@ The host is responsible for:
 - Collecting the normalized fields that the runtime exposes.
 - Assigning privacy-safe opaque IDs and ownership hints.
 - Running one Governor task for the monitored task set.
-- Selecting `gpt-5.6-terra` with Medium reasoning for that Governor when available.
+- Selecting `gpt-6-sol` with Medium reasoning for that Governor when available.
 - Listing the scoped host tasks once per cycle and reconciling a bounded,
   privacy-safe inventory before it waits on the returned rotating batch.
 - Delivering emitted events to the Governor inbox.
@@ -142,7 +141,7 @@ task.
 
 The deterministic cycle does not use model tokens. Monitored tasks can use
 Luna, Terra, Sol, or a mix. The recommended host configuration is one Governor
-task using `gpt-5.6-terra` with Medium reasoning when available. The host, not
+task using `gpt-6-sol` with Medium reasoning when available. The host, not
 Chronos, selects the model and reasoning effort. Chronos does not call a model,
 change a task model, or treat a model label as trusted cost metadata.
 

@@ -1,4 +1,4 @@
-# Chronos for Codex - diagnostics, supervision, and read-task coordination
+# Chronos for Codex
 
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
@@ -30,9 +30,55 @@ Routine unchanged cycles stay quiet.
 Chronos is published by Dravara, LLC. `FaxanFM` is the GitHub project account
 used to develop and distribute it.
 
-**[Install Chronos for Codex from the OpenAI Plugins Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571)**
+## Chronos Control Room
 
-The currently approved directory package is live. Chronos is available to eligible users
+The **v0.10.0 candidate includes Control Room inside the plugin**, with a
+packaged launcher and onboarding skill. It is not yet a published marketplace
+update. After this candidate is installed, use one starter:
+
+> Set up the Chronos Control Room for this workspace and template: explain privacy and permissions before starting.
+
+Chronos starts and opens the private local dashboard itself. No manual server
+command, repository clone, npm install, hook patch or scheduled Governor is
+needed. It prefers Codex's bundled Node/Git tools, checks prerequisites and
+keeps execution paused until session consent. A local Codex executor and Node
+22+ are required; Windows diagnostics remain Windows-only.
+
+Build visual pipelines with stage queues, bot pools, joins, isolated code
+changes, native checks and human review gates. Optional outcome-learning and
+tool-call review pipelines propose improvements from accepted evidence without
+silently applying them. Thread links create managed context forks, not control
+of original Desktop turns. [Plugin setup guide](docs/CONTROL-ROOM-PLUGIN.md).
+
+The [developer source](experimental/orchestrator/README.md) remains available
+for inspection and contribution. Existing v0.9.4 packages do not gain this
+feature until a new reviewed package is published.
+See the [go/no-go decision](docs/ORCHESTRATOR-DECISION-2026-10-18.md) for
+platform, privacy and distribution limits.
+
+## Choose Your Edition
+
+Control Room requires a supported local Codex executor and Node 22+, with Git
+for source worktrees. Existing diagnostics, protected Governor state and hooks
+require Windows and inbox Windows PowerShell 5.1.
+Check the version and source before installing; keep one Chronos source enabled.
+
+### Current Versions
+
+Last verified publication records: October 1, 2026. These are not a live status
+check; confirm the listing and release before installing.
+
+| Edition | Recorded version | Install route |
+| --- | --- | --- |
+| Directory skills-only | Live listing v0.9.2; v0.9.4 submitted for review | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
+| GitHub full | Published v0.9.3 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.9.3); five optional hooks |
+| Control Room preview | Unreleased v0.10.0 candidate; publication pending | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md); not in the current Directory package |
+| Legacy onboarding preview | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
+
+The current source is not the previously uploaded package. Audit repairs
+require a new signed candidate and review before publication.
+
+Chronos is available to eligible users
 across plans, including Free, subject to region, supported surface, workspace
 controls, and role. Directory publication permits distribution; it is not an
 OpenAI endorsement or support commitment.
@@ -40,15 +86,29 @@ OpenAI endorsement or support commitment.
 Manual Git marketplace fallback for environments where the Directory is not available:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
 codex.cmd plugin add chronos@chronos
 ```
 
 After any install or upgrade, fully quit and reopen Codex. Then open a fresh
 task and ask:
 
-> **Set up Chronos: verify source, create one Governor, explain hooks, and prove
-> Heartbeat coverage and zero worker recurrences.**
+> **Set up Chronos for my active chats: explain privacy, offer optional hooks,
+> configure one Governor, and verify what is running.**
+
+Onboarding starts with a short explanation of scope and data handling.
+It asks separately about recurring governance, the supported Governor model,
+installed hooks, standing diagnostic permission, and a one-off briefing.
+All decisions stay in the setup chat before Governor handoff.
+Hook review does not authorize installation or grant
+trust. An unanswered choice creates no reminder or retry recurrence. Core
+governance does not require hooks, and the final receipt separates configured
+features from observed execution. See [onboarding and consent](docs/ONBOARDING.md).
+
+For the full GitHub edition with optional recommended hooks, use the
+[complete installation and uninstall guide](docs/INSTALLATION.md). It includes
+an exact signed testing identity, tested plugin-manager commands, a prompt-led
+Governor path, privacy/trust steps, and readiness limits for a recorded walkthrough.
 
 Do not install both sources. Codex identifies the same package as
 `chronos@chronos` in the Git marketplace and `chronos@openai-curated-remote` in
@@ -131,13 +191,14 @@ paths, identifiers, prompts, commands, credentials, or private source.
   schema v2 accounts for the known Governor inside that same call. The native
   result returns hash-only
   normalized task statuses; routine cycles do not wake monitored tasks. Setup
-  stops before task creation or claim when the host cannot prove completeness.
+  stops before task creation or claim when current-host liveness is unavailable;
+  account-wide completeness is not required.
 - Treats an isolated modest Governor-cycle overrun as normal runtime variance.
   Only sustained or material self-degradation causes a 15-minute collector
   backoff, and compact status explains the budget, baseline, overrun, and reason.
 - Registers optional task activity and subagent lifecycle hints through five
-  reviewed headless hooks. Four request asynchronous execution where supported;
-  `SessionEnd` remains synchronous.
+  reviewed headless hooks. All five use synchronous bounded intake as defined
+  in the packaged configuration.
   The completed-turn signal has no worker recurrence, model call, transcript
   read, or model-visible output. Brief registry contention uses a bounded
   protected fallback that the next Governor status removes after merging.
@@ -157,15 +218,10 @@ the result reports whether that activity was observed.
 
 ## Install in Codex
 
-For the normal Directory installation, use the link above. If the Directory is
-not available in the current Codex surface, ask Codex to:
-
-> **Analyze and install [FaxanFM/chronos](https://github.com/FaxanFM/chronos), then use Chronos Governor for appropriate low-complexity repository tasks.**
-
-Or install the Git fallback manually:
+Choose the versioned edition above. For the published GitHub full edition:
 
 ```powershell
-codex.cmd plugin marketplace add FaxanFM/chronos
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.9.3
 codex.cmd plugin add chronos@chronos
 ```
 
@@ -187,11 +243,12 @@ and unknown publication facts.
 
 ## Use
 
+Recurring setup requires one verified Governor recurrence and zero worker recurrences.
+
 For complete setup, use the first starter prompt or ask:
 
 ```text
-Set up Chronos: verify source, create one Governor, explain hooks, and prove
-Heartbeat coverage and zero worker recurrences.
+Set up Chronos for my active chats: explain privacy, offer optional hooks, configure one Governor, and verify what is running.
 ```
 
 Chronos verifies the package source and native status, reuses or creates one
@@ -331,6 +388,8 @@ See [v0.7.1 Delta Audit Response](docs/V0.7.1-DELTA-AUDIT-RESPONSE.md) for the
 follow-up security, parser, release, and discovery fixes.
 See [v0.7.6 Final Audit Response](docs/V0.7.6-FINAL-AUDIT-RESPONSE.md) for the
 focused v0.7.7 correctness repairs and validation boundary.
+See [v0.9.4 Usability Audit Response](docs/V0.9.4-USABILITY-AUDIT-RESPONSE.md)
+for this release's fixed, contained and open usability findings.
 
 ## Safety and privacy
 
@@ -368,8 +427,9 @@ focused v0.7.7 correctness repairs and validation boundary.
   data from another process already running as that user. The temporary
   contention fallback uses the same protected or hashed metadata and no raw
   path. Host task tools remain the liveness authority.
-- Stores one random, non-secret 128-bit installation ID with no machine-derived
-  data so host reconciliation remains scoped to this PC after registry recovery.
+- New installations derive a non-secret 128-bit installation ID from a SHA-256
+  hash of the machine name and canonical Codex home. Earlier random anchors are
+  retained unchanged. Raw machine names and Codex-home paths are not stored.
 - An invoked Heartbeat cycle stores bounded per-scope transition, coverage,
   cadence, deduplication, hashed delivery/outbox, intervention, and health metadata in the user's local Chronos
   application-data directory. It does not persist raw snapshots, prompts,

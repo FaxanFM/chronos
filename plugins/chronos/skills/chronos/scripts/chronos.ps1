@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("inspect", "plan", "cleanup", "heartbeat", "supervise", "install-status")]
+  [ValidateSet("inspect", "plan", "cleanup", "heartbeat", "supervise", "install-status", "data-plan", "data-remove")]
   [string]$Action = "inspect",
   [int]$MinAgeMinutes = 60,
   [int]$ProcessId = 0,
@@ -48,10 +48,244 @@ param(
   [ValidateRange(0, [long]::MaxValue)]
   [long]$SupervisionSinceRevision = 0,
   [switch]$SupervisionConfirmRecurrenceStopped,
+  [string[]]$RemovalRepositories = @(),
+  [string]$RemovalPlanHash,
+  [switch]$ConfirmRecurrencesStopped,
+  [switch]$ConfirmHooksDisabled,
+  [switch]$ConfirmLocalDataRemoval,
   [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+
+# Removal is independent of state initialization: inspecting an empty scope must
+# not create an anchor, import old state, or resurrect a stopped Governor.
+if ($Action -in @('data-plan', 'data-remove')) {
+  function Get-RemovalHash {
+    param([string]$Text)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+  }
+  function Assert-RemovalPath {
+    param([string]$Path, [string]$Root)
+    $full = [IO.Path]::GetFullPath($Path)
+    $base = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    if ($full -ne $base -and -not $full.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'removal_path_out_of_scope' }
+    $cursor = $full
+    while ($cursor) {
+      if (Test-Path -LiteralPath $cursor) {
+        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'removal_reparse_path' }
+      }
+      $parent = Split-Path -Parent $cursor
+      if ($parent -eq $cursor) { break }
+      $cursor = $parent
+    }
+  }
+  function Get-RemovalSnapshot {
+    param($Roots, [string[]]$IgnoreLocks = @())
+    $files = @()
+    $directories = @()
+    $totalBytes = 0L
+    foreach ($entry in $Roots) {
+      Assert-RemovalPath $entry.path $entry.path
+      if (-not (Test-Path -LiteralPath $entry.path)) { continue }
+      $rootItem = Get-Item -LiteralPath $entry.path -Force
+      if (-not $rootItem.PSIsContainer) { throw 'removal_root_invalid' }
+      $directories += $entry.path
+      $queue = @($entry.path)
+      while ($queue.Count) {
+        $directory = $queue[0]
+        $queue = @($queue | Select-Object -Skip 1)
+        $entryCount = 0
+        foreach ($childPath in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+          $entryCount++
+          if ($entryCount -gt 768 -or $files.Count -ge 4096) { throw 'removal_capacity' }
+          $child = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
+          Assert-RemovalPath $child.FullName $entry.path
+          if ($IgnoreLocks -contains $child.FullName) { continue }
+          if ($child.PSIsContainer) {
+            if ($directory -ne $entry.path -or $child.Name -ne 'session-registry.json.pending' -or $entry.kind -ne 'supervision') { throw 'removal_unknown_entry' }
+            $directories += $child.FullName
+            $queue += $child.FullName
+            continue
+          }
+          $allowed = if ($directory -ne $entry.path -or $entry.kind -eq 'inbox') {
+            $child.Name -match '^(pending-slot-\d{3}\.json|\.pending-[a-f0-9]{32}\.tmp)$'
+          } elseif ($entry.kind -eq 'supervision') {
+            $child.Name -match '^(session-registry\.json|installation-scope\.json|\.supervision-(scope-|probe-)?[a-f0-9]{32}\.tmp)$'
+          } elseif ($entry.kind -eq 'heartbeat') {
+            $child.Name -match '^(heartbeat-state\.json|\.heartbeat-(probe-)?[a-f0-9]{32}\.(tmp|bak))$'
+          } else {
+            $child.Name -match '^governor-state\.json(\.bak|\.tmp-[a-f0-9]{32})?$'
+          }
+          if (-not $allowed) { throw 'removal_unknown_entry' }
+          if ([ChronosRemovalFileIdentity]::LinkCount($child.FullName) -ne 1) { throw 'removal_hardlink_path' }
+          if ($child.Length -gt 262144) { throw 'removal_file_oversize' }
+          $totalBytes += $child.Length
+          if ($totalBytes -gt 16777216) { throw 'removal_capacity' }
+          # Lease state is repository-scoped, not Codex-home scoped. Require an
+          # explicit repository selection and never remove a live lease.
+          if ($entry.kind -eq 'governor' -and $child.Name -in @('governor-state.json', 'governor-state.json.bak')) {
+            $data = Get-Content -Raw -LiteralPath $child.FullName | ConvertFrom-Json
+            if ($data.version -notin @(1, 2, 3, 4) -or $null -eq $data.leases -or $null -eq $data.tasks) { throw 'removal_governor_state_invalid' }
+            if ($data.leases.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
+                $data.tasks.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') { throw 'removal_governor_state_invalid' }
+            $leaseAuthority = $child.Name -eq 'governor-state.json' -or
+              -not (Test-Path -LiteralPath (Join-Path $entry.path 'governor-state.json') -PathType Leaf)
+            foreach ($lease in $data.leases.PSObject.Properties) {
+              if ($null -eq $lease.Value -or $lease.Value.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
+                  $lease.Value.status -isnot [string]) { throw 'removal_governor_state_invalid' }
+              if ($lease.Value.status -in @('leased', 'working', 'awaiting_verification', 'needs_correction', 'verified', 'blocked_legacy_write')) {
+                # Replace() retains the previous revision. A valid current state
+                # settles that lease; an orphan backup cannot prove settlement.
+                if ($leaseAuthority) { throw 'removal_active_lease' }
+                continue
+              }
+              if ($lease.Value.status -cnotin @('accepted', 'failed', 'released')) { throw 'removal_governor_state_invalid' }
+            }
+          }
+          $files += [ordered]@{ path = $child.FullName; sha256 = (Get-FileHash -LiteralPath $child.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+        }
+      }
+    }
+    return [pscustomobject]@{ files = @($files | Sort-Object { $_.path }); directories = @($directories | Sort-Object -Unique) }
+  }
+  $held = @()
+  $repositoryLocks = @()
+  try {
+    if (-not ('ChronosRemovalFileIdentity' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class ChronosRemovalFileIdentity {
+  [StructLayout(LayoutKind.Sequential)] private struct Info {
+    public uint Attributes;
+    public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+    public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+  }
+  [DllImport("kernel32.dll", SetLastError=true)]
+  private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);
+  public static uint LinkCount(string path) {
+    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+      Info info;
+      if (!GetFileInformationByHandle(stream.SafeFileHandle, out info)) throw new IOException("file identity unavailable");
+      return info.Links;
+    }
+  }
+}
+'@
+    }
+    $selectedHome = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\', '/')
+    Assert-RemovalPath $selectedHome $selectedHome
+    if (-not (Test-Path -LiteralPath $selectedHome -PathType Container)) { throw 'removal_codex_home_unavailable' }
+    if ($RemovalRepositories.Count -gt 16) { throw 'removal_repository_capacity' }
+    $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $local = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    $scope = '{0}|{1}' -f $env:COMPUTERNAME.ToUpperInvariant(), $selectedHome.ToUpperInvariant()
+    $scopeHash = Get-RemovalHash $scope
+    $priorHash = Get-RemovalHash ('{0}|{1}' -f $env:COMPUTERNAME, $selectedHome)
+    $heartbeatHash = Get-RemovalHash (ConvertTo-Json -InputObject $scope -Compress)
+    $roots = @(0..3 | ForEach-Object { [pscustomobject]@{ kind = 'supervision'; path = Join-Path $temp ('Chronos-Supervision-v3-{0}-{1}' -f $scopeHash.Substring(0, 24), $_) } })
+    $roots += [pscustomobject]@{ kind = 'inbox'; path = Join-Path $temp ('Chronos-Supervision-Inbox-v1-' + $scopeHash.Substring(0, 24)) }
+    $roots += [pscustomobject]@{ kind = 'supervision'; path = Join-Path $temp ('Chronos\Supervision-v2\' + $priorHash) }
+    $roots += [pscustomobject]@{ kind = 'heartbeat'; path = Join-Path $temp ('Chronos\Heartbeat-v2\' + $heartbeatHash) }
+    if ($selectedHome.Equals([IO.Path]::GetFullPath((Join-Path $HOME '.codex')).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) {
+      $roots += [pscustomobject]@{ kind = 'supervision'; path = Join-Path $local 'Chronos\Supervision' }
+      $roots += [pscustomobject]@{ kind = 'supervision'; path = Join-Path $temp 'Chronos\Supervision' }
+      $oldScopes = @(
+        ('{0}|{1}' -f $env:COMPUTERNAME, $selectedHome),
+        ('{0}|{1}|{2}' -f $env:COMPUTERNAME, $selectedHome, [IO.Path]::GetFullPath((Get-Location).Path))
+      )
+      foreach ($oldScope in $oldScopes) {
+        $oldHash = Get-RemovalHash (ConvertTo-Json -InputObject $oldScope -Compress)
+        $roots += [pscustomobject]@{ kind = 'heartbeat'; path = Join-Path $temp ('Chronos\Heartbeat-v2\' + $oldHash) }
+        $roots += [pscustomobject]@{ kind = 'heartbeat'; path = Join-Path $temp ('Chronos\Heartbeat\' + $oldHash) }
+        $roots += [pscustomobject]@{ kind = 'heartbeat'; path = Join-Path $env:LOCALAPPDATA ('Chronos\Heartbeat\' + $oldHash) }
+      }
+    }
+    foreach ($repository in $RemovalRepositories) {
+      $repo = [IO.Path]::GetFullPath($repository)
+      Assert-RemovalPath $repo $repo
+      $common = (& git --no-optional-locks -c core.fsmonitor=false -C $repo rev-parse --path-format=absolute --git-common-dir | Out-String).Trim()
+      if ($LASTEXITCODE -ne 0 -or -not $common) { throw 'removal_repository_invalid' }
+      $common = [IO.Path]::GetFullPath($common)
+      Assert-RemovalPath $common $common
+      $repoHash = Get-RemovalHash $common.ToLowerInvariant()
+      $roots += [pscustomobject]@{ kind = 'governor'; path = Join-Path $temp ('Chronos\Governor\' + $repoHash) }
+      $roots += [pscustomobject]@{ kind = 'governor'; path = Join-Path $common 'chronos' }
+    }
+    $roots = @($roots | Sort-Object path -Unique)
+    foreach ($entry in $roots) {
+      if ($entry.kind -notin @('supervision', 'heartbeat')) { continue }
+      $fileName = if ($entry.kind -eq 'supervision') { 'session-registry.json' } else { 'heartbeat-state.json' }
+      $stateFile = [IO.Path]::GetFullPath((Join-Path $entry.path $fileName)).ToUpperInvariant()
+      $identity = if ($entry.kind -eq 'supervision') { $stateFile } else { ConvertTo-Json -InputObject $stateFile -Compress }
+      $prefix = if ($entry.kind -eq 'supervision') { 'ChronosSupervision-' } else { 'ChronosHeartbeat-' }
+      $mutex = New-Object Threading.Mutex($false, ('Global\' + $prefix + (Get-RemovalHash $identity).Substring(0, 24)))
+      $acquired = $false
+      try { $acquired = $mutex.WaitOne(1000) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+      if (-not $acquired) { $mutex.Dispose(); throw 'removal_mutex_busy' }
+      $held += $mutex
+    }
+    $snapshot = Get-RemovalSnapshot $roots
+    $hashInput = [ordered]@{ home = $selectedHome.ToUpperInvariant(); sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; roots = @($roots.path); files = $snapshot.files; directories = $snapshot.directories }
+    $planHash = Get-RemovalHash ($hashInput | ConvertTo-Json -Compress -Depth 8)
+    if ($Action -eq 'data-remove') {
+      if (-not $ConfirmLocalDataRemoval -or -not $ConfirmRecurrencesStopped -or -not $ConfirmHooksDisabled) { throw 'removal_confirmation_required' }
+      if ($RemovalPlanHash -notmatch '^[a-f0-9]{64}$' -or $RemovalPlanHash -cne $planHash) { throw 'removal_plan_changed' }
+      foreach ($entry in $roots) {
+        if ($entry.kind -ne 'governor' -or -not (Test-Path -LiteralPath $entry.path -PathType Container)) { continue }
+        $lockPath = Join-Path $entry.path 'governor-state.json.lock'
+        Assert-RemovalPath $lockPath $entry.path
+        try { $stream = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
+        catch { throw 'removal_repository_busy' }
+        $repositoryLocks += [pscustomobject]@{ path = $lockPath; stream = $stream }
+      }
+      $lockedSnapshot = Get-RemovalSnapshot $roots @($repositoryLocks.path)
+      if (($lockedSnapshot.files | ConvertTo-Json -Compress -Depth 4) -cne ($snapshot.files | ConvertTo-Json -Compress -Depth 4)) { throw 'removal_plan_changed' }
+      foreach ($file in $snapshot.files) {
+        $root = @($roots | Where-Object { $file.path.StartsWith($_.path + '\', [StringComparison]::OrdinalIgnoreCase) })
+        if ($root.Count -ne 1) { throw 'removal_path_out_of_scope' }
+        Assert-RemovalPath $file.path $root[0].path
+        if ([ChronosRemovalFileIdentity]::LinkCount($file.path) -ne 1) { throw 'removal_hardlink_path' }
+        if ((Get-FileHash -LiteralPath $file.path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $file.sha256) { throw 'removal_plan_changed' }
+        Remove-Item -LiteralPath $file.path -Force -ErrorAction Stop
+      }
+      foreach ($lock in $repositoryLocks) {
+        $lock.stream.Dispose()
+        $lock.stream = $null
+        Remove-Item -LiteralPath $lock.path -Force -ErrorAction Stop
+      }
+      foreach ($directory in @($snapshot.directories | Sort-Object Length -Descending)) {
+        Assert-RemovalPath $directory $directory
+        # Never recurse. A concurrent writer or unexpected file leaves its
+        # directory intact and prevents a false complete-removal receipt.
+        [IO.Directory]::Delete($directory, $false)
+      }
+      $remaining = Get-RemovalSnapshot $roots
+      if ($remaining.files.Count -or $remaining.directories.Count) { throw 'removal_incomplete' }
+    }
+    [ordered]@{ ok = $true; action = $Action; planHash = $planHash; scope = 'selected_codex_home_and_explicit_repositories'; fileCount = $snapshot.files.Count; directories = $snapshot.directories; files = $snapshot.files; removed = ($Action -eq 'data-remove'); hostStopEvidence = 'caller_confirmed_not_native_verified'; unselectedScopes = 'preserved'; chatsLogsAndPluginManagerData = 'preserved' } | ConvertTo-Json -Compress -Depth 8
+    exit 0
+  } catch {
+    $code = [string]$_.Exception.Message
+    if ($code -notmatch '^removal_[a-z_]+$') { $code = 'removal_failed' }
+    [ordered]@{ ok = $false; action = $Action; error = $code; partialRemovalPossible = ($Action -eq 'data-remove') } | ConvertTo-Json -Compress
+    exit 1
+  } finally {
+    foreach ($lock in $repositoryLocks) {
+      if ($null -ne $lock.stream) {
+        $lock.stream.Dispose()
+        Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue
+      }
+    }
+    foreach ($mutex in $held) { try { $mutex.ReleaseMutex() } catch {}; $mutex.Dispose() }
+  }
+}
 
 # Heartbeats share the installed Chronos command surface.  The implementation
 # remains a small internal module so inspection behavior stays backward-compatible.
@@ -3299,7 +3533,7 @@ if ($Action -eq "inspect") {
   $overallLevel = Get-WorseLevel (Get-WorseLevel $resourceLevel $quotaLevel) $quotaHealth.RuleStatus
   $diskDisplay = if ($snapshot.DiskFreeGB -lt 0) { "unknown" } else { $snapshot.DiskFreeGB }
   $headline = ("CHRONOS {0} advisory=true family={1} desktop={2} helpers={3} node_repl={4} runners={5} privateMB={6} handles={7} threads={8} cpuCores={9} diskFreeGB={10} fsHelper={11} fsHelperCopyFailure={12} fsHelperLaunchFailure={13} pcRestartAdvised={14} logDb={15} logDbGiB={16} logReclaimableGiB={17} logWalMiB={18} logWalActive={19} logSeq={20} logRate={21} logTracePct={22} quotaRisk={23} tokenFiles={24} tokenSamples={25} tokenSessionInputM={26} tokenCachedReadPct={27} tokenCacheWriteM={28} tokenCacheWriteObserved={29} tokenReasoningPct={30} tokenMaxContextPct={31} tokenHighEffortSessions={32} tokenExtremeEffortSessions={33} tokenUltraSessions={34} tokenSpawnCalls={35} tokenCompactions={36} tokenMalformedRecords={37} tokenDuplicateRecords={38} tokenOutOfOrderRecords={39} tokenTailIncompleteFiles={40} machineHealth={41} tokenCoverageWindowHours={42} tokenCoverageStartUtc={43} tokenCoverageEndUtc={44} tokenFilesEligible={45} tokenFilesSelected={46} tokenCoverageCapped={47} tokenTailTruncatedFiles={48} tokenUnreadableFiles={49} tokenCoverageContinuity={50} tokenSpawnObservation={51} tokenCompactionObservation={52} approvalReviewTurnsObserved={53} approvalReviewerSessionsObserved={54} approvalReviewerModels={55} approvalReviewObservation={56} approvalReviewCoverage={57} approvalReviewsPerHour={58} approvalReviewerInputM={59} approvalPrimaryInputM={60} approvalReviewerMainInputRatio={61} approvalRequestObservation={62} approvalOptimization={63} rolloutSelectedMiB={64} rolloutGrowthMiBPerHour={65} rolloutCrossFileDuplicateRecords={66} rolloutCrossFileDuplicateCompactions={67} tokenUsageScope={68} approvalAverageIntervalSeconds={69} approvalPeakPerMinute={70} approvalConcurrentPeak={71} approvalParentLinksObserved={72} approvalRequestsObserved={73} approvalUniqueClasses={74} approvalRepeatedRequests={75} approvalRepeatPct={76} approvalSources={77} approvalDeniedObserved={78} approvalDeniedObservation={79} rolloutCrossFileDuplicateBytes={80} rolloutReplayPct={81} compactionUniqueSnapshots={82} compactionDuplicateBytes={83} rolloutGrowthObservation={84} rolloutProjected24hMiB={85} rolloutLineageLinksObserved={86} rolloutForkFilesObserved={87} rolloutNearSizeClusterFiles={88} codexVersionsObserved={89} authProvidersObserved={90} tokenInheritedSnapshots={91} tokenLineageDeltaFiles={92} logDbReasons={93} logDbPerformanceImpact={94} quotaRiskScope={95} tokenAdviceReason={96} approvalModesObserved={97} reviewerControlCapability={98} reviewerCompatibility={99} tokenQuotaContributors={100} tokenAdvice={101}" -f `
-    $machineLevel, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
+    $overallLevel, $snapshot.Count, $snapshot.Desktop, $snapshot.Helpers, $snapshot.NodeRepl,
     $snapshot.Runners, $snapshot.PrivateMB, $snapshot.Handles, $snapshot.Threads,
     $snapshot.CpuCores, $diskDisplay, $filesystemHelper.Level,
     (Format-Metric $filesystemHelper.CopyFailure),

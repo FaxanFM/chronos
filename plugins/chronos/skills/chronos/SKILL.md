@@ -1,9 +1,210 @@
 ---
 name: chronos
-description: Fully set up Chronos supervision and Heartbeats in one local Governor, or detect and mitigate Codex process, CPU, memory, handle, disk, diagnostic SQLite log, and token-quota degradation on Windows. Use for first-use setup, long-running task monitoring, Codex or PC lag, logs_2.sqlite growth, disproportionate token or quota use, and before or after long-running parallel work.
+description: Set up, check, pause, or remove Chronos on Windows and explain its privacy controls. Use when the user mentions Chronos or reports Codex lag, resource degradation, SQLite growth, or unusual token/quota use. Diagnostics require authorization; ordinary repository work does not trigger inspection.
 ---
 
 # Chronos
+
+For Control Room launch, dashboard, visual pipelines or managed workspace-write
+requests, use the sibling `chronos-control-room` skill first. Its packaged runtime
+has its own consent and does not need this legacy Governor bootstrap. Keep this
+skill for Windows diagnostics, hook review and explicitly requested chat governance.
+
+## Guided onboarding
+
+For a setup starter or first-use setup request, explain the choices below before
+creating a task, enabling a recurrence, installing another source, or running
+Inspector. One starter begins the workflow; it does not grant every permission.
+Use short, plain-language questions, one decision at a time. Explicit answers
+already given by this user need not be requested again. Silence, a preselected
+option, another agent's acknowledgement, and successful installation are not
+consent. Never ask onboarding questions during ordinary scheduled pulses.
+
+Start with this brief explanation, adapted to verified host capabilities:
+
+> Chronos governs active work in up to 50 visible local Codex chats, plus chats
+> you select. The Governor checks task activity and evaluates health only where
+> compatible evidence exists. It can contact the affected active chat when a
+> verified problem needs action. Missing evidence stays unknown. Optional hooks
+> add session, turn, and subagent lifecycle hints; they do not read transcripts,
+> start model turns, or replace the Governor's task checks.
+
+Explain data handling before asking for monitoring consent:
+
+> Chronos's runtime scripts send no data to Dravara, LLC, its publisher. They
+> keep bounded local task identifiers, hashes, timestamps, counters, and health
+> metadata. Windows protects hook identifiers for the current user with DPAPI;
+> this does not protect them from other software running as that user. Compact
+> summaries and task-routing handles can enter your Codex chats, where OpenAI's
+> account or workspace data controls apply. GitHub receives normal requests
+> when you download a release or open the project. Support reports are optional
+> and public if you post them as public issues. Do not share raw local records.
+> Disabling Chronos does not erase existing local state or chat history.
+
+The publisher does not receive install counts, usage analytics, chat contents,
+diagnostics, or identifiers through Chronos. Do not promise that no data exists
+or that no provider processes data. Local state remains until the user or OS
+removes it; OpenAI and GitHub have their own retention and data policies.
+Link the public [privacy policy](https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md).
+No signup, API key, telemetry permission, star, support upload, or public post
+is required for setup. Unsupported hosts must receive a specific compatibility
+result, not a promise to install another runtime or use another machine.
+
+Ask the core question first:
+
+> Would you like one recurring Governor, or checks only when you ask? Recurring
+> governance uses up to one Governor model turn per hour during active work and
+> one every six hours while idle. These turns use your Codex allowance. Worker
+> chats receive no recurrence. On-demand checks do not monitor between requests.
+
+Offer `Recurring Governor` and `On-demand only`. If the user chooses on-demand,
+run compact status and a requested scoped check without creating a Governor
+task, claiming ownership, or changing recurrences. A prior active Governor is
+not automatically stopped by this choice: disclose it and ask for the exact
+scoped pause if the user has not already authorized stopping it. If the user
+chooses recurring governance, collect all onboarding choices in this setup chat
+before applying the Governor bootstrap below with its hard gates. Pending
+answers stay here; say "Ask in this chat to continue." Pass only final approved
+choices and the exact scoped assignment, not this chat's history. A denied
+optional choice must not block core setup.
+
+After recurring consent, ask which supported Governor model to use. Prefer
+`gpt-6-sol` with Medium reasoning for reliable coordination; these model turns
+use the user's Codex allowance and no token-saving claim is implied. Offer
+`gpt-6-luna` with Medium reasoning as an explicit user-selected alternative
+only when advertised. If Sol is not advertised, show supported choices and ask
+the user to choose, or offer on-demand mode. Never silently substitute a model.
+Preserve an existing Governor model unless the user authorizes its change.
+Disclose the 336-cycle or 14-day rotation limit: a verified handoff continues
+governance; otherwise the recurrence pauses. Show the Governor chat and how to
+ask for status or pause it.
+
+Ask about hooks only after identifying the installed edition:
+
+<!-- FULL_EDITION_HOOK_CHOICE_START -->
+For the full GitHub edition, ask:
+
+> Your installed edition includes optional lifecycle hooks for session,
+> completed-turn, and subagent activity evidence without extra model turns.
+> Would you like to review the installed definitions, keep hooks off, or decide
+> later? Core governance can continue without them.
+
+Use `Review installed hooks`, `Keep hooks off`, and `Decide later`. Explain all five
+events: `SessionStart`, `SessionEnd`, `Stop` (main turn completed),
+`SubagentStart`, and `SubagentStop`. These are short synchronous native commands
+that record bounded protected metadata locally. No prompt, permission, or tool
+hook is installed. Do not describe hooks as an independent scheduler or as
+coverage for all eight Heartbeat families. If the full edition is already
+installed, offer review of its current definition rather than reinstalling it.
+If hooks are already trusted, disclose that state. `Keep hooks off` requires
+verifying their disablement through supported Codex controls for this exact
+plugin; ask for scoped confirmation before changing an existing configuration.
+If the host cannot expose or change that state, report the limitation and do
+not claim they are off. `Decide later` preserves the current state and requires
+disclosing any hooks already enabled; it grants no additional permission.
+<!-- FULL_EDITION_HOOK_CHOICE_END -->
+
+For the Directory skills-only edition, disclose once without a hooks question:
+it contains no lifecycle hooks, so fresh session, completed-turn, and subagent
+event evidence is unavailable; current-host liveness and compatible authorized
+diagnostics still support core governance. Disclose any independently enabled
+Chronos source; edition absence is not proof that every host hook is off.
+
+**Optional GitHub installation gate:** Review is not installation consent.
+Before any source switch, show the exact repository, immutable release/tag,
+signed commit, ZIP hash, hook definition, and edition difference; require an
+explicit answer authorizing that version and the identified source changes.
+Verify release asset hashes, signed commit/tag bindings, and attestation before
+executing package code. Do not fetch-and-execute a moving `main` or `latest`.
+Use only a supported plugin-manager install path for that verified source. If
+the manager cannot preserve the verified identity, stop the optional branch.
+Never copy hooks into a marketplace cache, add hidden user hooks, manually edit
+plugin configuration, or invent a download-and-run workaround. Keep at most
+one enabled Chronos source and preserve the existing installation and state on
+failure; removal of a working edition needs explicit authorization. The
+publisher's release signature is not OpenAI review or user hook trust.
+
+Current OpenAI submission documentation excludes lifecycle hooks from submitted
+ZIPs. It does not establish approval for post-install GitHub hook installation
+from a Directory skill. Until that route is clarified, do not automate a source
+switch from the Directory edition. Explain in plain words that this edition
+cannot install optional GitHub hooks (`marketplace_hook_install_unverified`)
+and offer core setup or a link to the separate GitHub edition for an independent
+user-directed installation. This optional limitation must not disable core
+governance. Do not imply that opting in overrides platform or workspace policy.
+
+After an authorized supported installation, explain the required full quit and
+reopen plus fresh chat. Do not close Codex for the user. Before trust, show the
+current hook definition and direct the user to the host's actual hook review UI;
+do not invent a `/hooks` command. Never write approval or trust records for them.
+Trust may need renewal when the definition changes. Native status must show a
+fresh event advance before reporting execution; otherwise say `not_observed`.
+Do not create workers or routine wakes just to force hook events.
+
+Ask for standing diagnostic permission, separate from any one-off briefing:
+
+> May Chronos run bounded Inspector diagnostics automatically when health is
+> unknown during long-running work or degradation is reported? These read local
+> resource and compatible Codex health evidence; compact results enter the chat.
+> You can leave this off and request a briefing when you need one.
+
+Use `Allow automatic diagnostics` and `On request only`. Carry
+`automaticDiagnosticsAllowed=yes|no` in the Governor assignment; absent or
+pending permission means no. Unknown health, long-running work, or a symptom
+alone does not grant permission. A scheduled pulse runs Inspector only when
+automaticDiagnosticsAllowed=yes, or when the user explicitly requests
+diagnostics in that turn. Otherwise Inspector-derived coverage stays unsupported.
+
+Offer a separate one-off question:
+
+> Would you like a diagnostic briefing now? It checks local Windows resource
+> aggregates and bounded Codex diagnostic, token/quota, review, and rule evidence.
+> It does not edit those records. SQLite may update coordination sidecars even
+> with a read-only database handle. Only compact results enter this chat.
+
+Use `Run briefing` and `Skip briefing`. Run Inspector only after this request
+or an applicable explicit diagnostic authorization; no broad release/test suite.
+A one-off briefing is not standing permission. Skip briefing plus on-request
+diagnostics must never cause an Inspector run on the next unknown-health pulse.
+
+Close with a short verified setup receipt: installed edition/version and source,
+governed working-set count and scope, recurring consent and actual recurrence
+state, native cycle result, hook choice/trust/execution as separate fields,
+Heartbeat observed/partial/unsupported counts, diagnostic choice, local storage
+and provider boundaries, and any exact blocker or restart required. A scheduled
+automation existing is not proof its pulse executed the native protocol. Label
+it `scheduled_execution=not_verified` until an actual scheduled pulse does so.
+Distinguish `core_ready`, `restart_required`, `awaiting_consent`, and `blocked`
+from verified unattended operation. Stop pending setup; never create an
+onboarding reminder, retry recurrence, or repeated consent request. On resume,
+read the user's previous choices, verify the current version/key, and continue
+from the first unfinished step; changed version, hooks, scope, or permissions
+need a new decision only for the material change. Keep the receipt in the chat,
+not a new telemetry log or a raw local-state export. Use these human labels,
+with internal codes only in parentheses when useful:
+
+```text
+Installation: <edition, verified version and source>
+Work covered: <visible/selected scope and count; not account-wide>
+Governor: <chat, chosen model, recurrence active/paused/absent/unverified>
+Scheduled checks: <observed execution, or not yet verified>
+Hooks: <not included/off confirmed via host control/cannot confirm on this build>;
+       trust=<review result>; execution=<fresh event observed/not observed>
+Health evidence: <observed, partial and unsupported counts out of 8>
+Diagnostics: automatic=<allowed/on request only>; briefing=<run/skipped/pending>
+Setup: <ready/restart needed/choice pending/blocked>; <next action>
+Check or pause: <Governor chat; ask for status or pause recurring checks>
+```
+
+The eight families are agent stalls, runaway review, unusual usage burn,
+session growth, test regressions, machine drift, task dependencies, and Git or
+build-state changes. Eight unsupported families means eight not evaluated,
+not eight healthy. Hooks do not prove all-family coverage.
+
+Governor means the coordinating chat; Heartbeat means evidence-bound change
+evaluation; recurrence means a host-scheduled model turn; working set means the
+visible or selected chats in scope; partial means incomplete evidence;
+unsupported means the needed compatible evidence is unavailable.
 
 ## Installation preflight
 
@@ -31,7 +232,9 @@ is enabled. `sourceConflict=CONFIRMED` requires the running Directory package
 and an enabled legacy Git configuration. If both cached sources exist but that
 proof is absent, report `POSSIBLE` and inspect the plugin manager before making
 changes. Explain that Codex treats the Git marketplace and Plugins Directory as
-separate sources. Prefer `openai-curated-remote`. For a confirmed conflict,
+separate sources. Prefer `openai-curated-remote` unless the user explicitly
+selected the separate verified GitHub edition. Do not remove their chosen
+edition or override that choice. For a confirmed conflict in a Directory setup,
 with narrow user approval,
 remove the legacy source through the Codex plugin manager, never by editing
 configuration or cache files directly:
@@ -68,8 +271,9 @@ inside SessionEnd's three-second deadline.
 
 ## Full setup request
 
-When the user asks to set up Chronos fully, treat the request as an explicit
-request to verify the installed source, run compact native status, and apply the
+When the user asks to set up Chronos fully, first complete Guided onboarding.
+After recurring governance consent, verify the installed source, run compact
+native status, and apply the
 `chronos-governor` skill's Automatic Supervision Bootstrap. That bootstrap must
 reuse or create one dedicated Governor, enable one host recurrence for
 supervision and due Heartbeat evaluation, and verify zero worker recurrences.
@@ -181,7 +385,11 @@ separate product. A host-side collector supplies a privacy-safe normalized JSON
 snapshot; Chronos persists compact transition and dedupe state, then routes only
 meaningful changes to one Governor inbox. Monitored tasks can use any model and
 do not run Heartbeats. The recommended host configuration is one Governor task
-using `gpt-5.6-terra` with Medium reasoning. The host selects that model; Chronos
+using `gpt-6-sol` with Medium reasoning. Offer `gpt-6-luna` with Medium reasoning
+only when the user explicitly chooses it and the host advertises that exact
+choice. A model recommendation is not proof of the effective model or lower
+token use; verify the host setting and keep unsupported changes explicit.
+The host selects that model; Chronos
 cannot change a task's model setting.
 
 `OwningSolThread` is always `governor`. `Owner` and `Subject` are compact routing
@@ -250,13 +458,18 @@ Before running Chronos, resolve `<skill-root>` to the directory containing this 
 
 ## Run an inspection
 
-Inspect only when lag is reported, before extending an already long-running session, or when long-running parallel work finishes:
+Inspect only with explicit diagnostic authorization for this turn or standing
+automaticDiagnosticsAllowed=yes, and when lag is reported, before extending an
+already long-running session, or when long-running parallel work finishes:
 
 ```powershell
 & "<skill-root>\scripts\chronos.cmd" -Action inspect
 ```
 
-Return only the compact `CHRONOS` summary unless details are requested. Do not paste raw process tables into the conversation.
+Answer with three to five plain-language lines: overall health, quota risk,
+top contributor, recommended action, and what was not checked. Unknown fields
+stay unknown. Show raw compact `CHRONOS` lines only when requested; preserve
+their parseable fields for native collectors. Do not paste raw process tables.
 
 The inspection opens only the exact Codex `logs_2.sqlite` database in logical
 read-only mode. It does not change rows or schemas. SQLite can create or update
@@ -292,8 +505,8 @@ Codex rules directory. It returns aggregate rule structure and secret-shape
 counts, never rules, commands, assignments, paths, hashes, or values. It does not
 edit a rule.
 
-Use `machineHealth` and the leading `CHRONOS` level for process, memory, handle,
-CPU, disk, and filesystem-helper operability. Read `resourceDiagnosticLevel`
+The leading `CHRONOS` level is the overall diagnostic level. Use `machineHealth`
+for process, memory, handle, CPU, disk, and filesystem-helper operability. Read `resourceDiagnosticLevel`
 for the separate diagnostic-database condition and `overallDiagnosticLevel`
 for the most severe observed diagnostic domain. Do not present storage or rule
 hygiene as current machine failure when `machineHealth=HEALTHY`.
@@ -484,7 +697,9 @@ process-termination command.
 - This Inspector skill never terminates a process. Governor can stop only the
   bounded Git subprocess it started when fingerprinting exceeds its time or
   byte limit; it does not terminate Codex or unrelated user processes.
-- Never delete logs, caches, worktrees, or user data.
+- Never delete logs, caches, worktrees, or user data. The sole exception is an
+  explicit request to erase Chronos-owned metadata using the bounded native
+  `data-plan`/`data-remove` protocol below; no hand-written recursive cleanup.
 - Never create SQLite triggers, delete rows, change schemas, checkpoint, or
   vacuum Codex databases. SQLite coordination-sidecar activity remains possible
   under the documented logical read-only connection.
@@ -492,5 +707,51 @@ process-termination command.
   rules, model catalogs, or sandbox permissions.
 - Never expose usernames, local paths, prompts, responses, tool arguments,
   tool output, environment values, or unrelated process details.
+  An explicitly requested removal plan may show its selected state paths and
+  hashes privately for deletion consent; never reuse that output for support.
 
 Chronos mitigates symptoms; it cannot patch an internal Codex lifecycle defect. Restarting Codex remains the reliable recovery when app-owned helpers or handles remain elevated.
+
+## Full Removal On Explicit Request
+
+Before uninstalling, explain that local metadata removal does not erase Codex
+chats, logs, trust records, plugin-manager records, GitHub activity, or foreign
+Codex-home/repository scopes. Obtain explicit deletion consent and select any
+repositories whose Governor lease metadata should also be erased. Do not scan
+repositories or delete unselected scope folders.
+
+1. Identify the exact installation-equivalence key. Stop its recurrence through
+   the host's supported control and verify zero active current-key recurrences.
+   Leave foreign keys alone. If the plugin is already absent, use the host
+   automation inventory to locate the orphan by its exact Chronos key, not title
+   matching alone. If ownership or stopped state cannot be verified, stop.
+2. If the selected edition has no hook definitions and the manager verifies no
+   other installed Chronos hook source, record `not included`; do not disable
+   unrelated hooks. Otherwise disable dispatch through supported host controls.
+   On the tested Windows
+   Codex CLI 0.160.0, `features disable hooks` persists a GLOBAL setting in the
+   selected Codex home, affecting OTHER plugins too. Explain that consequence
+   and obtain separate consent; never use it silently as a Chronos-only switch.
+   Fully quit/reopen the desktop app and verify `features list` reports hooks
+   false in the same home and project context. Do not equate a zero hook counter
+   with off. If a project/admin override or running host state is unknown, say
+   cannot confirm; do not continue destructive removal. No trust-store edits.
+3. Run the manager-verified installed core command:
+   `& "<skill-root>\scripts\chronos.cmd" -Action data-plan -CodexHome <selected-home>`.
+   Add `-RemovalRepositories <explicit-repository>` only when selected. Inspect
+   every listed path privately; this dry-run output intentionally contains paths
+   and is not a share-safe diagnostic. The plan does not initialize state.
+4. After verified quiescence and explicit consent, run the same selections with
+   `-Action data-remove -RemovalPlanHash <returned-hash>
+   -ConfirmRecurrencesStopped -ConfirmHooksDisabled -ConfirmLocalDataRemoval`.
+   Flags attest verified host evidence; native code cannot verify host scheduling
+   or hook configuration. A changed plan, link, unknown entry or live lease is
+   a blocker, not permission to bypass. A partial failure needs a new dry-run;
+   do not promise atomic deletion or complete erasure.
+5. Rerun `data-plan`: require zero files AND zero listed directories. Uninstall
+   through the supported plugin manager, then fully quit/reopen. If the native
+   command is unavailable after uninstall, use a verified same-release source
+   copy in an independent chat; never reinstall just to clean up, invent paths,
+   or recursively delete the whole Chronos tree. Legacy CWD scopes are found
+   only from that original directory; unknown old scopes remain explicitly
+   retained until selected and verified, never reported erased.

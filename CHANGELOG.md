@@ -1,5 +1,40 @@
 # Changelog
 
+## Pending v0.9.4 Usability Remediation
+
+- Separate standing Inspector permission from a one-off diagnostic briefing;
+  keep all onboarding choices in the setup chat before Governor handoff.
+- Add native, dry-run-bound removal for selected Chronos metadata; require
+  stopped scheduling, disabled hooks and explicit deletion consent. Preserve
+  foreign scopes and reject changed plans, links, unknown files and live leases.
+- Document the build-qualified global hooks feature control without presenting
+  it as a Chronos-only switch or proof of desktop dispatch.
+- Publish the SSH signer trust file and add release verification bound to the
+  signed tag, source commit, immutable ZIP and GitHub workflow attestation.
+- This working-tree candidate is not the package currently awaiting review.
+
+## v0.9.4 (Unreleased)
+
+- Add consent-led onboarding with separate recurrence, optional hook, and
+  diagnostic choices, transparent privacy disclosures, and verified receipts.
+- Prefer GPT-6 Sol with Medium reasoning for the Governor. Offer GPT-6 Luna
+  only as an explicit supported choice; do not silently change existing chats
+  or infer token savings from model names.
+- Keep the full five-hook GitHub edition separate from a clearly labeled
+  hook-free Plugin Directory package. Core governance and diagnostics remain
+  available without hooks; missing evidence stays partial or unsupported.
+- Require separate standing diagnostic permission, keep setup choices in one
+  chat, ask for a supported model, and explain coverage in human language.
+- Lead Inspector output with overall severity while retaining machineHealth.
+- Hooks: unchanged; changed definitions still require user review.
+
+## v0.9.3
+
+- Govern up to 50 visible local chats plus explicit selections using schema-v3
+  scoped inventory, not account-wide completeness.
+- Preserve bounded hash-only results, restart identity, and protected hook intake.
+- Hooks: changed, review again. All five use bounded synchronous intake.
+
 ## v0.9.2
 
 - Add a non-claiming host-inventory capability preflight before Governor task

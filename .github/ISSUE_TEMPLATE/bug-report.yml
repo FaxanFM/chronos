@@ -11,7 +11,36 @@ body:
     id: version
     attributes:
       label: Chronos version
-      placeholder: 0.9.2
+      placeholder: 0.10.0
+    validations:
+      required: true
+  - type: input
+    id: codex_version
+    attributes:
+      label: Codex host version
+      placeholder: Exact desktop or CLI build; unknown if installation failed
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Chronos edition
+      options:
+        - GitHub full
+        - Directory skills-only
+        - Unknown or installation failed
+    validations:
+      required: true
+  - type: dropdown
+    id: hook_state
+    attributes:
+      label: Hook state
+      options:
+        - Not included in this edition
+        - Off confirmed through host controls
+        - Definitions reviewed or trusted; execution not observed
+        - Fresh execution observed
+        - Cannot confirm on this host
     validations:
       required: true
   - type: input
@@ -57,7 +86,7 @@ body:
     id: compact
     attributes:
       label: Sanitized compact output
-      description: Paste only aggregate CHRONOS or CHRONOS GOVERNOR output after reviewing it.
+      description: Use the plain-language summary. Supervision status can contain raw task IDs; omit them and review all output before sharing.
       render: text
   - type: checkboxes
     id: privacy
@@ -66,5 +95,5 @@ body:
       options:
         - label: I removed paths, IDs, prompts, commands, source, secrets, and private workspace details.
           required: true
-        - label: I reproduced this on the version named above.
-          required: true
+        - label: I reproduced this on the version named above, or this report describes an installation failure.
+          required: false
