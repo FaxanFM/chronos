@@ -76,8 +76,10 @@ first accepted input and do not later rerun when other inputs arrive. Multiple
 independent work items can advance asynchronously. A packet's writers are
 serialized against all of its readers/writers; separate packets get separate
 workspaces. Accepted outputs passed between stages are compact 2,000-character
-summaries. For larger artifacts, later stages must inspect the shared packet
-workspace; there is no hidden full-report or cross-packet file merge.
+summaries, native verification metadata and accepted artifact-workspace paths.
+For larger artifacts, later stages must inspect those files; there is no hidden
+full-report copy or cross-packet file merge. A large join is still subject to the
+selected model's context limit; use intermediate synthesis stages for large flows.
 
 Configure a native check as an argument array, for example
 `["node", "--test"]`, using tools already installed on the machine. It runs in

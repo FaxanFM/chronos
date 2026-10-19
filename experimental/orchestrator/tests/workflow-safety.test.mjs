@@ -64,12 +64,15 @@ test('same-packet workspace writers are never dispatched concurrently', async ()
 
 test('accepted sources can join across workflows but unfinished inputs cannot', async () => {
   const wfA = workflow('source', [node('source')]);
-  const { engine } = await setup(wfA);
+  const { engine, adapter } = await setup(wfA);
   const source = engine.state.tasks[0];
-  source.state = 'accepted'; source.summary = 'accepted result';
+  source.state = 'accepted'; source.summary = 'accepted result'; source.workspacePath = '/accepted-artifacts';
   await engine.action({ action: 'save-workflow', workflow: workflow('target', [node('target')]) });
   await engine.action({ action: 'add-packet', workflowId: 'target', title: 'target', input: 'input', sourceTaskIds: [source.id] });
   assert.deepEqual(engine.state.tasks.at(-1).dependencies, [source.id]);
+  await engine.action({ action: 'start' });
+  assert.ok(adapter.started.at(-1).instruction.includes('/accepted-artifacts'));
+  await engine.action({ action: 'pause' });
   source.state = 'review';
   await assert.rejects(engine.action({ action: 'add-packet', workflowId: 'target', title: 'target', input: 'input', sourceTaskIds: [source.id] }), /outbox_sources_invalid/);
 });

@@ -148,7 +148,7 @@ function App() {
       </div>
     </header>
     <nav className="main-nav" aria-label="Views">{[['flow', GitBranch, 'Workflow'], ['queues', Inbox, 'Queues'], ['runtime', Activity, 'Runtime']].map(([id, Icon, label]) => <Button key={id} icon={Icon} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}{id === 'queues' && <span className="count">{tasks.filter((task) => task.state === 'review').length}</span>}</Button>)}<span className="nav-spacer" /><span className="local-label">LOCAL WORKSPACE</span></nav>
-    {message && <div className="notice" role="alert"><span>{message}</span><Button icon={X} aria-label="Dismiss notice" onClick={() => setMessage('')} /></div>}
+    {message && !modal && <div className="notice" role="alert"><span>{message}</span><Button icon={X} aria-label="Dismiss notice" onClick={() => setMessage('')} /></div>}
     {!snapshot ? <div className="loading">Connecting to the local Control Room...</div> : <>
       <section className="workspace-bar"><label className="workflow-select"><span>Workflow</span><select aria-label="Selected workflow" value={selectedId} onChange={(event) => switchWorkflow(event.target.value)}>{snapshot.workflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <span className="workflow-stats">{nodes.length} stages <span>/</span> {packets.filter((item) => item.workflowId === selectedId).length} work items</span><div className="bar-actions"><Button className="primary" icon={Plus} disabled={!workflow || !workflow.nodes.length || dirty} onClick={() => { setPacket(emptyPacket()); setThreadInfo(null); setModal('packet'); }}>Add work item</Button></div>
@@ -208,6 +208,7 @@ function App() {
       </section>}
     </>}
     {modal && <div className="modal-backdrop"><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="panel-heading"><h2 id="dialog-title">{modal === 'packet' ? 'New work item' : 'Execution permissions'}</h2><Button icon={X} aria-label="Close dialog" onClick={() => setModal(null)} /></div>
+      {message && <div className="warning" role="alert">{message}</div>}
       {modal === 'packet' ? <form onSubmit={async (event) => { event.preventDefault(); const result = await act({ action: 'add-packet', workflowId: selectedId, ...packet }); if (result) { setModal(null); setView('queues'); setTaskId(result.tasks.find((task) => task.packetId === result.packets.at(-1)?.id)?.id || ''); } }}>
         <label>Title<input id="packet-title" required maxLength={120} value={packet.title} onChange={(event) => setPacket({ ...packet, title: event.target.value })} /></label>
         <label>Assignment<textarea id="packet-input" required rows={5} maxLength={12000} value={packet.input} onChange={(event) => setPacket({ ...packet, input: event.target.value })} /></label>

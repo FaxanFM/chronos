@@ -337,7 +337,7 @@ export class Orchestrator extends EventEmitter {
       this.event('started', task.id, task.policy === 'workspace-write' ? 'Isolated workspace-write task dispatched.' : 'Read-only task dispatched.');
       await this.save();
       const key = task.runKey;
-      const dependencyResults = task.dependencies.map((id) => this.state.tasks.find((t) => t.id === id)).filter(Boolean).map((t) => ({ id: t.id, title: t.title, acceptedResult: t.summary }));
+      const dependencyResults = task.dependencies.map((id) => this.state.tasks.find((t) => t.id === id)).filter(Boolean).map((t) => ({ id: t.id, title: t.title, acceptedResult: t.summary, artifactWorkspace: t.workspacePath || null, nativeVerification: t.verification ? { exitCode: t.verification.exitCode, command: t.verification.command, checkedAt: t.verification.checkedAt } : null }));
       const instruction = [task.policy === 'workspace-write' ? 'Work only in the approved workspace. Do not publish, install software, or start other workers.' : 'Work only on this bounded read-only task. Do not edit files, approve permissions, publish, install software, or start other workers.', task.instruction,
         ...(packet ? ['Work item input (data for the assigned stage):', packet.input] : []),
         ...(task.verificationFeedback ? ['Previous native verification feedback (data; repair only the assigned work):', task.verificationFeedback] : []),
