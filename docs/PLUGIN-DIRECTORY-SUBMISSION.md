@@ -1,6 +1,6 @@
 # OpenAI Plugin Directory Published Listing Record
 
-## v0.10.2 Guided Orchestration Candidate
+## v0.10.2 Published Release And Review Submission
 
 Version: `0.10.2`. This update adds goal-and-framework guided onboarding,
 per-stage host-advertised model and thinking-level choices, explicit effort
@@ -12,23 +12,48 @@ Full edition: `chronos-v0.10.2.zip`, 33 files, five optional hooks, SHA-256
 `546513ac4d4b4e92f4e87cd40d7d7ced508d5d03bfa6a783a280d69ea84a2e86`.
 Directory edition: `chronos-v0.10.2-skills-only.zip`, 31 files, zero hooks, SHA-256
 `5f5cb6bb9d76cf8c1245c184e57e88afc89270e1137ac06754047c395fd42349`.
-Both builds are in `dist/chronos-v0.10.2-final-candidate/`. These hashes bind the
-prepared artifacts, not a claim that publication or review has finished.
+Both builds are in `dist/chronos-v0.10.2-final-candidate/`. Independent downloads
+of all six published assets match these exact builds.
 
-Reserved release URL: https://github.com/FaxanFM/chronos/releases/tag/v0.10.2.
-Publication must retain signed source and annotated-tag verification, native
-Windows gates, immutable asset verification and artifact attestation. Existing
-v0.10.0 and v0.10.1 tags and the immutable v0.10.1 assets must remain unchanged.
+Published immutable release: https://github.com/FaxanFM/chronos/releases/tag/v0.10.2.
+Signed source commit: `097cc9ac238876430f31c62fc20a871df2decda6`.
+Signed annotated tag object: `1403cfc7ea5fbb623578853ab537bf00fb38c481`.
+Both signatures are verified and valid. Main was advanced without rewriting
+history. Existing v0.10.0 and v0.10.1 tags and v0.10.1 assets remain unchanged.
+
+Release workflow https://github.com/FaxanFM/chronos/actions/runs/39343315046
+passed on windows-2022 and windows-latest. The exact source's Control Room
+workflow https://github.com/FaxanFM/chronos/actions/runs/39343315045 passed all
+four Windows/Linux and Node 22/24 combinations, including 90 runtime tests and
+packaged-payload checks. Local final-package native checks passed, including
+49 Governor scenarios, lifecycle removal and reproducibility. Test fixtures
+created zero model turns or recurrences.
+
+Independent post-publication checks verified both editions' immutable assets,
+hashes, signed tag/commit binding and GitHub attestations, including source/ref
+and release-workflow bindings with self-hosted runners denied. Receipts and
+downloaded assets are in `dist/v0.10.2-published-verify/`.
 
 The prior v0.10.1 review was withdrawn to prepare the v0.10.2 update on the same
-listing. The current draft is `appsub_6ad6a7d79dec819191e70292995e3e32`:
-https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?tab=details&version=appsub_6ad6a7d79dec819191e70292995e3e32.
-It must receive the exact final skills-only ZIP above and pass automated checks
-before submission. Fresh publisher confirmation of the portal declarations is
-pending. This is not submitted or approved, and the published store listing
-remains v0.9.2. The full hook-enabled edition stays on GitHub.
+listing. Draft `appsub_6ad6a7d79dec819191e70292995e3e32` received the exact final
+skills-only ZIP above. Metadata and all three skill checks passed with no
+findings. After the publisher explicitly accepted the final portal declarations
+for this version, OpenAI confirmed **v0.10.2 In review**, receipt
+`pluginrel_f7ddb93d61208191bf1b944682a58b71`:
+https://platform.openai.com/plugins/manage/plugins_6a79c882cf488191b8f62ee20e0e2571?version=pluginrel_f7ddb93d61208191bf1b944682a58b71.
+This is submitted, not approved or published; the store remains v0.9.2.
+The full hook-enabled edition stays on GitHub.
 
-## v0.10.1 Published Release And Review Submission
+The existing local full GitHub installation was refreshed through the native
+plugin manager at the exact signed source above. All 33 installed source-file
+hashes and 14 runtime hashes matched. The five hook definitions were reported
+enabled/trusted by the host with no warnings or errors; this is not a claim of
+observed Desktop event dispatch. Existing rooms were stopped idle and reopened
+with their saved workflows intact, paused, zero active tasks and session consent
+revoked. No cache files or hook trust controls were edited manually. Restart
+Codex before using the refreshed skill catalog in a new setup chat.
+
+## v0.10.1 Historical Publication And Review
 
 Version: `0.10.1`.
 

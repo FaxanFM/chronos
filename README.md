@@ -77,15 +77,14 @@ check; confirm the listing and release before installing.
 
 | Edition | Recorded version | Install route |
 | --- | --- | --- |
-| v0.10.2 update | Release and marketplace preparation | [Version notes](CHANGELOG.md); verify the release and listing status before installing |
-| Directory skills-only | v0.10.1 submitted; In review (store remains v0.9.2) | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
-| GitHub full | Published v0.10.1 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1); five optional hooks |
-| Control Room | Published in v0.10.1 | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md) |
+| Directory skills-only | v0.10.2 submitted; In review (store remains v0.9.2) | [Plugin Directory](https://chatgpt.com/plugins/plugins_6a79c882cf488191b8f62ee20e0e2571); no hooks |
+| GitHub full | Published v0.10.2 | [Signed release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.2); five optional hooks |
+| Control Room | Guided setup, model and thinking controls in v0.10.2 | [One-prompt setup and requirements](docs/CONTROL-ROOM-PLUGIN.md) |
 | Legacy onboarding preview | Unreleased v0.9.4 source draft | [Pinned preview instructions](docs/INSTALLATION.md); no release attestation |
 
 The signed v0.10.0 tag is retained as the original candidate history. The
-published v0.10.1 release carries the support-metadata correction. The
-skills-only marketplace update has been submitted and is In review; it is not
+published v0.10.1 release carries the support-metadata correction. Both remain
+unchanged. The v0.10.2 skills-only update has been submitted and is In review; it is not
 approved or published in the store yet, which remains on v0.9.2. Do not treat
 the GitHub release as marketplace publication.
 Version 1.0 is the next milestone.
@@ -101,6 +100,22 @@ Manual Git marketplace fallback for environments where the Directory is not avai
 codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.2
 codex.cmd plugin add chronos@chronos
 ```
+
+For an existing Git marketplace pinned to an older revision, first stop idle
+Control Room instances with **Stop Control Room**. Use the native plugin manager
+to refresh the source, then install; do not edit the plugin cache or delete queue
+state:
+
+```powershell
+codex.cmd plugin marketplace remove chronos
+codex.cmd plugin marketplace add FaxanFM/chronos --ref v0.10.2
+codex.cmd plugin add chronos@chronos
+```
+
+The setup chat can run these steps with the host-provided Codex executable when
+`codex.cmd` is not on PATH. Confirm the source change succeeded before installing.
+Stopping an idle room preserves its saved workflows; active work must be handled
+before an upgrade. Reopen the room from the new installed package afterward.
 
 After any install or upgrade, fully quit and reopen Codex. Then open a fresh
 task and ask:
