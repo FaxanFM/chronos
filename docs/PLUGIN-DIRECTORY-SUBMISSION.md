@@ -1,5 +1,50 @@
 # OpenAI Plugin Directory Published Listing Record
 
+## v0.11.0 Prepared Candidate (Not Submitted)
+
+Version: `0.11.0`. This candidate adds persistent project agents with Hybrid
+conversation routing, in-room agent discussion, clarification and restart
+recovery. It preserves bounded collaboration, immutable file checkpoints,
+isolated write correction, responsive workflow editing and the private local API.
+The existing listing is `plugins_6a79c882cf488191b8f62ee20e0e2571`.
+No upload, submission, approval, install or publication has been performed for
+this candidate. Older records below are historical, not a current portal check.
+
+Current release-tag-form packages in `dist/v0.11.0-live-release/`:
+
+- Full: `chronos-v0.11.0.zip`, 39 files, five optional hooks, SHA-256
+  `9f7eca14d03476a7d0a9951626004f1b5d22e58a9818448ab5f2ae296678869e`.
+- Directory: `chronos-v0.11.0-skills-only.zip`, 37 files, zero hooks, SHA-256
+  `932491e89e6a28cf53aba19d92449e2ad97bf502df42a831c001f21c4d177409`.
+
+Both include the same 20-file runtime and require a local executor. Guided setup
+opens paused; execution and isolated writes require separate consent. Control
+Room needs neither hooks nor a scheduled Governor. It does not control original
+Desktop chats, add MCP, train a model or invent token/cost coverage.
+
+The earlier checkpoint-engine candidate's real fault-injection proof passed six
+dispatched native turns: initial
+build, independent branch, review rejection, interrupted correction, confirmed
+stop/re-consent/recovery, and corrected review. Original source/prior snapshots
+remained intact and the independent branch executed once. Final human acceptance
+was not granted. See [candidate handoff](RELEASE-v0.11.0-CANDIDATE.md) and
+[file/recovery contract](COLLABORATIVE-WRITE-CHECKPOINTS.md).
+
+The earlier UX/API and checkpoint packages are superseded. Current verification
+and its exact evidence boundaries are recorded in
+[persistent-agent verification](PERSISTENT-PROJECT-AGENTS-VERIFICATION.md).
+The earlier six-turn persistent-agent probe used the installed local host during
+development, not the final ZIP. A separately authorized live compaction/rotation
+probe now passes on the release implementation, including successor resumption
+after restart. Packaging itself starts no inference.
+
+The planned GitHub destination is
+`https://github.com/FaxanFM/chronos/releases/tag/v0.11.0`; it is not live yet.
+Publish and independently verify the exact signed candidate and immutable assets
+before using the skills-only ZIP in the existing marketplace listing. The tag
+policy URLs become valid only after publication. No prior legal declaration is
+treated as consent to submit this new version.
+
 ## v0.10.2 Published Release And Review Submission
 
 Version: `0.10.2`. This update adds goal-and-framework guided onboarding,

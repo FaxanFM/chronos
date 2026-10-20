@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { Orchestrator } from '../lib/engine.mjs';
 import { createControlRoom } from '../server.mjs';
+import { ControlRoomClient } from '../lib/control-client.mjs';
 
 test('loopback control API requires session token, same origin and bounded JSON', async () => {
   const adapter = new EventEmitter(); adapter.close = async () => {};
@@ -14,6 +15,9 @@ test('loopback control API requires session token, same origin and bounded JSON'
     assert.equal((await call('/api/state')).status, 401);
     const authorized = await call('/api/state', { headers });
     assert.equal(authorized.status, 200);
+    const capabilities = await call('/api/capabilities', { headers });
+    assert.equal(capabilities.status, 200);
+    assert.equal((await capabilities.json()).protocol, 'chronos.control-room.v1');
     const sessionCookie = authorized.headers.get('set-cookie');
     assert.match(sessionCookie, /HttpOnly; SameSite=Strict; Path=\/api\//);
     assert.doesNotMatch(sessionCookie, new RegExp(room.token));
@@ -52,4 +56,25 @@ test('authenticated shutdown closes only this room and is idempotent', async () 
   await room.close();
   assert.equal(stopped, 1);
   assert.equal(room.server.listening, false);
+});
+
+test('control client completes authenticated state read and guarded rename against a real room', async () => {
+  const adapter = new EventEmitter(); adapter.close = async () => {};
+  const engine = await new Orchestrator({ adapter }).initialize();
+  const room = await createControlRoom({ engine, instanceId: '11111111-1111-4111-8111-111111111111', workspaceInfo: { sourceRoot: 'C:\\workspace', base: 'committed_HEAD', uncommittedChangesCopied: false } });
+  const client = new ControlRoomClient({ origin: room.origin, token: room.token, expectedInstanceId: '11111111-1111-4111-8111-111111111111', expectedWorkspace: 'C:\\workspace' });
+  try {
+    assert.equal((await client.capabilities()).protocol, 'chronos.control-room.v1');
+    await client.action({ action: 'rename-workflow', workflowId: 'software_factory-default', name: 'Local pipeline' });
+    assert.equal((await client.state()).workflows.find((item) => item.id === 'software_factory-default').name, 'Local pipeline');
+    const wrongInstance = new ControlRoomClient({ origin: room.origin, token: room.token, expectedInstanceId: '22222222-2222-4222-8222-222222222222' });
+    await assert.rejects(wrongInstance.action({ action: 'rename-workflow', workflowId: 'software_factory-default', name: 'Wrong room' }), /control_room_instance_mismatch/);
+    const wrongWorkspace = new ControlRoomClient({ origin: room.origin, token: room.token, expectedWorkspace: 'C:\\other' });
+    await assert.rejects(wrongWorkspace.action({ action: 'rename-workflow', workflowId: 'software_factory-default', name: 'Wrong workspace' }), /control_room_workspace_mismatch/);
+    const after = await client.state();
+    assert.equal(after.workflows.find((item) => item.id === 'software_factory-default').name, 'Local pipeline');
+    assert.equal(after.consent.execution, false);
+    assert.equal(after.consent.writes, false);
+    assert.equal(after.mode, 'paused');
+  } finally { await room.close(); }
 });

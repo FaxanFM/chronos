@@ -1,7 +1,7 @@
 {
   "name": "chronos",
-  "version": "0.10.2",
-  "description": "Launch a local Codex workflow dashboard with one setup prompt, isolated task execution, optional outcome and tool-call learning, and Windows diagnostics.",
+  "version": "0.11.0",
+  "description": "Local Codex project teams with persistent agents, Hybrid conversations, guided workflows, verified file checkpoints, review-driven correction, recovery and Windows diagnostics.",
   "requires_local_executor": true,
   "author": {
     "name": "Dravara, LLC",
@@ -21,10 +21,10 @@
   "interface": {
     "displayName": "Chronos for Codex",
     "shortDescription": "Local Control Room for Codex",
-    "longDescription": "Describe your goal and select framework files or a folder. Your setup chat prepares a paused Chronos Control Room workflow with clear handoffs and human review gates. Choose models and supported thinking levels per stage, with task-based suggestions and hover/focus help. Design visual workflows with bot pools, inboxes, outboxes, joins, isolated workspace writes and native checks. Optional learning pipelines propose improvements from completed workflows without silently applying them. Uses a local Codex executor and Node 22+; Windows diagnostics and existing-chat Governor monitoring remain separate opt-ins. No publisher telemetry.",
+    "longDescription": "Describe your goal and select framework files or a folder. Your setup chat prepares a paused Control Room workflow with model and thinking-level choices, native checks and human gates. Talk to project-scoped agents, keep decisions with their evidence, and resume compatible conversations. Hybrid defaults keep related discussion in primary chats while isolating writes, independent reviews and unrelated work. Use Structured pipelines or bounded Collaborative feedback; corrections preserve independent accepted work. Verified file checkpoints retain revisions and write rework uses fresh isolated directories. Session limits, supported compaction, recorded rotation and native archival bound growth without silently deleting history. Restart revokes consent; uncertain work requires reconciliation. Optional learning proposes changes from completed workflows without applying them. Requires local Codex and Node 22+; Windows diagnostics and existing-chat Governor are separate opt-ins. No publisher telemetry.",
     "developerName": "Dravara, LLC",
     "category": "Developer Tools",
-    "capabilities": ["Guided goal and framework setup", "Visual workflows and stage queues", "Model and thinking-level controls", "Isolated workspace execution", "Native checks and human gates", "Optional outcome learning", "Tool-call efficiency review", "Windows diagnostics and Governor"],
+    "capabilities": ["Guided goal and framework setup", "Persistent project agents", "Agent chat and decision history", "Hybrid conversation routing", "Visual workflows and stage queues", "Model and thinking-level controls", "Bounded collaborative rework", "Verified file checkpoints", "Isolated writes and restart recovery", "Bounded native session lifecycles", "Native checks and human gates", "Optional learning", "Windows diagnostics and Governor"],
     "websiteURL": "https://github.com/FaxanFM/chronos",
     "supportURL": "https://github.com/FaxanFM/chronos/blob/main/SUPPORT.md",
     "privacyPolicyURL": "https://github.com/FaxanFM/chronos/blob/main/PRIVACY.md",

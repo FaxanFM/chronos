@@ -1,0 +1,7 @@
+{
+  "sampleEvents": 120,
+  "durationSeconds": 60,
+  "legacyRateEventsPerSecond": 0.5,
+  "requiredRateEventsPerSecond": 2,
+  "purpose": "Synthetic fault-injection fixture. No production data or external actions."
+}

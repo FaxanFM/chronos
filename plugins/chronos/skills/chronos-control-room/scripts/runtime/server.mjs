@@ -54,6 +54,15 @@ export async function createControlRoom({ engine, token = randomBytes(32).toStri
         const launchAuthorized = matchesSecret(received, token);
         if (!launchAuthorized && !matchesSecret(cookie, session)) return respond(res, 401, { error: 'open_the_private_launch_link' });
         if (launchAuthorized) res.setHeader('Set-Cookie', cookieName + '=' + session + '; HttpOnly; SameSite=Strict; Path=/api/');
+        if (path === '/api/capabilities' && req.method === 'GET') return respond(res, 200, {
+          protocol: 'chronos.control-room.v1',
+          instanceId,
+          packageId,
+          transport: 'authenticated_loopback_http',
+          origin,
+          actions: ['connect', 'authorize', 'rename-workflow', 'save-workflow-layout', 'save-workflow', 'apply-setup-plan', 'apply-template', 'delete-workflow', 'add-packet', 'archive-packet', 'configure', 'start', 'pause', 'disconnect', 'accept', 'retry', 'cancel', 'resolve-collaboration', 'send-agent-message', 'answer-agent-question', 'configure-project-agents', 'configure-agent-retention', 'upgrade-project-agents', 'record-project-decision', 'rotate-agent', 'compact-agent', 'recover-agent-session', 'release-agent-session', 'cleanup-agent-sessions', 'shutdown'],
+          guarantees: ['same_origin_required', 'loopback_only', 'explicit_execution_consent', 'explicit_workspace_write_consent', 'human_review_for_review_tasks']
+        });
         if (path === '/api/state' && req.method === 'GET') return respond(res, 200, await snapshot());
         if (path !== '/api/actions' || req.method !== 'POST') return respond(res, 404, { error: 'route_not_found' });
         if (req.headers.origin !== origin) return respond(res, 403, { error: 'origin_required' });
@@ -114,7 +123,7 @@ export async function startLocalControlRoom({ codexPath, cwd, codexHome, statePa
     if (prepared.workspacePath) await adapter.allowWorkspace(prepared.workspacePath);
     return prepared;
   };
-  const engine = await new Orchestrator({ adapter, statePath, prepareWorkspace, verifier: adapter, recoverStaleLock }).initialize();
+  const engine = await new Orchestrator({ adapter, statePath, prepareWorkspace, verifier: adapter, checkpoints: workspaces, recoverStaleLock }).initialize();
   try {
     if (!existing) {
       if (template !== 'software_factory') {

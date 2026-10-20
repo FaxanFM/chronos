@@ -9,8 +9,8 @@ const destination = join(repo, 'plugins/chronos/skills/chronos-control-room/scri
 const version = JSON.parse(await readFile(join(repo, 'plugins/chronos/.codex-plugin/plugin.json'), 'utf8')).version;
 const files = [
   'server.mjs', 'launcher.mjs', 'lib/codex-adapter.mjs', 'lib/engine.mjs',
-  'lib/runtime-health.mjs', 'lib/runtime-discovery.mjs', 'lib/templates.mjs',
-  'lib/workflow-contracts.mjs', 'lib/workspaces.mjs', 'lib/setup-plan.mjs', 'public/app.js',
+  'lib/runtime-health.mjs', 'lib/runtime-discovery.mjs', 'lib/templates.mjs', 'lib/control-client.mjs',
+  'lib/workflow-contracts.mjs', 'lib/collaboration.mjs', 'lib/collaboration-state.mjs', 'lib/file-checkpoints.mjs', 'lib/workspaces.mjs', 'lib/setup-plan.mjs', 'lib/protocol-capabilities.mjs', 'lib/agent-state.mjs', 'public/app.js',
   'public/app.css', 'public/index.html', 'public/chronos-mark.png'
 ];
 const record = { schemaVersion: 1, pluginVersion: version, files: [] };

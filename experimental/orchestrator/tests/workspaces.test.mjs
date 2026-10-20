@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { WorkspaceManager, executeWorkspaceGit } from '../lib/workspaces.mjs';
+import { FileCheckpointStore } from '../lib/file-checkpoints.mjs';
 
 const run = promisify(execFile);
 test('write packets use an isolated committed worktree; reviewers reuse it', async () => {
@@ -110,4 +111,87 @@ test('committed checkout filters require review before state creation and can re
     await fixture.noMarkers();
     await git(['worktree', 'remove', '--force', prepared.cwd]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+async function checkpointFixture() {
+  const root = await mkdtemp(join(tmpdir(), 'chronos-checkpoint-workspaces-'));
+  const source = join(root, 'source'); const owned = join(root, 'owned'); const checkpoints = join(root, 'checkpoints');
+  await mkdir(source); await writeFile(join(source, 'input.txt'), 'seed');
+  await run('git', ['-C', source, 'init'], { windowsHide: true });
+  await run('git', ['-C', source, 'config', 'user.name', 'Chronos fixture'], { windowsHide: true });
+  await run('git', ['-C', source, 'config', 'user.email', 'fixture@example.invalid'], { windowsHide: true });
+  await run('git', ['-C', source, 'add', 'input.txt'], { windowsHide: true });
+  await run('git', ['-C', source, '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], { windowsHide: true });
+  const store = new FileCheckpointStore({ storageRoot: checkpoints, sourceRoot: source, workspaceRoots: [source, owned, join(checkpoints, 'materialized')] });
+  const manager = new WorkspaceManager({ sourceRoot: source, storageRoot: owned, checkpointStore: store });
+  return { root, source, owned, checkpoints, store, manager };
+}
+
+test('collaborative attempts materialize a private checkpoint workspace', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const result = await fixture.manager.prepare({ packetId: 'packet-a', taskId: 'task-a', policy: 'workspace-write', collaborative: true, attempt: 1 });
+    assert.equal(result.kind, 'checkpoint_directory');
+    assert.notEqual(result.cwd, fixture.source);
+    assert.equal(await readFile(join(result.cwd, 'input.txt'), 'utf8'), 'seed');
+    assert.equal(result.fileBaseCheckpoint.ownerId, 'seed:packet-a');
+    assert.equal(result.checkpointBase.ownerId, 'input:task-a:1');
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('persisted seed checkpoint is reused after manager restart', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const first = await fixture.manager.seedCheckpoint('packet-restart');
+    await writeFile(join(fixture.source, 'input.txt'), 'mutated after seed');
+    const restarted = new WorkspaceManager({ sourceRoot: fixture.source, storageRoot: fixture.owned, checkpointStore: fixture.store });
+    const second = await restarted.seedCheckpoint('packet-restart');
+    assert.equal(second.id, first.id);
+    const prepared = await restarted.prepare({ packetId: 'packet-restart', taskId: 'task-restart', policy: 'workspace-write', collaborative: true, attempt: 1 });
+    assert.equal(await readFile(join(prepared.cwd, 'input.txt'), 'utf8'), 'seed');
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('read-only task with a file checkpoint is private and does not expose source', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const input = await fixture.store.checkpoint({ workspacePath: fixture.source, ownerId: 'seed:input-only' });
+    const prepared = await fixture.manager.prepare({ packetId: 'packet-read', taskId: 'task-read', policy: 'read-only', inputCheckpoints: [input] });
+    assert.equal(prepared.kind, 'checkpoint_directory');
+    assert.notEqual(prepared.cwd, fixture.source);
+    assert.equal(await readFile(join(prepared.cwd, 'input.txt'), 'utf8'), 'seed');
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('repair materialization preserves the original accepted snapshot', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const first = await fixture.manager.prepare({ packetId: 'packet-repair', taskId: 'task-first', policy: 'workspace-write', collaborative: true, attempt: 1 });
+    await writeFile(join(first.cwd, 'result.txt'), 'accepted');
+    const accepted = await fixture.manager.sealTask({ id: 'task-first', attempts: 1, packetId: 'packet-repair', workspacePath: first.cwd });
+    const repair = await fixture.manager.prepare({ packetId: 'packet-repair', taskId: 'task-repair', policy: 'workspace-write', collaborative: true, attempt: 2, repairCheckpoint: accepted });
+    await writeFile(join(repair.cwd, 'result.txt'), 'corrected');
+    assert.equal(await readFile(join(first.cwd, 'result.txt'), 'utf8'), 'accepted');
+    assert.equal(await readFile(join(repair.cwd, 'result.txt'), 'utf8'), 'corrected');
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('seal rejects a workspace owned by another task', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const prepared = await fixture.manager.prepare({ packetId: 'packet-owner', taskId: 'task-owner', policy: 'workspace-write', collaborative: true, attempt: 1 });
+    await assert.rejects(fixture.manager.sealTask({ id: 'task-other', attempts: 1, packetId: 'packet-owner', workspacePath: prepared.cwd }), /workspace_owner_mismatch|ENOENT/);
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('tampered checkpoint blobs fail closed before materialization', async () => {
+  const fixture = await checkpointFixture();
+  try {
+    const receipt = await fixture.store.checkpoint({ workspacePath: fixture.source, ownerId: 'seed:tamper' });
+    const manifest = JSON.parse(await readFile(join(fixture.checkpoints, 'manifests', `${receipt.id}.json`), 'utf8'));
+    const blob = join(fixture.checkpoints, 'blobs', manifest.files[0].sha256.slice(0, 2), manifest.files[0].sha256);
+    await writeFile(blob, 'tampered');
+    await assert.rejects(fixture.store.verify(receipt, { ownerId: 'seed:tamper' }), /checkpoint_blob_tampered|checkpoint_size_cap|ENOENT/);
+    assert.ok(receipt.id);
+  } finally { await rm(fixture.root, { recursive: true, force: true }); }
 });

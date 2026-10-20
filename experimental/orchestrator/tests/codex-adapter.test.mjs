@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { CodexAdapter } from '../lib/codex-adapter.mjs';
+const PERSISTENT_SCHEMA = { oneOf: ['thread/start', 'thread/resume', 'thread/read', 'turn/start', 'thread/compact/start', 'thread/unsubscribe', 'thread/archive', 'thread/list'].map((method) => ({ method: { enum: [method] } })) };
 
 function fakeTransport() {
   const t = new EventEmitter();
@@ -27,7 +28,7 @@ function fakeTransport() {
 test('starts only an owned task and omits a model override by default', async () => {
   const transport = fakeTransport(); const adapter = new CodexAdapter({ transportFactory: async () => transport });
   await adapter.connect(); const started = await adapter.startTask({ id: 'task-1', instruction: 'read only' });
-  assert.deepEqual(started, { threadId: 'owned-thread', turnId: 'owned-turn' });
+  assert.deepEqual(started, { threadId: 'owned-thread', turnId: 'owned-turn', reusedThread: false });
   assert.equal(transport.sent.find((x) => x.method === 'thread/start').params.model, undefined);
   await assert.rejects(() => adapter.interruptTask({ threadId: 'other-thread' }), /task_not_owned/); await adapter.close();
 });
@@ -118,6 +119,18 @@ test('a selected deep link forks context with native goal continuation disabled'
   await adapter.close();
 });
 
+test('reuses only an idle adapter-owned read-only stage thread', async () => {
+  const transport = fakeTransport(); const adapter = new CodexAdapter({ transportFactory: async () => transport }); await adapter.connect();
+  const first = await adapter.startTask({ id: 'first', instruction: 'Inspect the first item.', reuseKey: 'project:stage:read-only' });
+  transport.emit('message', { jsonrpc: '2.0', method: 'turn/completed', params: { threadId: first.threadId, turnId: first.turnId, turn: { status: { type: 'completed' } } } });
+  const second = await adapter.startTask({ id: 'second', instruction: 'Inspect the next item.', reuseKey: 'project:stage:read-only' });
+  assert.equal(second.reusedThread, true);
+  assert.equal(second.threadId, first.threadId);
+  assert.equal(transport.sent.filter((message) => message.method === 'thread/start').length, 1);
+  assert.equal(transport.sent.filter((message) => message.method === 'turn/start').length, 2);
+  await adapter.close();
+});
+
 test('native verification uses explicit sandbox policy and bounded output', async () => {
   const transport = fakeTransport(); const adapter = new CodexAdapter({ cwd: process.cwd(), transportFactory: async () => transport }); await adapter.connect();
   const result = await adapter.verifyCommand({ command: ['node', '--test'], policy: 'read-only', taskId: 'verify' });
@@ -180,4 +193,54 @@ test('diagnostics expose bounded protocol state without payloads', async () => {
   await adapter.startTask({ id: 'task-1', instruction: 'read only' });
   transport.emit('message', { jsonrpc: '2.0', method: 'turn/completed', params: { threadId: 'owned-thread', turn: { id: 'owned-turn', status: { type: 'completed' } }, text: 'secret prompt' } });
   const d = adapter.diagnostics(); assert.equal(d.connected, true); assert.equal(d.lastMethod, 'turn/completed'); assert.equal(d.lastStatus, 'completed'); assert.equal('text' in d, false); assert.equal(d.ownedTaskCount, 1); await adapter.close();
+});
+
+test('prepares a durable session before its first turn and resumes only with a verified binding', async () => {
+  const transport = fakeTransport();
+  const original = transport.send;
+  transport.send = (message) => {
+    if (message.method === 'thread/start' && message.params?.approvalPolicy === 'never') {
+      queueMicrotask(() => transport.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: '11111111-1111-4111-8111-111111111111' }, cwd: message.params.cwd, approvalPolicy: 'never', sandbox: { type: 'readOnly', networkAccess: false }, model: 'host-default', modelProvider: 'host' } }));
+      return;
+    }
+    if (message.method === 'thread/read') {
+      queueMicrotask(() => transport.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: message.params.threadId, cwd: process.cwd(), model: 'host-default', status: { type: 'idle' } } } }));
+      return;
+    }
+    if (message.method === 'thread/resume') {
+      queueMicrotask(() => transport.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: message.params.threadId, cwd: process.cwd(), model: 'host-default', status: { type: 'idle' } }, model: 'host-default', approvalPolicy: 'never', sandbox: { type: 'readOnly', networkAccess: false } } }));
+      return;
+    }
+    if (message.method === 'turn/start') {
+      queueMicrotask(() => {
+        transport.emit('message', { jsonrpc: '2.0', method: 'turn/completed', params: { threadId: message.params.threadId, turn: { id: 'owned-turn', status: { type: 'completed' } } } });
+        transport.emit('message', { jsonrpc: '2.0', id: message.id, result: { turn: { id: 'owned-turn' } } });
+      });
+      return;
+    }
+    original(message);
+  };
+  const adapter = new CodexAdapter({ cwd: process.cwd(), protocolSchema: PERSISTENT_SCHEMA, transportFactory: async () => transport });
+  await adapter.connect();
+  const hash = 'a'.repeat(64);
+  const prepared = await adapter.prepareSession({ stageId: 'reviewer', cwd: process.cwd(), instructionsHash: hash });
+  assert.equal(prepared.binding.schemaVersion, 1);
+  assert.equal(prepared.binding.threadId, prepared.threadId);
+  assert.equal(transport.sent.filter((message) => message.method === 'turn/start').length, 0);
+  const resumed = await adapter.resumeSession(prepared);
+  assert.equal(resumed.threadId, prepared.threadId);
+  const turn = await adapter.startSessionTurn({ threadId: prepared.threadId, binding: prepared.binding, runKey: 'run-1', instruction: 'Review the bounded result.' });
+  assert.equal(turn.turnId, 'owned-turn');
+  assert.equal(adapter.diagnostics().activeTurns, 0);
+  await adapter.close();
+});
+
+test('persistent-session archive fails closed without descendant proof', async () => {
+  const transport = fakeTransport(); const original = transport.send; transport.send = (message) => {
+    if (message.method === 'thread/start') { queueMicrotask(() => transport.emit('message', { jsonrpc: '2.0', id: message.id, result: { thread: { id: '22222222-2222-4222-8222-222222222222' }, cwd: message.params.cwd, approvalPolicy: 'never', sandbox: { type: 'readOnly', networkAccess: false }, model: 'host-default', modelProvider: 'host' } })); return; }
+    original(message);
+  }; const adapter = new CodexAdapter({ cwd: process.cwd(), protocolSchema: PERSISTENT_SCHEMA, transportFactory: async () => transport }); await adapter.connect();
+  const prepared = await adapter.prepareSession({ stageId: 'cleanup', cwd: process.cwd(), instructionsHash: 'b'.repeat(64) });
+  await assert.rejects(() => adapter.archiveSession(prepared), /session_archive_descendants_unproven/);
+  await adapter.close();
 });

@@ -28,6 +28,35 @@ optional hooks. Both packages are available in the
 [v0.10.1 GitHub release](https://github.com/FaxanFM/chronos/releases/tag/v0.10.1).
 It does not attach to existing desktop chats. It creates its own managed tasks
 through an installed Codex App Server using local stdio, not recurring prompts.
+Within one connected room, sequential read-only work for the same stage reuses
+an idle Control-Room-owned thread. A user-selected source remains fork-only,
+and write, source-linked, model-specific, or web-search work keeps a fresh
+isolated thread.
+
+### Project agents and Hybrid sessions
+
+New workflows use **Hybrid** as the default. A stage receives a durable local
+agent identity, while compatible related read-only work may reuse that agent's
+idle primary session. Writes, source-linked work, independent review, and
+unrelated work are isolated into worker sessions. Existing workflows that omit
+conversation fields retain legacy behavior until the operator explicitly opts
+into the upgrade action; Chronos does not silently migrate them.
+
+The **Agents** view provides an in-room, read-only discussion mailbox, pending
+questions, project decision ledger, and primary/worker session lineage. Sending
+a message queues a discussion item; it does not start a model turn or grant
+permissions. An uncertain session is blocked until an explicit native
+inspection/recovery action reports an authoritative state. Retention and worker
+cleanup are bounded and reversible; protected history, active work, questions,
+and recovery-unknown tasks are not silently deleted.
+
+Project-agent state is local to the selected queue and is not publisher
+telemetry. Model/provider traffic, workspace contents, and files a task reads
+remain subject to the configured Codex provider and workspace policy.
+Execution and workspace writes still require the existing explicit consent.
+Optional source-edition hooks are separate from the skills-only package and
+must be installed and trusted by the user; the Control Room does not install
+them implicitly.
 
 ## Run Locally
 

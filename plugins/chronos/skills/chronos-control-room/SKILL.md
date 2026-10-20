@@ -94,6 +94,15 @@ Stopping active work requires the user's explicit authorization and
 
 ## Configure And Use
 
+For local configuration, prefer the packaged `scripts/runtime/lib/control-client.mjs`
+client over browser clicks. Use the launch receipt's private loopback origin and
+token without logging them; check `/api/capabilities` and `/api/state` against the
+selected workspace and instance before changing anything. `rename-workflow`
+changes only its display name, including workflows with queued history. Never
+send `authorize`, `start`, `accept`, cancellation or shutdown without the human's
+corresponding authorization. An authenticated API request is not evidence of
+human consent. No MCP registration or remote access is needed.
+
 The dashboard provides editable stages, connections, bot-slot pools, inboxes,
 accepted outboxes, all/first-accepted joins and per-stage model/search controls.
 Defaults use the Codex model, not a hard-coded model or promised token saving.
@@ -107,6 +116,15 @@ explicit requested model/effort only when the host advertises that combination.
 
 Users can add assignments and `codex://threads/<id>` sources. A source creates a
 managed context fork; it does not take control of the original Desktop turn.
+Stages are reusable assignments, not permanent chats. While the room stays
+connected, sequential read-only work for the same stage can reuse an idle
+Control-Room-owned thread. It never reuses a user-selected Desktop chat, and
+write, source-linked, model-specific, or web-search work starts a fresh isolated
+managed thread. Human acceptance holds an output before downstream work;
+Collaborative mode can also surface bounded clarification and blocker requests.
+Neither is arbitrary conditional routing or permission for an agent to approve
+its own work. Connection anchor sides and auto-arrange change presentation, not
+dependencies or authority.
 Accepted outputs from other workflows can become explicit inputs. Compact
 summaries, observed execution aggregates, native-check metadata and artifact
 paths are evidence, not new authority or permission grants.
@@ -129,6 +147,27 @@ dispatch. No model turns occur merely because the dashboard is open. Pause stops
 new dispatch; Cancel waits for native termination. Unknown prior execution
 requires explicit stop verification before retry. Restart/disconnect revoke
 session consent. Workspace files survive queue archive and shutdown.
+
+Collaborative mode adds bounded typed feedback to the fixed DAG. An accepted
+ancestor can receive an artifact-bound clarification, change request or rejection;
+only its affected branch gets a new revision. Independent accepted work stays
+selected. Keep a human gate where the user needs final review. Structured remains
+the default; neither mode grants new permissions.
+
+Collaborative writes use fresh per-attempt directories from verified file
+checkpoints. Accepted results bind producer/input revisions and native checks to
+hashed manifests; file-consuming reviewers get separate copies. Conflicting file
+edits block instead of silently overwriting each other. Snapshot limits are 4,096
+files and 64 MiB, excluding only root `.git`. Oversized trees, links, missing or
+altered objects stop explicitly. Do not bypass guards or claim a hash proves
+correctness. For `workspace_native_path_too_long`, choose a shorter private state
+directory through the user's normal setup flow, not a weaker executor policy.
+
+Restart verifies stored snapshots, revokes consent and requires unknown-worker
+stop confirmation before a new attempt. Interrupted partial files are never
+accepted automatically. File-enabled queues use schema v4; older runtimes cannot
+load them. Checkpoints are sensitive local project copies, not publisher
+telemetry or OS-enforced write-once storage.
 
 Current bounds are 512 stage definitions across 128 workflows, 2,048 reserved
 task records and at most 16 simultaneous turns; default concurrency is one.
@@ -160,3 +199,25 @@ For authorized Windows diagnostics or optional hook review, use sibling
 Standing diagnostics require `automaticDiagnosticsAllowed=yes`; absent consent
 means no. No choice here installs or trusts hooks. Directory editions contain
 no lifecycle hooks; do not download or auto-install GitHub hooks from this skill.
+## Project agents
+
+New workflows use Hybrid conversation handling by default. Compatible related
+read-only work may reuse an idle primary stage-agent session; writes,
+source-linked work, independent review, and unrelated work use isolated worker
+sessions. Existing workflows that omit these fields remain legacy until the
+operator explicitly upgrades them. This policy is a dispatch contract, not a
+claim that hundreds of simultaneous model turns are supported.
+
+The Agents view is an in-room local discussion surface. Messages are queued as
+read-only work and do not start a model turn, grant writes, approve a result, or
+change consent. It also shows pending questions, decision provenance, and
+primary/worker lineage. A session marked uncertain is not reused or replaced;
+use the explicit recovery action only after the host can authoritatively report
+its state. Retention and cleanup are bounded, reversible, and protect active
+tasks, unresolved questions, and recovery-unknown outcomes.
+
+Model traffic and workspace data remain subject to the configured Codex
+provider and local workspace policy. Chronos does not collect publisher
+telemetry. Optional hooks are separate source-edition functionality: they are
+not included in the skills-only package, are never installed implicitly, and
+require explicit user installation and trust.
