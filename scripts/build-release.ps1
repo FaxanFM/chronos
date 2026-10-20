@@ -115,7 +115,7 @@ function Get-PackagedBytes {
       if ($relative -eq '.codex-plugin/plugin.json') {
         $directoryManifest = $content | ConvertFrom-Json
         $directoryManifest.PSObject.Properties.Remove('hooks')
-        $directoryManifest.description = 'Skills-only edition: guided local Control Room setup, model and thinking-level controls, managed workflows and optional learning, with Windows diagnostics. No lifecycle hooks.'
+        $directoryManifest.description = 'Skills-only edition: persistent local project agents, Hybrid conversations, guided Control Room workflows, model and thinking controls, checkpoints and recovery. No lifecycle hooks.'
         $directoryManifest.interface.longDescription = $directoryManifest.interface.longDescription + ' Lifecycle hooks are not included or auto-installed.'
         $directoryManifest.extensions.'com.openai'.onboardingSkill = './skills/chronos-control-room/SKILL.md'
         $content = ($directoryManifest | ConvertTo-Json -Depth 12) + "`n"
@@ -140,6 +140,13 @@ Model and thinking-level options come from the connected Codex host. Suggestions
 are explicit choices, not cost or quality guarantees. Hover or focus a control
 for help; guided setup can prepare the process before you use the editor.
 Existing-chat Governor monitoring and Windows diagnostics are separate opt-ins.
+
+New workflows use Hybrid project agents with in-room discussion, durable decisions
+and correlated questions. Existing workflow policies are preserved. Compatible
+primary conversations resume; writes and independent reviews stay isolated.
+Native compaction, rotation and archival remain host-dependent and observable.
+Protected history is not silently deleted; native transcript bytes and destructive
+transcript/workspace removal are unsupported.
 
 Chronos sends no publisher runtime telemetry. Bounded local metadata stays on
 this host; compact chat summaries use OpenAI's account data controls. Downloads

@@ -2,9 +2,10 @@
 
 # Chronos for Codex - Control Room and workflow orchestration
 
-The v0.10.2 candidate bundles the Control Room launcher, dashboard and guided
-onboarding, with model and thinking-level choices for each stage. After
-installation, start with:
+Version 0.11.0 adds persistent project agents, in-room discussion and Hybrid
+conversation routing, alongside bounded collaboration, verified file checkpoints
+and isolated write correction/restart recovery. Guided onboarding includes
+per-stage model and thinking choices. After installation, start with:
 
 > Set up Control Room from my goal and framework. Suggest models and thinking. Explain privacy and permissions; open paused.
 
@@ -15,7 +16,22 @@ API key, hook patch or scheduled Governor is needed. Model execution and
 isolated writes are separate session permissions. Learning modules are opt-in
 recommendation pipelines, not automatic changes or model training.
 
-This candidate is not a claim that the current Directory listing has already
+New workflows use Hybrid: related discussion can retain a primary conversation;
+writes, independent review and unrelated work stay isolated. Existing workflows
+keep their prior policy until explicitly upgraded. Agent decisions have durable
+provenance; clarification continues the same work item. Native compaction,
+rotation and archival require compatible host support and observed receipts.
+Session and storage limits stop growth without silently deleting protected
+history. Transcript deletion and native disk-byte accounting are unsupported.
+
+Choose Structured for a fixed pipeline, or Collaborative for artifact-bound
+upstream feedback with bounded rework. Accepted file revisions are preserved;
+corrections and file-consuming reviewers use fresh directories. Conflicting
+changes stop for review. Snapshot caps are 4,096 files and 64 MiB; only root
+`.git` is excluded. Restart revokes consent and unknown workers require stop
+confirmation before retry. Hashes verify file identity, not correctness.
+
+This GitHub version is not a claim that the current Directory listing has already
 updated. See the repository's publication record before installing.
 
 ## Existing Governance And Diagnostics

@@ -1,5 +1,15 @@
 # Chronos for Codex
 
+**Chronos v0.11.0.** Persistent project agents, in-room
+discussion and Hybrid conversation routing extend Control Room alongside
+bounded collaboration, verified file checkpoints and restart recovery.
+Existing workflows preserve their policies. Structured graph routing remains
+the default, independently of conversation handling. See the
+[persistent-agent verification](docs/PERSISTENT-PROJECT-AGENTS-VERIFICATION.md),
+[checkpoint and recovery contract](docs/COLLABORATIVE-WRITE-CHECKPOINTS.md) and
+[implementation audit](docs/MULTI-AGENT-ORCHESTRATION-AUDIT.md).
+The published-version records below describe earlier releases, not this candidate.
+
 [![Release](https://img.shields.io/github/v/release/FaxanFM/chronos?label=release)](https://github.com/FaxanFM/chronos/releases/latest)
 [![Test](https://github.com/FaxanFM/chronos/actions/workflows/test.yml/badge.svg)](https://github.com/FaxanFM/chronos/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/FaxanFM/chronos)](LICENSE)

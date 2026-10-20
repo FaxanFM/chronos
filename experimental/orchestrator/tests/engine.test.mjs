@@ -28,6 +28,44 @@ test('nothing executes without explicit consent, connection and start', async ()
   assert.equal(a.starts.length, 0); await e.close();
 });
 
+test('workflow display names can be renamed without invalidating queued history and survive restart', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'chronos-rename-')), 'state.json');
+  const first = await new Orchestrator({ adapter: new Adapter(), statePath: path }).initialize();
+  await first.action({ action: 'add-packet', workflowId: 'software_factory-default', title: 'Release', input: 'Prepare notes' });
+  await first.action({ action: 'rename-workflow', workflowId: 'software_factory-default', name: 'Launch operations' });
+  assert.equal(first.snapshot().workflows.find((item) => item.id === 'software_factory-default').name, 'Launch operations');
+  await first.close();
+  const second = await new Orchestrator({ adapter: new Adapter(), statePath: path }).initialize();
+  assert.equal(second.snapshot().workflows.find((item) => item.id === 'software_factory-default').name, 'Launch operations');
+  await assert.rejects(second.action({ action: 'rename-workflow', workflowId: 'missing', name: 'Nope' }), /workflow_not_found/);
+  await assert.rejects(second.action({ action: 'rename-workflow', workflowId: 'software_factory-default', name: '   ' }), /workflow_name_required_max_120/);
+  await second.close(); await rm(path, { force: true }); await rm(join(path, '..'), { recursive: true, force: true });
+});
+
+test('workflow layout saves exact node positions and edge anchors without changing execution semantics', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'chronos-layout-')), 'state.json');
+  const e = await new Orchestrator({ adapter: new Adapter(), statePath: path }).initialize();
+  const workflow = { id: 'layout-w', name: 'Layout', nodes: [{ id: 'a', title: 'A', instruction: 'A' }, { id: 'b', title: 'B', instruction: 'B' }], edges: [{ id: 'ab', source: 'a', target: 'b' }] };
+  await e.action({ action: 'save-workflow', workflow });
+  await e.action({ action: 'add-packet', workflowId: 'layout-w', title: 'Work', input: 'Input' });
+  const before = e.snapshot().workflows.find((item) => item.id === 'layout-w');
+  await e.action({ action: 'save-workflow-layout', workflowId: 'layout-w', positions: [{ id: 'a', x: 12, y: 24 }, { id: 'b', x: 300, y: 400 }], anchors: [{ id: 'ab', sourceHandle: 'out-right', targetHandle: 'in-left' }] });
+  const after = e.snapshot().workflows.find((item) => item.id === 'layout-w');
+  assert.deepEqual(after.nodes.map(({ id, position }) => ({ id, position })), [{ id: 'a', position: { x: 12, y: 24 } }, { id: 'b', position: { x: 300, y: 400 } }]);
+  assert.equal(after.edges[0].sourceHandle, 'out-right'); assert.equal(after.edges[0].targetHandle, 'in-left');
+  assert.deepEqual(after.nodes.map(({ id, title, instruction }) => ({ id, title, instruction })), before.nodes.map(({ id, title, instruction }) => ({ id, title, instruction })));
+  await assert.rejects(e.action({ action: 'save-workflow-layout', workflowId: 'layout-w', positions: [{ id: 'a', x: 1, y: 1 }, { id: 'b', x: 2, y: 2, extra: 1 }], anchors: [{ id: 'ab', sourceHandle: 'out-right', targetHandle: 'in-left' }] }), /workflow_layout_position_invalid/);
+  await assert.rejects(e.action({ action: 'save-workflow-layout', workflowId: 'layout-w', positions: [{ id: 'a', x: 1, y: 1 }, { id: 'b', x: 2, y: 2 }], anchors: [{ id: 'ab', sourceHandle: 'in-left', targetHandle: 'out-right' }] }), /workflow_layout_anchor_invalid/);
+  await e.action({ action: 'connect' }); await e.action({ action: 'authorize', confirmed: true }); await e.action({ action: 'start' });
+  await assert.rejects(e.action({ action: 'save-workflow-layout', workflowId: 'layout-w', positions: [{ id: 'a', x: 1, y: 1 }, { id: 'b', x: 2, y: 2 }], anchors: [{ id: 'ab', sourceHandle: 'out-left', targetHandle: 'in-right' }] }), /pause_and_finish_running_tasks_first/);
+  await e.action({ action: 'pause' }); await e.close();
+  const resumed = await new Orchestrator({ adapter: new Adapter(), statePath: path }).initialize();
+  const persisted = resumed.snapshot().workflows.find((item) => item.id === 'layout-w');
+  assert.deepEqual(persisted.nodes.map((node) => node.position), [{ x: 12, y: 24 }, { x: 300, y: 400 }]);
+  assert.equal(persisted.edges[0].sourceHandle, 'out-right'); assert.equal(persisted.edges[0].targetHandle, 'in-left');
+  await resumed.close(); await rm(path, { force: true }); await rm(join(path, '..'), { recursive: true, force: true });
+});
+
 test('dependencies wait for human acceptance, not model completion', async () => {
   const a = new Adapter(), e = new Orchestrator({ adapter: a });
   const one = await add(e, 'Research'), two = await add(e, 'Verify', [one]);
@@ -35,6 +73,18 @@ test('dependencies wait for human acceptance, not model completion', async () =>
   a.finish(); await flush(e); assert.equal(e.snapshot().tasks[0].state, 'review'); assert.equal(a.starts.length, 1);
   await e.action({ action: 'accept', taskId: one }); await flush(e); assert.equal(a.starts.length, 2);
   assert.match(a.starts[1].instruction, /Verified report/); assert.equal(e.snapshot().tasks.find((t) => t.id === two).state, 'running');
+  await e.close();
+});
+
+test('sequential read-only workflow packets keep a stable managed-thread reuse key', async () => {
+  const a = new Adapter(), e = new Orchestrator({ adapter: a });
+  e.state.project.conversationDefault = 'legacy';
+  await e.action({ action: 'save-workflow', workflow: { id: 'reuse', name: 'Reuse', conversationDefault: 'inherit', nodes: [{ id: 'inspect', title: 'Inspect', instruction: 'Inspect the assigned item.', policy: 'read-only', routing: 'approval' }], edges: [] } });
+  await e.action({ action: 'add-packet', workflowId: 'reuse', title: 'First', input: 'First input' });
+  await e.action({ action: 'add-packet', workflowId: 'reuse', title: 'Second', input: 'Second input' });
+  await start(e); assert.equal(a.starts.length, 1); assert.equal(a.starts[0].reuseKey, 'reuse:inspect:read-only');
+  a.finish(0); await flush(e); await e.action({ action: 'accept', taskId: e.snapshot().tasks[0].id }); await flush(e);
+  assert.equal(a.starts.length, 2); assert.equal(a.starts[1].reuseKey, 'reuse:inspect:read-only');
   await e.close();
 });
 

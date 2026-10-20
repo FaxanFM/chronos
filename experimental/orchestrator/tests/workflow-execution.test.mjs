@@ -11,11 +11,12 @@ class FixtureAdapter extends EventEmitter {
   async startTask(input) { this.started.push(input); return { threadId: `thread-${this.started.length}`, turnId: `turn-${this.started.length}` }; }
   async interruptTask() {}
 }
-const workflow = (nodes, edges) => ({ id: 'wf', name: 'Execution', nodes, edges });
+const workflow = (nodes, edges) => ({ id: 'wf', name: 'Execution', conversationDefault: 'inherit', nodes, edges });
 const node = (id, extra = {}) => ({ id, title: id, instruction: `do ${id}`, kind: 'task', ...extra });
 
 async function setup(wf, extra = {}) {
   const adapter = new FixtureAdapter(); const engine = new Orchestrator({ adapter, prepareWorkspace: async ({ policy }) => ({ cwd: policy === 'workspace-write' ? '/write' : '/read', workspacePath: policy === 'workspace-write' ? '/write' : null }), ...extra });
+  engine.state.project.conversationDefault = 'legacy';
   await engine.action({ action: 'connect' }); await engine.action({ action: 'save-workflow', workflow: wf }); await engine.action({ action: 'add-packet', workflowId: 'wf', title: 'packet', input: 'input' }); await engine.action({ action: 'authorize', confirmed: true }); return { engine, adapter };
 }
 

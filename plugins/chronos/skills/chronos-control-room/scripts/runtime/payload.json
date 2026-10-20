@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "pluginVersion": "0.10.2",
+  "pluginVersion": "0.11.0",
   "files": [
     {
       "path": "server.mjs",
-      "bytes": 12760,
-      "sha256": "2aa8c2486f71166ab226246b8c6793ab0d74891d3de8f92f405189181aeb8f2d"
+      "bytes": 13784,
+      "sha256": "4ac04082f4249b1e49591df6088c13d1724f0e8eb2a505d16ea4e1cec2f695eb"
     },
     {
       "path": "launcher.mjs",
@@ -14,13 +14,13 @@
     },
     {
       "path": "lib/codex-adapter.mjs",
-      "bytes": 27458,
-      "sha256": "6fe91214720a3abaf55c839e9ad9abea21b8e911a99dbf3111573d7dfae85b55"
+      "bytes": 57984,
+      "sha256": "ee3815f6a3384be5887cf867af167f59c27141df73420ec28114e6b3c8b8ac71"
     },
     {
       "path": "lib/engine.mjs",
-      "bytes": 45332,
-      "sha256": "3fc85bc8713820986fa41efce1652538b8014984b2f6d85a08445d6f8fa2f692"
+      "bytes": 65539,
+      "sha256": "974e26c249c67cd2846fdc2a3e0c59d2c874eea8a0b3b722905473565a399cd9"
     },
     {
       "path": "lib/runtime-health.mjs",
@@ -38,29 +38,59 @@
       "sha256": "a4dd7f1c78cc7e060c3a14b4c387b84f2d3b3daaa04d4e07bb85c9b5d2abeebd"
     },
     {
+      "path": "lib/control-client.mjs",
+      "bytes": 3286,
+      "sha256": "7261ad2fcaed59449e5ed82d2488e37f30a37a73bb0d532119e653ec5ee4ccc2"
+    },
+    {
       "path": "lib/workflow-contracts.mjs",
-      "bytes": 4144,
-      "sha256": "7bcaac429cbc0644cfe66b6558f9e6ff4c900d79d8ca7964ba121394dcf185a5"
+      "bytes": 7987,
+      "sha256": "050cce2492f3e78dae21a820f6c6161bf56f715ea670e725beba82dc08b302c3"
+    },
+    {
+      "path": "lib/collaboration.mjs",
+      "bytes": 5659,
+      "sha256": "2727928770075b120c3c84eec7dca7ca9162fc79a74cbc56faa9874dbb464d64"
+    },
+    {
+      "path": "lib/collaboration-state.mjs",
+      "bytes": 19903,
+      "sha256": "b6c9b45c24d1559741874fb68f37a382ecb9747a4ecfdb481f5bf3a2cacb3e13"
+    },
+    {
+      "path": "lib/file-checkpoints.mjs",
+      "bytes": 14600,
+      "sha256": "bf19db1163b46fe35d8c065d31ac13ce11499165cf75ff8d386c1fd6b6ddefb0"
     },
     {
       "path": "lib/workspaces.mjs",
-      "bytes": 9045,
-      "sha256": "7c4ab66cf991f86862fd068e7d1650af9fe95edba8047086f235d65ce6ccf82b"
+      "bytes": 16060,
+      "sha256": "6f9160094062deeaa908b722234560f081d2a772e39b8bb62db3fbac022a9be4"
     },
     {
       "path": "lib/setup-plan.mjs",
-      "bytes": 4806,
-      "sha256": "3acbfae3349f41b92eac609c608bd39908f42019eb658c78f452d915753c7da7"
+      "bytes": 5842,
+      "sha256": "b92c88975d2282803fbe7694dd99701e067debddc4bac052bac63970c4100505"
+    },
+    {
+      "path": "lib/protocol-capabilities.mjs",
+      "bytes": 2249,
+      "sha256": "cd70ed82c548e0fed8e06ae704cd89d738f97a9c2bbfb205d330315414d6221b"
+    },
+    {
+      "path": "lib/agent-state.mjs",
+      "bytes": 44420,
+      "sha256": "a55529684893054f86a818c630960767726d82cc5418a281babfb537e674de42"
     },
     {
       "path": "public/app.js",
-      "bytes": 426774,
-      "sha256": "b531cfce7fea342a2ae9c43dff53a41c19262d8462c175cecffc3f11f1b17576"
+      "bytes": 465304,
+      "sha256": "a88f55dec97dc4c46ca300e32780b27c494babe01f4e804cf03920dff0c1cdd8"
     },
     {
       "path": "public/app.css",
-      "bytes": 32109,
-      "sha256": "001dfb25e66db499e49563bb2062fa7c8ae5d30abd9a7893b287c062f2901de3"
+      "bytes": 55621,
+      "sha256": "89e5a4d045cb9c497b4f8851f0fa70b153466e6836bd994146efb76e32e9b5d3"
     },
     {
       "path": "public/index.html",

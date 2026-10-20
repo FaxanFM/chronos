@@ -1,5 +1,14 @@
 # Control Room Plugin Setup
 
+## v0.11.0 Candidate
+
+The next unpublished candidate adds bounded Collaborative feedback, verified
+file checkpoints and isolated write correction/restart recovery. Guided setup,
+models, thinking levels and explicit permissions remain. See
+[the checkpoint contract](COLLABORATIVE-WRITE-CHECKPOINTS.md). Release status below
+is the earlier v0.10.2 publication record, not a current portal recheck or proof
+that v0.11.0 has been submitted.
+
 ## Guided Setup In v0.10.2
 
 Version 0.10.2 adds host-advertised Model and Thinking level

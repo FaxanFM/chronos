@@ -26,6 +26,15 @@ test('guided setup records selected context without treating it as execution con
   await assert.rejects(validateSetupPlan({ ...plan, maxConcurrency: 17 }, { workspace }), /setup_concurrency_invalid/);
 });
 
+test('new guided workflows explicitly default to Hybrid and allow scoped work-item overrides', async () => {
+  const { workspace, plan } = await fixture();
+  const normalized = await validateSetupPlan({ ...plan, workItem: { ...plan.workItem, conversationMode: 'one-off', complexity: 'low' } }, { workspace });
+  assert.equal(normalized.workflow.conversationDefault, 'hybrid');
+  assert.deepEqual(normalized.workItem, { title: plan.workItem.title, input: plan.workItem.input, conversationMode: 'one-off', complexity: 'low' });
+  const explicit = await validateSetupPlan({ ...plan, workflow: { ...plan.workflow, conversationDefault: 'persistent' } }, { workspace });
+  assert.equal(explicit.workflow.conversationDefault, 'persistent');
+});
+
 test('guided context rejects traversal, links, secrets and another workspace', async () => {
   const { root, workspace, plan } = await fixture();
   for (const reference of ['../FRAMEWORK.md', '.env', '.codex/auth.json', 'a/../../secret', 'C:\\secret.txt']) {

@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.11.0
+
+- Add persistent project agents, direct read-only agent discussion, correlated
+  questions and a provenance ledger. New workflows default to Hybrid; validated
+  migrations retain exact backups and preserve existing omitted policies.
+- Persist native creation intents and verified bindings before model dispatch.
+  Resume compatible conversations after reconciliation, isolate writers/reviewers,
+  and stop ambiguous outcomes without creating blind replacements.
+- Add visible primary lineage, controlled rotation, capability-gated compaction,
+  bounded retention and observed native archival with lost-receipt recovery.
+  Transcript deletion and native disk-byte accounting remain unsupported.
+- Verify compaction and successor rotation on the local installed Codex host.
+  Correlate current context-compaction item/turn completion and expose recovery
+  for unobserved maintenance instead of relying on a legacy notification alone.
+- Rename referenced workflows without losing history; save canvas positions and
+  connection anchors independently of process changes. Add auto-arrange, a snap
+  grid, stage duplication, workflow/task search and current/review/history filters.
+- Add eight connection anchors with touch-friendly selectors, a stage picker,
+  readable phone focus, full-window canvas mode and responsive control layouts.
+- Expose authenticated local API capabilities and a loopback-only client with
+  optional instance/workspace checks. Preserve consent and human-review authority;
+  synchronize clean editors without replacing unsaved drafts.
+- Add bounded Collaborative feedback beside the default Structured DAG:
+  artifact-bound clarification, response, change request, rejection, blocker
+  and operator resolution. Version only affected branches and retain history.
+- Bind accepted write results to verified content-addressed file checkpoints,
+  producer/input revisions and native checks. Materialize a fresh workspace
+  for each correction or repair; preserve earlier accepted files.
+- Three-way joins preserve unchanged files and deletions, and stop on divergent
+  changes or unsafe path collisions. Reject altered/missing snapshots and
+  links. Cap each snapshot at 4,096 files / 64 MiB, excluding only root `.git`.
+- Restore file-enabled schema-v4 queues paused with consent revoked. Require
+  explicit unknown-worker stop confirmation; never adopt interrupted partial
+  files or repeat independent accepted work automatically.
+- Add compact checkpoint/revision UI, bounded feedback controls and clearer
+  routing JSON. Compact Windows working paths and preflight native path limits.
+- Keep full GitHub and skills-only Directory editions, guided onboarding,
+  model/thinking controls, explicit write consent and final human gates.
+- Local validation receipts and remaining scope are recorded in
+  `docs/PERSISTENT-PROJECT-AGENTS-VERIFICATION.md`,
+  `docs/MULTI-AGENT-ORCHESTRATION-AUDIT.md` and
+  `docs/COLLABORATIVE-WRITE-CHECKPOINTS.md`. No publication is implied.
+
 ## v0.10.2
 
 - Add chat-led setup from an outcome and selected workspace files or folders.
